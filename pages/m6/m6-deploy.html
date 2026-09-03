@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>部署基础：Nginx 与 Docker · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ===== 本页动画专用样式：写字楼前台分流访客——Nginx 反向代理演示，纯手写 CSS ===== */
+.dp-wrap { display: flex; gap: 16px; flex-wrap: wrap; margin: 12px 0; }
+.dp-floors { flex: 1 1 260px; min-width: 240px; }
+.dp-floor {
+  border: 2px solid #94a3b8; border-radius: 10px; padding: 8px 12px; margin: 6px 0;
+  background: #fff; font-size: 13px; transition: border-color .25s, background .25s, box-shadow .25s;
+}
+.dp-floor b { color: #41506b; }
+.dp-floor .dp-floor-note { font-size: 12px; color: #8a93a6; margin-top: 2px; }
+.dp-floor.is-active { border-color: #10B981; background: #ecfdf5; box-shadow: 0 0 0 3px rgba(16, 185, 129, .15); }
+.dp-floor.is-fallback { border-color: #c9a34e; background: #fffbeb; box-shadow: 0 0 0 3px rgba(201, 163, 78, .22); }
+.dp-right { flex: 1 1 260px; min-width: 240px; }
+.dp-visitor { font-size: 13px; margin-bottom: 8px; }
+.dp-visitor b {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 6px; padding: 2px 8px;
+}
+.dp-pick { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.dp-pick .fg-btn.is-picked { border-color: #10B981; color: #10B981; box-shadow: 0 0 0 2px rgba(16, 185, 129, .2); }
+</style>
+</head>
+<body data-page="m6-deploy">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">知识点：部署基础：Nginx 与 Docker（建议学习时长约 25 分钟）——部署全景、Nginx 三大职责、SPA 刷新 404 的兜底、镜像与容器。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>本页前置依赖：<strong>无，可直接开始</strong>——本页讲的是「程序写完之后」的事：怎么从自己电脑上能跑，变成全世界都能访问。若你已了解 <a href="./m6-server.html">HTTP 服务</a> 与 <a href="../m3/m3-router.html">前端路由</a>，会有不少「原来如此」的瞬间。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：分小标题推进 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、从「我电脑上能跑」到「公网能访问」</h3>
+    <p>本地开发时，程序跑在你自己的机器上，只有你能访问。上线还差几步：找一台<strong>全天在线的服务器</strong>（云主机）；把代码放上去并让它<strong>一直活着</strong>（进程守护，崩了自动拉起）；再让用户能<strong>顺利找到并进入</strong>——最后一环通常交给一个守大门的软件：<strong>Nginx</strong>。用户的请求先到 Nginx，Nginx 决定这请求该去哪儿。</p>
+
+    <h3>二、Nginx 三大职责：静态、转发、分流</h3>
+    <p><strong>静态资源服务</strong>：打包产物（HTML、CSS、JS、图片）就是磁盘上的文件，Nginx 收到请求直接回文件，这活它干得又快又省。<strong>反向代理</strong>：遇到接口请求（如 /api 开头），Nginx 自己不干活，转手交给内网真正的后端服务（比如跑在 3001 端口的 Node），再把结果原样带回给用户——用户全程只认识 Nginx 这一个入口。<strong>负载均衡</strong>：后端起了多个实例时，Nginx 按策略（默认轮询）把请求分摊给它们，某台挂了还能自动摘除。核心片段长这样（proxy_pass 的真实写法是「协议名 + 内网地址端口」，此处示意）：</p>
+<pre><code>server {
+  listen 80;                        # 前台只守一个大门
+  location /api/ {                  # 规则一：以 /api/ 开头的请求
+    proxy_pass 后端服务地址;          # 转发给内网后端（127.0.0.1:3001 一类）
+  }
+  location / {
+    root /usr/share/app/dist;       # 其余请求：直接给打包好的前端静态文件
+    try_files $uri /index.html;     # 文件不存在时兜底回首页（SPA 刷新 404 的解药）
+  }
+}</code></pre>
+
+    <h3>三、SPA 之痛：history 路由刷新 404</h3>
+    <p>单页应用用 history 路由时，用户在 <code>/detail/42</code> 按下刷新，请求真的发到了服务器——可磁盘上根本没有 <code>detail/42</code> 这个文件，Nginx 只能回 404。解法就是上面那行 <code>try_files $uri /index.html</code>：先按路径找文件，找不到就统一回退到 index.html，让前端路由接管这个路径，正确渲染详情页。这条配置是每个 SPA 上线的标配。</p>
+
+    <h3>四、Docker：把「应用 + 环境」装进集装箱</h3>
+    <p>代码搬上服务器的第一坑是环境：「在我电脑上是好的」——你本机的 Node 20，服务器却是 Node 14；少装一个依赖、差一个系统库，程序就起不来。Docker 的解法是把<strong>应用和它依赖的整套环境</strong>（运行时、系统库、配置）一起打包成一个<strong>镜像</strong>；镜像在服务器上跑起来就是一个<strong>容器</strong>。关系像「类与实例」：镜像是只读模板，可以基于它起任意多个容器；容器之间互相隔离，互不污染。打包说明书叫 <strong>Dockerfile</strong>：Base 用什么系统、装什么依赖、拷什么文件、启动命令是什么，一步步写清楚。「一次构建，处处运行」——开发、测试、生产跑的是<strong>同一个镜像</strong>，环境漂移问题从根上消失。</p>
+
+    <h3>五、一条最短的部署链路</h3>
+    <p>把本页知识串起来：推代码 → 构建出前端静态产物与后端服务的 Docker 镜像 → 服务器上运行容器（后端 3001、3002…）→ Nginx 守 80/443 大门：静态文件自己回，/api 转发给容器，多实例轮询分流。前端的职责边界也清晰了：产出 build 产物、配好 history 兜底、了解缓存与压缩交给 Nginx 的姿势——至此，你的程序才真正「活在网上」。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 写字楼前台与整装集装箱</div>
+      <p>一栋写字楼只开一个正门，<strong>前台</strong>（Nginx）守在那里。访客（HTTP 请求）递上写着房间号的条子（URL 路径），前台看前缀指路：「/api 开头的，上 3 楼」；3 楼有 A、B 两个工位（后端多实例），前台按「一个轮一个」的顺序把访客分过去，谁休假了就跳过谁（负载均衡与摘除）；「/admin 开头的，去 5 楼」（另一组服务）；其余访客请到<strong>一楼资料架</strong>自取现成文件（静态资源，Nginx 直接回）。</p>
+      <p>有位访客的条子写着「展厅 42 号」（history 路由的 <code>/detail/42</code>），可资料架上并没有这个名字的文件——前台没有直接把他轰走（404），而是递给他一张<strong>公司总导览图</strong>（index.html）：「按图里的内部指引走，你自然能找到 42 号展厅」（try_files 兜底，前端路由接管）。这正是 SPA 刷新不白屏的秘密。</p>
+      <p>再看楼里的公司怎么入驻。老办法是租间毛坯房现场装修：刷墙、拉电线、装空调（服务器装环境），装到一半发现「我这版图纸在我原来的办公室是好的」——环境对不上，白干。新办法是<strong>整装集装箱</strong>（Docker）：工厂里把办公室连家具、电器、说明书打包成一个箱子（镜像），吊车把箱子放到哪栋楼（任何装了 Docker 的服务器），落地通电立刻开业（容器运行）；同一张图纸可以复制出多个箱子开分店（一个镜像跑多个容器），箱子与箱子之间互相隔离，一家重新装修（升级依赖）也弄不脏邻居。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：写字楼前台分流访客（点选访客 + 接待执行，纯 DOM/CSS/JS 手写） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>你来当访客：点选一个请求路径，再点「前台接待」，看 Nginx 如何按「最长前缀」指路、给 /api 轮询分流、给不存在的路由递导览图：</p>
+    <div class="anim-stage">
+      <div class="dp-wrap">
+        <div class="dp-floors">
+          <div class="dp-floor" id="dp-floor-api"><b>3F · 后端 API</b><div class="dp-floor-note" id="dp-note-api">A 窗口接待 0 次 · B 窗口接待 0 次（轮询负载均衡）</div></div>
+          <div class="dp-floor" id="dp-floor-admin"><b>5F · 管理后台</b><div class="dp-floor-note">独立的一组服务</div></div>
+          <div class="dp-floor" id="dp-floor-static"><b>1F · 资料架（静态资源）</b><div class="dp-floor-note">前端打包产物；找不到的路径由 try_files 兜底回导览图 index.html</div></div>
+        </div>
+        <div class="dp-right">
+          <div class="dp-visitor">当前访客：<b id="dp-current">/api/orders</b></div>
+          <div class="dp-pick" id="dp-pick"></div>
+          <div class="anim-console" id="dp-console">
+            <div class="anim-line is-muted">点选访客路径，然后点「前台接待」…</div>
+          </div>
+        </div>
+      </div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="dp-desk">前台接待</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="dp-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（全部为课程数据中的真实 path） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：无，本页是「上线环节」的入口，可直接开始。</p>
+    <p><strong>向后延伸</strong>：站点上线后，加载快慢的主战场就在 Nginx 与静态资源之间，见<a href="../m4/m4-load.html">首屏与资源加载优化</a>（强缓存、指纹文件名、压缩都由 Nginx 配合完成）。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="../m3/m3-router.html">前端路由原理</a> —— history 模式刷新 404 的前端侧成因，与 Nginx try_files 兜底是一对「前后端约定」</li>
+      <li><a href="../m2/m2-cache.html">浏览器缓存策略</a> —— Nginx 给静态资源补 Cache-Control 头，长缓存 + 指纹文件名的策略在部署层落地</li>
+      <li><a href="./m6-server.html">HTTP 服务：Express 与 Koa</a> —— 反向代理背后的目标正是这些 Node 服务；也解释了为什么生产环境常让 Node 只管接口、静态交给 Nginx</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（mode:'main'，判分写入进度仓库） -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后会把最佳成绩写入进度仓库，并推进复习计划：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：部署就是让「在我电脑上能跑」的东西公网可达——Docker 像整装集装箱，把程序连环境一起打包，搬到哪台服务器都能立刻开业；Nginx 像写字楼前台，守着大门分流：静态文件直接给、接口转给后端、找不到的路由递一张首页导览图让前端自己认路。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前默写那段最小 Nginx 配置（location /api/ 转发 + location / 的 try_files 兜底），并用一句话说清镜像与容器的关系；1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：正反向代理 + Docker 解决什么，答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：正向代理和反向代理的区别是什么？</summary>
+      <ul>
+        <li>看代理「站在哪一侧」：正向代理站在<strong>客户端</strong>一侧，替客户端出门办事，服务器看到的来源是代理而非真实用户（如公司统一出口、内网穿透）。</li>
+        <li>反向代理站在<strong>服务端</strong>一侧，统一收客再分发，客户端不知道也不需要知道背后哪台机器在干活（如 Nginx 转发、云网关）。</li>
+        <li>隐藏的对象不同：正向代理对服务器隐藏「真实客户端」，反向代理对客户端隐藏「真实服务端」。</li>
+        <li>反向代理的附带价值：负载均衡、HTTPS 终结（大门统一配证书）、限流与安全隔离、缓存。</li>
+        <li>加分项：一句话总结——方向相反的两次「代劳」，区别在替谁隐藏谁。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：Docker 解决了什么问题？镜像和容器是什么关系？</summary>
+      <ul>
+        <li>核心痛点：环境不一致——「在我电脑上是好的」。应用依赖运行时版本、系统库、配置，手工装环境必然漂移。</li>
+        <li>Docker 把应用与依赖环境打包成镜像，开发、测试、生产跑同一个镜像，实现「一次构建，处处运行」。</li>
+        <li>镜像与容器是「类与实例」：镜像是只读模板（分层存储、可复用可版本化），容器是镜像的运行实例，写层独立、彼此隔离。</li>
+        <li>与虚拟机的区别：容器共享宿主机内核、只隔离用户态，秒级启动、占用极小；虚拟机则连内核一起虚拟，重但隔离更彻底。</li>
+        <li>加分项：Dockerfile 是镜像的「装修图纸」，构建即按步生成镜像层；配合 Nginx 统一入口就是最小可用部署链路。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm6-deploy'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'）：题目 id 以知识点 id 开头 */
+  var WARMUP = [{
+    id: 'm6-deploy-warmup-1',
+    type: 'single',
+    stem: '预热：用户在 history 路由的 SPA 里，于 /detail/42 页面按下刷新，结果 404。最直接的解法是？',
+    options: [
+      '服务端对所有找不到的路径统一返回 index.html，交给前端路由接管（如 Nginx 的 try_files 兜底）',
+      '把 404 页面设计得好看一点，安慰用户',
+      '要求运维在服务器磁盘上真的建一个 detail/42 文件夹',
+      '禁止用户直接在地址栏输入网址或刷新'
+    ],
+    answer: [0],
+    explain: '404 的根源：/detail/42 是前端路由「画」出来的地址，服务器磁盘上并没有对应文件。正解是服务端约定兜底——文件不存在就回退 index.html，前端路由读地址栏路径渲染出详情页（m3 路由篇讲过成因，本页讲服务端解法）。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm6-deploy-q1',
+      type: 'single',
+      stem: '关于正向代理与反向代理，下列说法正确的是？',
+      options: [
+        '正向代理站在客户端一侧替用户出门办事（服务器不知道真实客户端是谁）；反向代理站在服务端一侧统一收客分流（用户不知道背后哪台机器在干活）',
+        '两者都部署在客户端电脑上，只是端口不同',
+        '反向代理的主要目的是给流量加密',
+        'Nginx 只能做反向代理，不能直接返回静态文件'
+      ],
+      answer: [0],
+      explain: '判断标准是「代理替谁隐藏谁」：正向代理替客户端隐身（服务端只见代理），反向代理替服务端隐身（客户端只见入口）。B 站错了边；C 以偏概全——加密（HTTPS 终结）只是反向代理的附带能力之一，分流、缓存、限流才是主业；D 错得离谱——静态资源服务恰是 Nginx 的看家本领，生产上静态文件通常就不劳烦 Node。'
+    },
+    {
+      id: 'm6-deploy-q2',
+      type: 'single',
+      stem: 'Nginx 配置 location / { try_files $uri $uri/ /index.html; } 对 SPA 部署的作用是？',
+      options: [
+        '禁止用户访问任何静态文件',
+        '优先按请求路径查找磁盘上的文件，找不到就回退返回 index.html，让前端路由接管深链接与刷新',
+        '把所有请求都转发给后端 Node 服务处理',
+        '自动开启 gzip 压缩，减小传输体积'
+      ],
+      answer: [1],
+      explain: 'try_files 按顺序试：$uri（按路径找文件）→ $uri/（当目录找，如 / 到 index.html）→ /index.html（最终兜底）。它正好弥合 SPA 的裂缝：真实存在的静态文件正常返回，前端路由「画」出来的地址统一回首页由路由渲染。A 与作用相反；C 是 proxy_pass 的活，写了 try_files 恰恰是「不转发」；D 是 gzip/brotli 指令的职责，与 try_files 无关。'
+    },
+    {
+      id: 'm6-deploy-q3',
+      type: 'code',
+      stem: 'Nginx 选择 location 的核心规则之一是「前缀匹配，最长者胜」：把请求路径与所有 location 前缀做字符串前缀比较，命中多个时返回「前缀最长」那条规则的目标地址（更具体的规则优先）。请实现 matchLocation(rules, path)：rules 是形如 { prefix, target } 的数组，返回最长前缀匹配规则的 target；没有任何规则命中时返回 null。',
+      stub: 'function matchLocation(rules, path) {\n  // 要点：\n  // 1. 遍历所有规则（不能第一个命中就停——可能存在更长的前缀）\n  // 2. path 以 prefix 开头（path.indexOf(prefix) === 0）即为候选\n  // 3. 多个候选中取「前缀最长」的那条（更具体的规则优先级更高）\n  // 4. 一条都没命中返回 null\n}\n',
+      reference: 'function matchLocation(rules, path) {\n  var best = null;\n  var bestLen = -1;                 // 记录当前胜者的前缀长度\n  for (var i = 0; i < rules.length; i++) {\n    var p = rules[i].prefix;\n    if (path.indexOf(p) === 0 && p.length > bestLen) {\n      best = rules[i].target;       // 命中且更具体 → 换人\n      bestLen = p.length;\n    }\n  }\n  return best;                      // 没有任何命中时仍是 null\n}',
+      asserts: [
+        "matchLocation([{prefix:'/api',target:'A'},{prefix:'/api/user',target:'B'}], '/api/user/1') === 'B'",
+        "matchLocation([{prefix:'/api',target:'A'}], '/user/list') === null",
+        "matchLocation([{prefix:'/',target:'S'}], '/anything/here') === 'S'",
+        "matchLocation([{prefix:'/api',target:'A'},{prefix:'/',target:'S'}], '/api/pay') === 'A'"
+      ],
+      explain: '四条断言钉住前缀匹配的四块心智：第一条验证「最长者胜」——/api 与 /api/user 都命中 /api/user/1，但 /api/user 更具体，胜出（若写成「首个命中就 return」就会错拿 A，这是本题最常见的 bug）；第二条验证不命中返回 null——/user/list 不以 /api 开头；第三条验证根前缀的兜底地位——/ 是一切路径的前缀，任何请求都命中它，这正是生产配置把 try_files 写在 location / 里的原因；第四条再验一次「具体优先于宽泛」，/api/pay 同时命中 /api 与 /，按长度规则选 /api。对照真实 Nginx：除了前缀匹配还有正则 location 与 ^~、= 精确匹配等修饰符，匹配优先级更复杂，但「前缀最长者胜」是日常配置最常用、也是面试最常考的心智模型。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：写字楼前台分流访客——Nginx 反向代理与负载均衡（纯 DOM 手写，无动画库） */
+(function () {
+  'use strict';
+
+  /* 访客可以点选的请求路径 */
+  var VISITORS = ['/api/orders', '/api/users', '/admin/login', '/detail/42', '/'];
+  /* 前缀路由表：按「最长前缀胜出」匹配（本页代码题的同款规则） */
+  var RULES = [
+    { prefix: '/api', floor: 'api', desc: '命中 location /api/' },
+    { prefix: '/admin', floor: 'admin', desc: '命中 location /admin/' }
+  ];
+
+  var pickEl = document.getElementById('dp-pick');
+  var currentEl = document.getElementById('dp-current');
+  var consoleEl = document.getElementById('dp-console');
+  var deskBtn = document.getElementById('dp-desk');
+  var resetBtn = document.getElementById('dp-reset');
+
+  var picked = 0;    // 当前选中访客的下标
+  var roundRobin = 0; // /api 轮询计数：0 → A 窗口，1 → B 窗口
+  var counterA = 0;
+  var counterB = 0;
+
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* 渲染访客选择按钮 */
+  function renderPick() {
+    pickEl.innerHTML = '';
+    VISITORS.forEach(function (path, i) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'fg-btn fg-btn--ghost fg-btn--sm' + (i === picked ? ' is-picked' : '');
+      b.textContent = path;
+      b.addEventListener('click', function () {
+        picked = i;
+        currentEl.textContent = path;
+        renderPick(); // 重画选中态
+      });
+      pickEl.appendChild(b);
+    });
+  }
+
+  /* 清空楼层高亮 */
+  function clearFloors() {
+    ['api', 'admin', 'static'].forEach(function (key) {
+      var el = document.getElementById('dp-floor-' + key);
+      el.classList.remove('is-active');
+      el.classList.remove('is-fallback');
+    });
+  }
+
+  /* 高亮某楼层（flag: '' 普通 / 'is-fallback' 兜底金色） */
+  function lightFloor(key, flag) {
+    var el = document.getElementById('dp-floor-' + key);
+    el.classList.add(flag || 'is-active');
+  }
+
+  function updateApiNote() {
+    document.getElementById('dp-note-api').textContent =
+      'A 窗口接待 ' + counterA + ' 次 · B 窗口接待 ' + counterB + ' 次（轮询负载均衡）';
+  }
+
+  /* 前台接待：对当前访客执行一次「最长前缀匹配 → 指路」 */
+  function desk() {
+    var path = VISITORS[picked];
+    clearFloors();
+    var hit = null;
+    var hitLen = -1;
+    /* 前缀匹配：遍历全部规则，取最长前缀（与例题 matchLocation 同逻辑） */
+    RULES.forEach(function (r) {
+      if (path.indexOf(r.prefix) === 0 && r.prefix.length > hitLen) {
+        hit = r;
+        hitLen = r.prefix.length;
+      }
+    });
+
+    if (hit) {
+      lightFloor(hit.floor);
+      if (hit.floor === 'api') {
+        var deskName = (roundRobin % 2 === 0) ? 'A 窗口' : 'B 窗口';
+        if (roundRobin % 2 === 0) counterA += 1; else counterB += 1;
+        roundRobin += 1;
+        updateApiNote();
+        log('访客 ' + path + ' → ' + hit.desc + ' → 反向代理转发给 3F 后端（本次轮到 ' + deskName + '）', 'is-ok');
+      } else {
+        log('访客 ' + path + ' → ' + hit.desc + ' → 反向代理转发给 5F 管理后台', 'is-ok');
+      }
+      return;
+    }
+
+    /* 没有前缀规则命中 → 走 location / 的静态与兜底逻辑 */
+    lightFloor('static');
+    if (path === '/') {
+      log('访客 / → 命中 location / → 资料架上就有 index.html，直接返回首页', 'is-ok');
+    } else {
+      lightFloor('static', 'is-fallback');
+      log('访客 ' + path + ' → 磁盘上没有这个文件 → try_files 兜底：递上导览图 index.html，由前端路由接管渲染', 'is-end');
+    }
+  }
+
+  function reset() {
+    picked = 0;
+    roundRobin = 0;
+    counterA = 0;
+    counterB = 0;
+    currentEl.textContent = VISITORS[0];
+    updateApiNote();
+    clearFloors();
+    consoleEl.innerHTML = '';
+    log('写字楼开门营业：点选访客路径，再点「前台接待」…', 'is-muted');
+    renderPick();
+  }
+
+  deskBtn.addEventListener('click', desk);
+  resetBtn.addEventListener('click', reset);
+  reset();
+})();
+</script>
+</body>
+</html>

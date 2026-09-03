@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>浏览器存储：Cookie、Web Storage 与 IndexedDB · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ===== 本页动画专用样式：四个「口袋」与请求包裹的存储行为对比演示 ===== */
+.st-grid { display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0; }
+.st-card {
+  flex: 1 1 150px; min-width: 145px; padding: 10px 12px; border-radius: 10px;
+  border: 2px solid #d5dbe7; background: #f7f9fc;
+  transition: border-color .25s, opacity .25s;
+}
+.st-card.is-active { border-color: #4C6FFF; box-shadow: 0 0 0 3px #eef2ff; }
+.st-card.is-gone { opacity: .38; }
+.st-card-name { font-weight: 700; font-size: 13px; color: #41506b; }
+.st-card-desc { font-size: 12px; color: #6a7690; margin-top: 2px; line-height: 1.6; }
+.st-cap { height: 7px; border-radius: 999px; background: #e3e8f2; margin: 8px 0 4px; overflow: hidden; }
+.st-cap-fill { height: 100%; border-radius: 999px; background: #8fa4e8; transition: width .3s; }
+.st-chip {
+  display: inline-block; font-size: 12px; padding: 3px 9px; margin-top: 6px;
+  border-radius: 999px; border: 1px solid #b9c3d6; background: #fff; color: #8a93a6;
+  transition: background .25s, border-color .25s, color .25s;
+}
+.st-chip.is-on { border-color: #35a06b; background: #eafaf1; color: #1d6f47; font-weight: 600; }
+.st-parcel-row { display: flex; align-items: center; gap: 10px; margin: 10px 0; flex-wrap: wrap; }
+.st-parcel {
+  display: inline-block; padding: 8px 14px; border-radius: 10px;
+  border: 2px solid #d5dbe7; background: #fff; color: #6a7690; font-size: 13px;
+  transition: border-color .25s, box-shadow .25s;
+}
+.st-parcel.is-sending { border-color: #4C6FFF; box-shadow: 0 0 0 3px #eef2ff; }
+.st-parcel-tag {
+  display: inline-block; margin-left: 8px; font-size: 12px; padding: 2px 8px;
+  border-radius: 999px; border: 1px solid #4C6FFF; background: #eef2ff; color: #2c47c7;
+  font-weight: 700; transition: opacity .25s; opacity: 0;
+}
+.st-parcel-tag.is-on { opacity: 1; }
+</style>
+</head>
+<body data-page="m2-storage">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">知识点：浏览器存储：Cookie、Web Storage 与 IndexedDB（建议学习时长约 25 分钟）——四种存储的容量、生命周期、发送行为与场景选型。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>本页前置依赖：<a href="./m2-cache.html">浏览器缓存策略</a>——缓存研究的是「资源文件怎么存」，本页研究的是「数据怎么存」，两者共用「本地有副本、按有效期决定去留」的思想。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：分小标题推进 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、为什么浏览器需要「存东西」</h3>
+    <p>网页一刷新，JS 变量就全部清零；HTTP 请求之间也互相「失忆」。可产品需要记住东西：登录状态、购物车、主题偏好、离线草稿……于是浏览器提供了几个容量、生命周期、行为各不相同的「存储柜」。挑错柜子轻则浪费流量，重则丢数据、出安全问题。</p>
+
+    <h3>二、Cookie：随身口袋名片，走到哪递到哪</h3>
+    <p>Cookie 是最老的存储：容量很小（约 4KB），最大特点是<strong>每次向同源发起 HTTP 请求时自动随请求发送</strong>——这是它的本职：让服务器在无状态的 HTTP 上认出「这是谁」。主要属性：
+      生命周期用 <code>Expires</code>（绝对时间）或 <code>Max-Age</code>（相对秒数）设置，不设置就是会话级 Cookie，浏览器关闭即消失；
+      作用域用 <code>Domain</code> 与 <code>Path</code> 限定发往哪些路径；安全属性有三个：<code>HttpOnly</code>（页面脚本读不到，防 XSS 偷取）、<code>Secure</code>（仅加密连接发送）、<code>SameSite</code>（限制跨站附带，防 CSRF）。
+      因为「每个请求都带着」，往 Cookie 里塞大文件是典型的反模式——白占请求带宽。</p>
+
+    <h3>三、localStorage 与 sessionStorage：家里的储物柜</h3>
+    <p>Web Storage 提供两个兄弟接口，容量都在 5MB 级，<strong>只存字符串</strong>（存对象要先序列化），API 是同步的 <code>getItem / setItem / removeItem / clear</code>：
+      <strong>localStorage</strong>：持久保存，关浏览器、重启电脑都还在，除非代码或用户手动清除；同一源的所有标签页共享，且能收到 <code>storage</code> 事件感知彼此的修改。
+      <strong>sessionStorage</strong>：会话级，标签页关闭即清空，而且<strong>每个标签页独立</strong>——同一网站开两个标签页，各自的 sessionStorage 互不相通，适合「本次操作流程」的临时数据（如表单多步草稿）。
+      它们<strong>不会自动随请求发送</strong>，纯粹是页面自己用。也正因页面脚本能随便读，敏感凭证放这里要掂量 XSS 风险。</p>
+
+    <h3>四、IndexedDB：私人档案室</h3>
+    <p>要存大量结构化数据（离线笔记、聊天记录、离线缓存的数据集），4KB 和 5MB 都不够用，就该请出 IndexedDB：浏览器内置的<strong>事务型数据库</strong>——容量可达数百 MB 甚至更多，
+      数据按「对象仓库（object store）」分门别类，每个仓库有主键，可以建<strong>索引</strong>加速查找；所有读写都必须在<strong>事务</strong>里进行，保证一批操作要么全部成功要么全部回滚；
+      API 是<strong>异步</strong>的（事件或 Promise 包装），不会卡住页面；存取用结构化克隆，对象、数组、甚至二进制都能直接放，不必先转字符串。代价是 API 繁琐，实际项目常借助封装库。</p>
+
+    <h3>五、场景选型速查</h3>
+    <p>登录态：首选 <strong>HttpOnly + Secure + SameSite 的 Cookie</strong>，由服务端配合 Session 或令牌机制——脚本偷不走，还能防 CSRF。
+      主题偏好、界面设置等纯前端小数据：<strong>localStorage</strong>，持久且不占请求带宽。
+      一次性流程的临时数据：<strong>sessionStorage</strong>，关页即走，不留垃圾。
+      大量结构化数据的离线能力（离线笔记、待同步队列）：<strong>IndexedDB</strong>。
+      原则一句话：<strong>服务器要读的放 Cookie，页面自己用的小数据放 Web Storage，大数据用 IndexedDB</strong>；任何存储都不该明文放敏感信息。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 小李通勤路上的四种「口袋」</div>
+      <p>小李每天通勤，身上有四种地方可以装东西。<strong>Cookie 是他西装胸前口袋里的名片</strong>：容量小，只装得下几行字（约 4KB）；但有个怪规矩——每进一栋写字楼（每发一次请求），保安都要求他<strong>把这张名片递出去过目</strong>，所以名片上只能写身份信息（登录态），塞张大照片进去他天天累得慌（占带宽）。名片还能设定「只用一周」（Max-Age），到期自动作废。
+        <strong>localStorage 是他家里的储物柜</strong>：能装 5MB 的东西，放在家里（浏览器里）不出门、不给人看（不随请求发送），每天回家都能取到（持久化），想处理得自己动手（手动清除）。
+        <strong>sessionStorage 是酒店房间的临时置物袋</strong>：也是 5MB 级，但退房（关闭标签页）时酒店直接清走；而且每间房的袋子互相独立（标签页隔离），隔壁房间翻不到你这袋。
+        <strong>IndexedDB 是他租的私人档案室</strong>：空间大得多，档案按抽屉分门别类（对象仓库）、每个抽屉有编号目录（索引）能快速翻找，存取都要走登记簿（事务），一沓文件要么全部登记成功要么全部作废。
+        小李的教训：把全家福塞进名片口袋（大文件放 Cookie）会天天累垮；把房卡写进置物袋后想第二天再用（跨会话数据放 sessionStorage）就会发现袋子早被清空；而把银行卡密码抄在储物柜标签上（敏感信息明文放 localStorage）更是大忌。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：四个口袋与请求包裹的存储行为对比，可单步执行 -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>把四份数据放进四个「口袋」，单步观察「发请求 / 关标签页 / 第二天再来」时谁还在、谁上包裹、谁消失：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">演示设定：登录凭证放 Cookie（设了 Max-Age 7 天）、主题偏好放 localStorage、表单草稿放 sessionStorage、离线笔记放 IndexedDB。
+        点「单步执行」逐个场景推进，注意观察包裹上的 Cookie 标签和 sessionStorage 卡片的变化：</p>
+      <div class="st-grid">
+        <div class="st-card" id="st-card-cookie">
+          <div class="st-card-name">Cookie</div>
+          <div class="st-card-desc">约 4KB · 自动随请求发送</div>
+          <div class="st-cap"><div class="st-cap-fill" style="width: 6%"></div></div>
+          <span class="st-chip" id="st-chip-cookie">空</span>
+        </div>
+        <div class="st-card" id="st-card-local">
+          <div class="st-card-name">localStorage</div>
+          <div class="st-card-desc">约 5MB · 持久 · 不随请求</div>
+          <div class="st-cap"><div class="st-cap-fill" style="width: 35%"></div></div>
+          <span class="st-chip" id="st-chip-local">空</span>
+        </div>
+        <div class="st-card" id="st-card-session">
+          <div class="st-card-name">sessionStorage</div>
+          <div class="st-card-desc">约 5MB · 会话级 · 标签页隔离</div>
+          <div class="st-cap"><div class="st-cap-fill" style="width: 35%"></div></div>
+          <span class="st-chip" id="st-chip-session">空</span>
+        </div>
+        <div class="st-card" id="st-card-idb">
+          <div class="st-card-name">IndexedDB</div>
+          <div class="st-card-desc">大容量 · 事务与索引 · 异步</div>
+          <div class="st-cap"><div class="st-cap-fill" style="width: 92%"></div></div>
+          <span class="st-chip" id="st-chip-idb">空</span>
+        </div>
+      </div>
+      <div class="st-parcel-row">
+        <span class="st-parcel" id="st-parcel">请求包裹（发往同源服务器）<span class="st-parcel-tag" id="st-parcel-tag">Cookie: 登录凭证已随行</span></span>
+      </div>
+      <div class="anim-console" id="st-console"></div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="st-step">单步执行</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="st-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（全部为课程数据中的真实 path） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="./m2-cache.html">浏览器缓存策略</a>——「本地留副本、按有效期决定去留」的判定思想，与 Cookie 的 Expires/Max-Age 一脉相承。</p>
+    <p><strong>向后延伸</strong>：登录态存进 Cookie 之后，服务端如何凭它认人？见<a href="../m6/m6-session.html">Cookie、Session 与鉴权基础</a>；无状态的令牌方案见<a href="../m6/m6-jwt.html">JWT 与 OAuth 2.0</a>。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="./m2-security.html">Web 安全：XSS、CSRF 与 CSP</a> —— HttpOnly / SameSite / Secure 正是 Cookie 的安全属性，存储选型直接决定安全面大小</li>
+      <li><a href="./m2-cors.html">跨域与 CORS</a> —— 「跨域携带 Cookie」要前后端同时许可，凭证与通配符互斥的规则就出自这里</li>
+      <li><a href="./m2-http.html">HTTP/1.1、HTTP/2 与 HTTP/3</a> —— Cookie 每请求自动附带，头部体积对 HTTP/1.1 尤其敏感，是大文件不放 Cookie 的底层原因</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（mode:'main'，判分写入进度仓库） -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后会把最佳成绩写入进度仓库，并推进复习计划：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：浏览器给了你四种口袋——名片口袋（Cookie）小但每次进门都要递给人看；家里储物柜（localStorage）能装还不跟着跑；酒店置物袋（sessionStorage）退房就清空；私人档案室（IndexedDB）能分门别类存大量档案——装什么，先想清楚「要不要给服务器看、要放多久、有多大」。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前默写「容量 / 是否随请求发送 / 生命周期」三维对比表；1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：经典问法，答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：Cookie 与 localStorage 的核心区别有哪些？</summary>
+      <ul>
+        <li>容量：Cookie 约 4KB；localStorage 约 5MB 级，差两个数量级。</li>
+        <li>发送行为：Cookie 在每次同源 HTTP 请求中自动附带（服务端也能下发/修改它），会占用请求带宽；localStorage 完全在浏览器本地，不随请求发送。</li>
+        <li>生命周期：Cookie 用 Expires / Max-Age 设定，不设置则为会话级（浏览器关闭即失效）；localStorage 持久保存，直到被代码或用户清除。</li>
+        <li>API 与数据形态：document.cookie 接口原始难用；localStorage 是 getItem/setItem 等同步 API，且只能存字符串（对象需序列化）。</li>
+        <li>作用域：Cookie 可用 Domain/Path 细分；Storage 按源隔离，sessionStorage 还额外按标签页隔离。</li>
+        <li>场景结论：服务器需要读的状态（登录态配合 HttpOnly）放 Cookie；纯前端偏好与缓存放 localStorage。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：登录令牌该放 HttpOnly Cookie 还是 localStorage？怎么权衡？</summary>
+      <ul>
+        <li>HttpOnly Cookie：页面脚本完全读不到，XSS 即使注入成功也偷不走令牌；配合 Secure 只走加密连接、SameSite 缓解 CSRF；代价是要处理 CSRF 防御（Token/SameSite）与跨域场景下的 credentials 配置。</li>
+        <li>localStorage：读写方便、不涉及跨域凭证问题；但任何一次 XSS 得手令牌即泄露，且无浏览器层兜底，必须靠严格的输出转义 + CSP 把 XSS 挡死。</li>
+        <li>通用加固：令牌短有效期 + 刷新机制、绑定设备指纹、敏感操作二次确认、服务端可吊销。</li>
+        <li>结论倾向：安全优先选 HttpOnly Cookie；选 localStorage 必须以「把 XSS 防御做到位」为前提，并能在面试里说清两种方案的攻防面。</li>
+        <li>加分项：提到两者都不要存可长期明文使用的敏感信息，以及多标签页共享登录态时 Cookie 天然同步、Storage 可靠 storage 事件同步。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm2-storage'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'）：题目 id 以知识点 id 开头 */
+  var WARMUP = [{
+    id: 'm2-storage-warmup-1',
+    type: 'single',
+    stem: '预热：同样是浏览器本地存储，Cookie 与 localStorage 最核心的行为差异是什么？',
+    options: [
+      'localStorage 容量更小，只有几百字节',
+      'Cookie 会在每次同源 HTTP 请求中自动携带，localStorage 不会随请求发送',
+      'localStorage 一关浏览器就全部清空，Cookie 反而永久保存',
+      '两者都要靠 Expires 头才能保存数据'
+    ],
+    answer: [1],
+    explain: 'Cookie 的本职就是随请求自动发送、让服务器认人，因此容量只有约 4KB；localStorage 容量 5MB 级、纯本地读写、不随请求出行。C 说反了：localStorage 才是持久保存的那个。Expires/Max-Age 是 Cookie 的过期属性，localStorage 没有「有效期」概念，需手动清除。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm2-storage-q1',
+      type: 'single',
+      stem: '要保存「用户的暗色/亮色主题偏好」，下一次打开网站仍然生效，最合适的存储是？',
+      options: [
+        'Cookie——让服务器每次请求都能看到用户偏好',
+        'localStorage——本地持久读写，不占请求带宽',
+        'sessionStorage——天然与本次会话绑定',
+        '存在 URL 参数里，方便分享'
+      ],
+      answer: [1],
+      explain: '主题偏好只有前端自己用，既不需要服务器读取，也不希望随每个请求白白占带宽，更要求持久保存——三条正好命中 localStorage 的强项。Cookie 的「自动发送」在这里是纯浪费（还会挤占 4KB 配额）；sessionStorage 关标签页就清空，无法「下次打开仍生效」；URL 参数刷新即丢且会被分享出去，都不是存储。'
+    },
+    {
+      id: 'm2-storage-q2',
+      type: 'multi',
+      stem: '关于 sessionStorage，下列说法正确的有哪些？（多选，全部选对才得分）',
+      options: [
+        '同一网站的两个标签页，各自的 sessionStorage 互不共享',
+        '标签页关闭后，其中的 sessionStorage 数据被清空',
+        '容量与 localStorage 相近，都是 5MB 级',
+        'sessionStorage 里的数据会自动随 HTTP 请求发送给服务器'
+      ],
+      answer: [0, 1, 2],
+      explain: 'sessionStorage 的三大特征：标签页隔离（每个标签页独立一份，互不相通）、会话级生命周期（关标签页即清空，这是它与 localStorage 的本质区别）、容量 5MB 级与 localStorage 相同。D 是 Cookie 的专属行为——Web Storage 完全不参与 HTTP 请求，这也是它比 Cookie 省带宽的原因。'
+    },
+    {
+      id: 'm2-storage-q3',
+      type: 'code',
+      stem: '实现 Cookie 报文解析函数 parseCookieHeader(header)：输入浏览器发来的 Cookie 请求头字符串（如 "a=1; b=2"），返回一个「键值对对象」。要求：以分号分隔各段；每段只在第一个等号处切分（值里可能再出现等号）；空字符串返回空对象；无等号的段直接跳过。',
+      stub: 'function parseCookieHeader(header) {\n  // 提示：\n  // 1. 先处理空入参：直接返回 {}\n  // 2. split(\';\') 分段，每段 trim 去掉分号后的空格\n  // 3. 用 indexOf(\'=\') 找第一个等号：key 取前半，value 取后半（可含等号）\n  // 4. 找不到等号的段跳过\n}\n',
+      reference: 'function parseCookieHeader(header) {\n  var out = {};\n  if (!header) return out;          // 空入参：空对象\n  var parts = header.split(\';\');\n  for (var i = 0; i < parts.length; i++) {\n    var seg = parts[i].trim();       // 去掉分号后遗留的空格\n    if (!seg) continue;\n    var eq = seg.indexOf(\'=\');       // 只按第一个 = 切分：值里可能还有 =\n    if (eq < 0) continue;            // 没有等号的段无法构成键值对，跳过\n    var key = seg.slice(0, eq);\n    out[key] = seg.slice(eq + 1);\n  }\n  return out;\n}',
+      asserts: [
+        "parseCookieHeader('a=1; b=2').a === '1'",
+        "parseCookieHeader('a=1; b=2').b === '2'",
+        "parseCookieHeader('token=abc=def').token === 'abc=def'",
+        "var __o = parseCookieHeader(''); Object.keys(__o).length === 0"
+      ],
+      explain: '这是读取 document.cookie 或服务端解析 Cookie 时的真实高频操作。三条断言各有考点：前两条验证「分号 + 空格」的分段与 trim——真实 Cookie 串各段之间是「分号 + 空格」，不 trim 就会得到带空格的键名；第三条验证「只在第一个等号处切分」——值本身可以包含等号，用 split(\'=\\\') 按所有等号切会把值切碎，slice(eq + 1) 才能完整保留；第四条验证空串边界，避免对空输入做 split 出现诡异结果。注意值都是字符串（"1" 而非数字 1），Cookie 本就只存文本，这也呼应了正文中「只存字符串」的特性。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：四个口袋与请求包裹的存储行为对比（纯 DOM 手写，无动画库） */
+(function () {
+  'use strict';
+  var consoleEl = document.getElementById('st-console');
+  var parcelEl = document.getElementById('st-parcel');
+  var parcelTagEl = document.getElementById('st-parcel-tag');
+  var stepBtn = document.getElementById('st-step');
+  var resetBtn = document.getElementById('st-reset');
+
+  /* 四张卡片的元素引用与芯片 id 对照 */
+  var CARDS = {
+    cookie: { card: document.getElementById('st-card-cookie'), chip: document.getElementById('st-chip-cookie') },
+    local:  { card: document.getElementById('st-card-local'),  chip: document.getElementById('st-chip-local') },
+    session:{ card: document.getElementById('st-card-session'),chip: document.getElementById('st-chip-session') },
+    idb:    { card: document.getElementById('st-card-idb'),    chip: document.getElementById('st-chip-idb') }
+  };
+
+  var DATA_LABEL = {
+    cookie: '登录凭证', local: '主题偏好', session: '表单草稿', idb: '离线笔记'
+  };
+
+  var phase = 0;   // 当前推进到第几个场景
+  var ended = false;
+
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* 把某个口袋标记为「已存入」或「已清空」 */
+  function setChip(kind, on) {
+    CARDS[kind].chip.textContent = on ? ('已存入：' + DATA_LABEL[kind]) : '空';
+    CARDS[kind].chip.classList.toggle('is-on', !!on);
+  }
+
+  function clearHighlights() {
+    for (var k in CARDS) {
+      if (Object.prototype.hasOwnProperty.call(CARDS, k)) CARDS[k].card.classList.remove('is-active');
+    }
+    parcelEl.classList.remove('is-sending');
+  }
+
+  function reset() {
+    phase = 0;
+    ended = false;
+    stepBtn.disabled = false;
+    clearHighlights();
+    parcelTagEl.classList.remove('is-on');
+    for (var k in CARDS) {
+      if (Object.prototype.hasOwnProperty.call(CARDS, k)) CARDS[k].card.classList.remove('is-gone');
+    }
+    setChip('cookie', false);
+    setChip('local', false);
+    setChip('session', false);
+    setChip('idb', false);
+    consoleEl.innerHTML = '';
+    log('初始：四个口袋都空着。点「单步执行」开始演示——先存数据，再依次经历「发请求 / 关标签页 / 第二天再来」…', 'is-muted');
+  }
+
+  /* 单步执行：存数据 → 发请求 → 关标签页 → 第二天再来 → 总结，共 5 步 */
+  function step() {
+    if (ended) return;
+    clearHighlights();
+    if (phase === 0) {
+      /* 第 1 步：四份数据各自入位 */
+      setChip('cookie', true);
+      setChip('local', true);
+      setChip('session', true);
+      setChip('idb', true);
+      log('第 1 步（存数据）：登录凭证 → Cookie（设了 Max-Age 7 天）；主题偏好 → localStorage；表单草稿 → sessionStorage；离线笔记 → IndexedDB', 'is-muted');
+    } else if (phase === 1) {
+      /* 第 2 步：发起一次请求，观察谁自动上包裹 */
+      parcelEl.classList.add('is-sending');
+      parcelTagEl.classList.add('is-on');
+      CARDS.cookie.card.classList.add('is-active');
+      log('第 2 步（发请求）：页面发起一次同源请求——只有 Cookie 自动跳上了包裹（浏览器自动附带），其余三个口袋纹丝不动', 'is-ok');
+    } else if (phase === 2) {
+      /* 第 3 步：关闭标签页，sessionStorage 清空 */
+      parcelTagEl.classList.remove('is-on');
+      CARDS.session.card.classList.add('is-gone');
+      setChip('session', false);
+      log('第 3 步（关闭标签页）：sessionStorage 被清空（会话级、标签页隔离）；Cookie 设了 Max-Age、localStorage 持久、IndexedDB 在档案室，全部安然无恙', 'is-end');
+    } else if (phase === 3) {
+      /* 第 4 步：第二天再来，盘点谁还在 */
+      log('第 4 步（第二天再来）：localStorage（主题偏好立即生效）、IndexedDB（离线笔记都在）、Cookie（7 天内仍随请求携带）都还在；sessionStorage 需要重新写入', 'is-ok');
+    } else {
+      /* 第 5 步：总结选型口诀 */
+      ended = true;
+      stepBtn.disabled = true;
+      log('总结口诀：服务器要读的放 Cookie，页面自己用的小数据放 Web Storage，大数据用 IndexedDB——容量、发送行为、生命周期三个维度对号入座 ✓', 'is-end');
+      return;
+    }
+    phase += 1;
+  }
+
+  stepBtn.addEventListener('click', step);
+  resetBtn.addEventListener('click', reset);
+  reset();
+})();
+</script>
+</body>
+</html>

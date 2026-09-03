@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>HTTPS 与 TLS 握手 · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ===== 本页动画专用样式：浏览器与服务器之间的 TLS 握手单步演示 ===== */
+.hs-scene { display: flex; gap: 12px; flex-wrap: wrap; margin: 12px 0; }
+.hs-side {
+  flex: 1 1 240px; padding: 10px 12px; border-radius: 10px;
+  border: 2px solid #d5dbe7; background: #f7f9fc; min-width: 220px;
+  transition: border-color .25s, box-shadow .25s;
+}
+.hs-side.is-active { border-color: #0FB5A6; box-shadow: 0 0 0 3px #e2f7f5; }
+.hs-side.is-bad { border-color: #e05656; box-shadow: 0 0 0 3px #fdeceb; }
+.hs-side-name { font-weight: 700; font-size: 13px; color: #41506b; margin-bottom: 6px; }
+.hs-tags { font-size: 12px; color: #6a7690; line-height: 1.7; }
+/* 证书卡片：正常时白底蓝框，被中间人调包后变红色警示 */
+.hs-cert {
+  margin-top: 8px; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid #b9c3d6; background: #fff; font-size: 12px; color: #41506b; line-height: 1.8;
+  transition: border-color .25s, background .25s, color .25s;
+}
+.hs-cert.is-fake { border-color: #e05656; background: #fdf0ef; color: #a13a3a; }
+/* 传输信道：展示当前正在线上跑的报文（明文/密文一目了然） */
+.hs-wire {
+  margin: 12px 0; padding: 8px 12px; border-radius: 8px;
+  border: 1px dashed #b9c3d6; background: #fbfcfe;
+  font-size: 12px; color: #6a7690; min-height: 20px; line-height: 1.7;
+}
+.hs-wire.is-cipher { color: #1d6f47; border-color: #35a06b; }
+</style>
+</head>
+<body data-page="m2-https">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">知识点：HTTPS 与 TLS 握手（建议学习时长约 25 分钟）——混合加密、数字证书与握手流程的完整拆解。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>本页前置依赖：<a href="./m2-http.html">HTTP/1.1、HTTP/2 与 HTTP/3</a>——先知道 HTTP 报文是「明文」在路上跑的，才能理解 HTTPS 在它和 TCP 之间垫了一层 TLS 做了什么。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：分小标题推进 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、HTTP 明文的烦恼，HTTPS 垫在哪一层</h3>
+    <p>HTTP 报文像一张<strong>明信片</strong>：写的是「帮我把余额转到某账户」，从你家到收件人，沿途每一个经手人（同一 WiFi 里的陌生人、路由器、运营商网关）都能<strong>看内容、改内容</strong>——偷窥密码、往页面里插广告、把你的跳转劫持到假网站，都是这么发生的。
+      HTTPS 并不是一个全新的协议，它就是「<strong>HTTP + TLS</strong>」：在 HTTP 与 TCP 之间垫了一层 TLS（安全传输层），发出前先把报文装进<strong>加密信封</strong>，路上只见密文，到对方手里再拆封。这就顺手拿到了三样东西：<strong>机密性</strong>（看不懂）、<strong>完整性</strong>（改了会被发现）、<strong>身份认证</strong>（确认对方真的是那个网站）。</p>
+
+    <h3>二、两把锁：对称加密与非对称加密的组合拳</h3>
+    <p><strong>对称加密</strong>：加密和解密用<strong>同一把钥匙</strong>。优点是快，适合加密海量数据；缺点是致命的——钥匙怎么安全地送到对方手里？在明文信道上直接寄钥匙，等于把密码写在明信片上寄出去。</p>
+    <p><strong>非对称加密</strong>：一把钥匙成对出现——<strong>公钥</strong>和<strong>私钥</strong>。用公钥锁上的箱子，只有配对的私钥能打开；公钥可以随便发，私钥永远不出门。这解决了「密钥配送」难题，但它<strong>很慢</strong>，不适合加密大量数据。</p>
+    <p>于是 TLS 取长补短：<strong>握手阶段</strong>用非对称加密把「会话密钥」安全地送到对方手里（并验证签名），<strong>之后的数据传输</strong>全部改用这把商量好的对称密钥——又安全又快，这就是<strong>混合加密</strong>。</p>
+
+    <h3>三、先验明正身：数字证书与 CA 信任链</h3>
+    <p>非对称加密还剩一个漏洞：浏览器收到一把「公钥」，凭什么相信它真的属于目标网站，而不是半路有人调包的？这就轮到<strong>数字证书</strong>出场：由浏览器和操作系统都信任的权威机构（<strong>CA，证书颁发机构</strong>，好比公证处）核验网站身份后，把「域名、持有者、公钥、有效期」打包成证书，并用 CA 自己的私钥对内容<strong>签名</strong>——签名相当于火漆印，谁都能用 CA 公开的公钥<strong>验证</strong>，但没有 CA 私钥就<strong>仿造不出来</strong>。</p>
+    <p>浏览器验证证书时会依次核对：<strong>① 用内置的 CA 公钥验签</strong>（签名对不上，直接拒绝连接）；<strong>② 沿证书链逐级核对</strong>（站点证书由中间 CA 签发、中间 CA 又由根 CA 背书，根证书预装在系统里，这是信任的锚点）；<strong>③ 域名匹配</strong>（证书里的域名必须和你访问的一致）；<strong>④ 有效期与吊销状态</strong>。任何一环失败，浏览器都会拦下连接并提示风险。</p>
+
+    <h3>四、TLS 握手流程拆解（对照下面的动画走一遍）</h3>
+    <p>以经典的 TLS 1.2 为例，握手大致是这五步：<strong>① ClientHello</strong>：浏览器发出「我支持的加密套件列表 + 一个客户端随机数」；
+      <strong>② ServerHello</strong>：服务器从中选定一套，回一个服务端随机数；
+      <strong>③ Certificate</strong>：服务器出示数字证书（含公钥）；
+      <strong>④ 密钥交换</strong>：浏览器验证证书后，生成一段「预主密钥」，用服务器公钥加密发过去——路上是密文，只有握着私钥的服务器能解开；
+      <strong>⑤ 会话密钥</strong>：双方用「客户端随机数 + 服务端随机数 + 预主密钥」各自算出<strong>同一把会话密钥</strong>，互发 Finished 校验后，之后的通信全部用它做对称加密。两个随机数让<strong>每次连接的密钥都不同</strong>，防止旧密钥被套用（防重放）。</p>
+    <p><strong>TLS 1.3</strong> 把握手从约两次往返（2-RTT）压到<strong>一次往返（1-RTT）</strong>：密钥交换直接并入两边的 Hello 报文，配合会话恢复甚至能做到 0-RTT；同时砍掉了 RSA 密钥交换等一批不再安全的旧算法，只保留具备<strong>前向安全</strong>（私钥日后泄露也解不开过去的流量）的方案。</p>
+
+    <h3>五、中间人为什么防住了</h3>
+    <p>假设攻击者半路劫持流量、把自己的公钥冒充成服务器的公钥发给你：他出示的<strong>假证书没有可信 CA 的签名</strong>，浏览器用内置公钥一验就对不上，当场拒绝连接；就算他只截获加密的预主密钥，<strong>没有服务器私钥也解不开</strong>。签名与证书校验，堵住了「调包」这条路。
+      但要清楚边界：HTTPS 只保「路上安全」——钓鱼网站同样能申请到合法证书（小锁不等于官方可信），XSS、CSRF 这类应用层攻击它也管不着，那是后续 Web 安全页的主题。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 小周给异地表哥寄房产证</div>
+      <p>小周要把一份房产证原件寄给异地的表哥，路上快递员、中转站谁都可能经手，怎么办？他设计了这么一套流程：
+        第一步，<strong>验明正身</strong>。小周并不直接信「对方自称是表哥」，而是找双方都信任的长辈（<strong>CA 公证处</strong>）作保：长辈当面核过表哥的身份证后，在他的挂锁照片旁签上名、盖上火漆印，做成一张「担保卡」（<strong>数字证书</strong>）。火漆印人人能辨认真假（用 CA 公钥验签），但只有长辈有那枚章（CA 私钥），仿不出来。
+        第二步，<strong>公开的锁先寄来</strong>。表哥把一只「扣得上却打不开的挂锁」（<strong>公钥</strong>）连同担保卡寄给小周——这锁谁拿到都能扣上，但开锁的钥匙（<strong>私钥</strong>）全世界只有表哥有一把，从不外借。
+        第三步，<strong>小周核对火漆印</strong>：签名对得上长辈的笔迹、担保卡上写的确是表哥的名字、卡片没过保质期——都对，才敢用这把锁。
+        第四步，<strong>寄钥匙</strong>。小周把自家保险箱的新钥匙放进小盒，用表哥的挂锁<strong>咔哒</strong>扣上寄回（用公钥加密预主密钥）。半路就算有人截下包裹，既打不开挂锁，也仿不出火漆印；只有握着唯一钥匙的表哥能取出里面那把新钥匙。
+        第五步，<strong>之后寄东西全换新钥匙</strong>：两人用这把商量好的钥匙上锁（<strong>对称加密</strong>），又快又稳，而且每寄一轮就换一把新钥匙（随机数参与），旧钥匙丢了也波及不了别轮。
+        如果中途有人把自己配的锁冒充表哥的锁寄来（<strong>中间人攻击</strong>），担保卡上的火漆印根本对不上——小周一眼识破，直接拒绝收件（浏览器拦截连接）。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：浏览器与服务器之间的 TLS 握手单步演示，可单步执行、可开启中间人攻击 -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>亲手走一遍 TLS 握手：先验明身份（证书），再商量出只有双方知道的会话密钥：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">左边是浏览器（客户端），右边是网站服务器，中间是「传输信道」——你能看到每一步真正在线上跑的报文是明文还是密文。
+        点「单步执行」逐阶段推进；点「制造中间人攻击」模拟同网段攻击者劫持流量、出示假证书，观察浏览器在哪一步识破它：</p>
+      <div class="hs-scene">
+        <div class="hs-side" id="hs-client">
+          <div class="hs-side-name">浏览器（客户端）</div>
+          <div class="hs-tags" id="hs-client-tags">还没有发起连接</div>
+        </div>
+        <div class="hs-side" id="hs-server">
+          <div class="hs-side-name">网站服务器（shop.com）</div>
+          <div class="hs-cert" id="hs-cert">
+            <strong>数字证书</strong><br>
+            域名：shop.com<br>
+            公钥：S（随证书一起下发）<br>
+            颁发者：<span id="hs-cert-issuer">受信任 CA（内置根证书背书）</span>
+          </div>
+          <div class="hs-tags" id="hs-server-tags"></div>
+        </div>
+      </div>
+      <div class="hs-wire" id="hs-wire">传输信道空闲——还没有报文发出。</div>
+      <div class="anim-console" id="hs-console"></div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="hs-step">单步执行</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="hs-mitm">制造中间人攻击</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="hs-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（全部为课程数据中的真实 path） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="./m2-http.html">HTTP/1.1、HTTP/2 与 HTTP/3</a>——HTTPS 就是 HTTP 套上 TLS 信封，先懂明文报文长什么样，才知道加密加密的是什么。</p>
+    <p><strong>向后延伸</strong>：HTTPS 只保传输安全，XSS、CSRF 这类应用层攻击要靠下一课，见<a href="./m2-security.html">Web 安全：XSS、CSRF 与 CSP</a>；
+      跨域请求同样跑在安全与同源规则的夹缝里，见<a href="./m2-cors.html">跨域与 CORS</a>。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="../m6/m6-session.html">Cookie、Session 与鉴权基础</a> —— Cookie 的 Secure、HttpOnly 属性配合 HTTPS 才能守住登录态；加密信道是会话安全的底座</li>
+      <li><a href="../m4/m4-load.html">首屏与资源加载优化</a> —— TLS 建连多出的往返与运算开销直接影响首屏速度，会话恢复、HTTP/2/3 复用连接都是为省掉这段成本</li>
+      <li><a href="./m2-cache.html">浏览器缓存策略</a> —— 强缓存命中时连请求都不发，TLS 握手开销也随之免掉；缓存与安全传输是一对配合关系</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（mode:'main'，判分写入进度仓库） -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后会把最佳成绩写入进度仓库，并推进复习计划：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：HTTPS 就是寄贵重物品前先互相验明身份（公证处盖章的证书），再用对方公开的锁（公钥）商量出一把只有你俩知道的新钥匙（会话密钥），之后所有信件都用这把钥匙上锁——路上的人既看不懂也改不了。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前默写一遍「ClientHello → ServerHello → 证书与验签 → 公钥加密预主密钥 → 算出会话密钥 → 对称加密通信」握手链；1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：经典问法，答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：HTTPS 建连为什么比 HTTP 慢？TLS 1.3 快在哪？</summary>
+      <ul>
+        <li>HTTP 建连只需 TCP 三次握手（约 1-RTT）；HTTPS 在此之上还要做 TLS 握手。</li>
+        <li>TLS 1.2 握手约需额外 2-RTT：协商算法、服务器发证书、浏览器验证证书并交换密钥材料，之后才能发第一个 HTTP 请求。</li>
+        <li>除了往返延迟，还有计算开销：证书链验证、签名验签、密钥运算都要耗 CPU。</li>
+        <li>TLS 1.3 的提速：握手压缩到 1-RTT（密钥交换并入两边的 Hello 报文），会话恢复可 0-RTT；砍掉 RSA 密钥交换等旧算法，只保留前向安全的方案，协商更快也更安全。</li>
+        <li>加分项：HTTP/3 基于 QUIC，把传输层握手与 TLS 1.3 握手合并成一步，建连总共 1-RTT 甚至 0-RTT；配合会话复用与 CDN 就近接入进一步压缩建连成本。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：数字证书是如何防止「服务器身份被伪造」的？为什么中间人拿到密文也没用？</summary>
+      <ul>
+        <li>证书内容：域名、持有者、服务器公钥、有效期等，由 CA 用自己的私钥对内容摘要做签名——签名人人可验，但没有 CA 私钥就造不出来。</li>
+        <li>浏览器验证链：用预装的根 CA 公钥验签 → 沿证书链逐级核对 → 再核对域名匹配、有效期与吊销状态，任一环节失败即拒绝连接。</li>
+        <li>密钥安全：浏览器用服务器公钥加密的预主密钥，只有持有配对私钥的真服务器能解开；中间人截获密文却没有私钥，无法还原密钥材料。</li>
+        <li>会话密钥由「双方随机数 + 预主密钥」共同推导，每次连接不同，旧密钥泄露不影响其他会话（配合 ECDHE 还有前向安全）。</li>
+        <li>加分项：主动说清边界——HTTPS 提供机密性、完整性、身份认证，但不防钓鱼（假站也能有合法证书）、不防 XSS/CSRF 等应用层攻击。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm2-https'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'）：题目 id 以知识点 id 开头 */
+  var WARMUP = [{
+    id: 'm2-https-warmup-1',
+    type: 'single',
+    stem: '预热：地址栏出现 https:// 和一把小锁图标，最直接说明的是？',
+    options: [
+      '这个网站一定是官方正规网站，内容绝对可信',
+      '浏览器与服务器之间的数据经过 TLS 加密传输，途中难以被窃听或篡改',
+      '这个网站用的是性能更好的服务器',
+      '网页内容本身加密了，只有付费用户能看'
+    ],
+    answer: [1],
+    explain: '小锁的含义是「传输信道被加密」：HTTP 明文外面套了一层 TLS 加密封套。它只保证「路上安全」，不保证「网站本身可信」——钓鱼网站同样能申请合法证书；加密的对象是传输途中的数据，页面内容对你（浏览器）始终可见。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm2-https-q1',
+      type: 'single',
+      stem: '在 HTTPS 的混合加密中，非对称加密与对称加密分别承担什么工作？',
+      options: [
+        '全程都用非对称加密，对称加密只是旧浏览器的兼容方案',
+        '握手阶段用非对称加密安全地交换密钥材料并验证签名，之后的通信数据用协商出的对称密钥加密',
+        '全程都用对称加密，非对称加密只用来压缩数据',
+        '对称加密负责验证证书，非对称加密负责压缩数据'
+      ],
+      answer: [1],
+      explain: '非对称加密安全但慢，只用在握手期解决「密钥配送」难题：把会话密钥材料安全送到对方手里、并验证证书签名；而真正的业务数据量大，交给快得多的对称加密。两者各取所长就是混合加密——A 错在把慢的非对称用在了全程；C、D 混淆了职责，压缩与加密是两回事，验证证书靠的是 CA 签名而非对称加密。'
+    },
+    {
+      id: 'm2-https-q2',
+      type: 'multi',
+      stem: '关于数字证书与 TLS 握手，下列说法正确的有哪些？（多选，全部选对才得分）',
+      options: [
+        '浏览器会用内置的 CA 公钥核对证书签名，确认证书确由可信机构签发',
+        '只要证书里的域名和访问的域名一致，即使没有可信 CA 签名也可以放心信任',
+        '握手双方各带一个随机数，与会话密钥的推导有关，让每次连接的密钥都不同',
+        'TLS 1.3 把握手往返从 TLS 1.2 的约两次压到一次（1-RTT），建连更快'
+      ],
+      answer: [0, 2, 3],
+      explain: 'B 是典型误区：域名匹配只是证书内容的一项核对，信任的根基是签名——没有可信 CA 签名，任何人都能给任意域名造一张「自说自话」的证书，中间人冒充服务器就防不住了。A 对：信任锚点是操作系统/浏览器预装的根 CA 公钥，验签失败会直接拦截连接。C 对：ClientHello/ServerHello 各带随机数，与预主密钥一起推导出会话密钥，保证每次连接密钥不同（防重放）。D 对：TLS 1.3 精简握手为 1-RTT，会话恢复时甚至 0-RTT。'
+    },
+    {
+      id: 'm2-https-q3',
+      type: 'code',
+      stem: '实现地址升级函数 upgradeToHttps(url)：参数不是字符串时返回 null；以 http:// 开头（不区分大小写）时把协议替换为 https:// 并原样保留其余部分；以 https:// 开头（不区分大小写）时原样返回；其余情况（无协议前缀或其他协议）返回 null。',
+      stub: 'function upgradeToHttps(url) {\n  // 提示：\n  // 1. 参数不是字符串 → 返回 null\n  // 2. 判断协议前缀时先统一转小写（URL 协议名大小写不敏感）\n  // 3. http:// 开头 → "https://" + 去掉前缀后的剩余部分\n  // 4. https:// 开头 → 原样返回；其余 → null\n}\n',
+      reference: 'function upgradeToHttps(url) {\n  if (typeof url !== "string") return null;\n  var lower = url.toLowerCase(); // 协议名大小写不敏感，先统一再比较\n\n  if (lower.indexOf("http://") === 0) {\n    return "https://" + url.slice(7); // 只换协议，其余部分原样保留\n  }\n  if (lower.indexOf("https://") === 0) {\n    return url; // 已是加密协议：原样返回\n  }\n  return null; // 无协议前缀或其他协议：不是可升级的网页地址\n}',
+      asserts: [
+        "upgradeToHttps('http://shop.com/item?id=7') === 'https://shop.com/item?id=7'",
+        "upgradeToHttps('https://shop.com/a/b') === 'https://shop.com/a/b'",
+        "upgradeToHttps('HTTP://SHOP.COM/A') === 'https://SHOP.COM/A'",
+        "upgradeToHttps('ftp://shop.com') === null && upgradeToHttps('shop.com/a') === null && upgradeToHttps(null) === null"
+      ],
+      explain: '这道题对应两个真实考点：其一，判断「传输是否加密」看的是协议（scheme）而不是域名——同一个 shop.com，http:// 是明信片，https:// 才是密文信封，所以函数必须先识别协议前缀。其二，URL 规范规定协议名大小写不敏感，浏览器会把 HTTP:// 当作 http:// 处理，因此比较前要先统一转小写，但替换时只换前 7 个字符、其余部分原样保留（第三条断言里 SHOP.COM 的大小写未被改动）。实际工程中这类函数常用于升级历史跳转链接：HTTPS 页面里引用 HTTP 资源会形成「混合内容」被浏览器拦截或降级警告，所以要把地址统一升级到 https。前缀判断用 indexOf(...) === 0 而非 contains 之类的「任意位置匹配」，是因为 ftp://a.http://xxx 这类字符串中协议出现在中间并不代表它就是协议——这与 TLS 验证「必须从证书链根部逐级验起」是同一种严谨。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：TLS 握手单步执行器（纯 DOM 手写，无动画库）
+   阶段机：hello-c → hello-s → cert → verify → exchange → session → done
+   开启「中间人攻击」后，证书被调包为假证书，浏览器在 verify 阶段识破并拒绝连接 */
+(function () {
+  'use strict';
+  var consoleEl = document.getElementById('hs-console');
+  var wireEl = document.getElementById('hs-wire');
+  var clientEl = document.getElementById('hs-client');
+  var clientTagsEl = document.getElementById('hs-client-tags');
+  var serverEl = document.getElementById('hs-server');
+  var serverTagsEl = document.getElementById('hs-server-tags');
+  var certEl = document.getElementById('hs-cert');
+  var certIssuerEl = document.getElementById('hs-cert-issuer');
+  var stepBtn = document.getElementById('hs-step');
+  var mitmBtn = document.getElementById('hs-mitm');
+  var resetBtn = document.getElementById('hs-reset');
+
+  var state = null; // mitm 是否开启 / phase 当前阶段
+
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* 统一渲染两侧面板、证书卡片与传输信道 */
+  function render() {
+    clientEl.classList.remove('is-active', 'is-bad');
+    serverEl.classList.remove('is-active', 'is-bad');
+    certEl.classList.remove('is-fake');
+
+    var p = state.phase;
+    if (p === 'hello-c') clientEl.classList.add('is-active');
+    else if (p === 'hello-s') serverEl.classList.add('is-active');
+    else if (p === 'verify') clientEl.classList.add(state.blocked ? 'is-bad' : 'is-active');
+    else if (p === 'cert') serverEl.classList.add('is-active');
+    else if (p === 'exchange' || p === 'session' || p === 'done') {
+      clientEl.classList.add('is-active');
+      serverEl.classList.add('is-active');
+    }
+    if (state.blocked) clientEl.classList.add('is-bad');
+
+    /* 证书卡片：中间人开启且已进入发证阶段后，显示假证书 */
+    if (state.mitm && state.phaseIdx >= 2) {
+      certEl.classList.add('is-fake');
+      certIssuerEl.textContent = '路人甲（非可信 CA，签名验不过）';
+    } else {
+      certIssuerEl.textContent = '受信任 CA（内置根证书背书）';
+    }
+
+    /* 密钥状态提示 */
+    clientTagsEl.textContent = state.sessionKey
+      ? '已持有会话密钥 K（与服务器一致）'
+      : (state.phaseIdx >= 1 ? '客户端随机数 R1 已生成' : '还没有发起连接');
+    serverTagsEl.textContent = state.sessionKey
+      ? '已持有会话密钥 K（与浏览器一致）'
+      : (state.phaseIdx >= 1 ? '服务端随机数 R2 已生成' : '');
+  }
+
+  function reset() {
+    state = { mitm: false, blocked: false, sessionKey: false, phaseIdx: 0 };
+    mitmBtn.textContent = '制造中间人攻击';
+    stepBtn.disabled = false;
+    wireEl.textContent = '传输信道空闲——还没有报文发出。';
+    wireEl.classList.remove('is-cipher');
+    consoleEl.innerHTML = '';
+    log('初始：浏览器准备访问 shop.com（HTTPS）。点「单步执行」开始 TLS 握手；也可以先点「制造中间人攻击」再握手，看攻击在哪一步被识破。', 'is-muted');
+    render();
+  }
+
+  /* 单步执行：每次只推进握手的一个阶段，观察线上报文的明文/密文变化 */
+  function step() {
+    if (state.blocked) return;
+    var idx = state.phaseIdx;
+
+    if (idx === 0) {
+      wireEl.textContent = '→ ClientHello（明文）：我支持这些加密套件 + 客户端随机数 R1';
+      log('① ClientHello：浏览器报出支持的加密套件，并带一个随机数 R1——此阶段还是明文，没关系，里面没有秘密', 'is-end');
+      state.phaseIdx = 1;
+      state.phase = 'hello-s';
+    } else if (idx === 1) {
+      wireEl.textContent = '← ServerHello（明文）：选定套件（如 TLS_ECDHE_RSA_WITH_AES_128_GCM）+ 服务端随机数 R2';
+      log('② ServerHello：服务器从套件列表里选定一套，回一个随机数 R2——两个随机数稍后都会参与会话密钥的推导', 'is-end');
+      state.phaseIdx = 2;
+      state.phase = 'cert';
+    } else if (idx === 2) {
+      wireEl.textContent = '← Certificate：数字证书（域名、有效期、服务器公钥 S、CA 签名）';
+      if (state.mitm) {
+        log('③ 攻击者把真证书调包成自己的假证书（没有可信 CA 签名）——火漆印对不上，下一步验签见分晓', 'is-end');
+      } else {
+        log('③ 服务器出示数字证书：域名 shop.com、公钥 S、可信 CA 的签名——相当于「公证处盖章的担保卡」', 'is-end');
+      }
+      state.phaseIdx = 3;
+      state.phase = 'verify';
+    } else if (idx === 3) {
+      if (state.mitm) {
+        /* 中间人路径：验签失败，连接被拒（终态） */
+        wireEl.textContent = '✗ 浏览器拒绝连接：证书签名无法通过内置 CA 公钥验证';
+        log('④ 验签失败：浏览器用内置的 CA 公钥核对签名，假证书对不上 → 拦下连接并提示风险（中间人攻击被识破）', 'is-end');
+        log('—— 演示结束。点「重置」关闭攻击再来一遍正常握手；这就是 HTTPS 防调包的核心机制。', 'is-muted');
+        state.blocked = true;
+        state.phase = 'blocked';
+        stepBtn.disabled = true;
+      } else {
+        log('④ 验证通过：签名可信、域名匹配、没过期、没被吊销 → 确认「对面真的是 shop.com」，可以放心用它的公钥', 'is-ok');
+        state.phaseIdx = 4;
+        state.phase = 'exchange';
+      }
+    } else if (idx === 4) {
+      wireEl.textContent = '→ 预主密钥（用公钥 S 加密 → 密文）：只有握着私钥的服务器能解开';
+      wireEl.classList.add('is-cipher');
+      log('⑤ 密钥交换：浏览器生成预主密钥，用证书里的公钥加密后发出——线上是密文，中间人截获也解不开（没有私钥）', 'is-end');
+      state.phaseIdx = 5;
+      state.phase = 'session';
+    } else if (idx === 5) {
+      wireEl.textContent = '⇄ 双方各自推导：会话密钥 K = f(R1, R2, 预主密钥)，再互发 Finished 校验';
+      log('⑥ 会话密钥就绪：双方用「R1 + R2 + 预主密钥」算出同一把 K，全程 K 没有在明文里出现过', 'is-ok');
+      state.sessionKey = true;
+      state.phaseIdx = 6;
+      state.phase = 'done';
+    } else if (idx === 6) {
+      wireEl.textContent = '⇄ 之后所有 HTTP 报文：都用会话密钥 K 对称加密（密文信封）';
+      log('⑦ 握手完成（TLS 1.2 约多花 2 次往返）：进入对称加密通信，又快又稳；TLS 1.3 能把这段压到 1 次往返', 'is-ok');
+      log('—— 演示结束。点「重置」可重新握手，或开启「制造中间人攻击」看识破过程。', 'is-muted');
+      state.phaseIdx = 7;
+      state.phase = 'done';
+      stepBtn.disabled = true;
+    }
+    render();
+  }
+
+  /* 中间人开关：模拟同网段攻击者劫持流量（真正生效在发证书那一步） */
+  function toggleMitm() {
+    state.mitm = !state.mitm;
+    mitmBtn.textContent = state.mitm ? '关闭中间人攻击' : '制造中间人攻击';
+    log(state.mitm
+      ? '（危险）同一 WiFi 里的攻击者开始劫持流量，准备在握手时冒充服务器……'
+      : '攻击已关闭：流量恢复直连服务器。', 'is-muted');
+    render();
+  }
+
+  stepBtn.addEventListener('click', step);
+  mitmBtn.addEventListener('click', toggleMitm);
+  resetBtn.addEventListener('click', reset);
+  reset();
+})();
+</script>
+</body>
+</html>

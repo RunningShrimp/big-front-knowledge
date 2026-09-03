@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>数据库基础与索引 · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ===== 本页动画专用样式：字典查词对比——逐页翻（全表扫描） vs 查目录（索引二分），纯手写 CSS ===== */
+.db-pages { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.db-page {
+  border: 2px solid #cbd5e1; border-radius: 8px; padding: 6px 10px; min-width: 54px;
+  text-align: center; font-size: 14px; background: #fff; transition: border-color .25s, background .25s, opacity .25s, box-shadow .25s;
+}
+.db-page b { display: block; font-size: 11px; font-weight: 700; color: #8a93a6; }
+.db-page.is-active { border-color: #10B981; background: #ecfdf5; box-shadow: 0 0 0 3px rgba(16, 185, 129, .15); }
+.db-page.is-out { opacity: .32; }
+.db-page.is-found { border-color: #c9a34e; background: #fffbeb; box-shadow: 0 0 0 3px rgba(201, 163, 78, .28); }
+</style>
+</head>
+<body data-page="m6-db">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">知识点：数据库基础与索引（建议学习时长约 25 分钟）——关系型与非关系型、SQL 四板斧、B+ 树索引的加速逻辑与代价。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>本页前置依赖：<strong>无，可直接开始</strong>——我们不会假设你写过 SQL，会从「程序为什么需要一个数据库」讲起。懂一点 <a href="../m2/m2-storage.html">浏览器存储</a> 会更有体感（浏览器里也有「迷你数据库」）。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：分小标题推进 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、数据库：断电也不丢的仓库</h3>
+    <p>变量存在内存里，程序一关、电脑一断，数据就没了。凡是需要<strong>留下来</strong>、<strong>下次还在</strong>、<strong>多人共用</strong>的数据（用户注册信息、订单、文章），都要放进一个专门管存储的软件——数据库。它像一座有规矩的仓库：数据怎么摆放、谁先进先出、怎么防止两个人同时改一份货单，它都替你想好了，你只要按它的「语言」下指令。</p>
+
+    <h3>二、两大门派：表格思维与文档思维</h3>
+    <p><strong>关系型数据库</strong>（MySQL、PostgreSQL）把数据摆成一张张二维表格：每行一条记录，每列一个字段，表与表之间靠 id 相互引用。适合数据结构规整、要<strong>多表联查</strong>、对一致性要求高的场景——比如订单、账户余额。
+      <strong>非关系型数据库</strong>（MongoDB 等文档型、Redis 等键值型）则更自由：一条数据就是一份文档（像一个大 JSON）或一个键值对。适合结构多变、读写量巨大的场景——比如商品详情、点赞数缓存。新手先学好关系型：表格思维是地基，其他都是变体。</p>
+
+    <h3>三、SQL 四板斧与 JOIN</h3>
+    <p>操作关系型数据库的语言叫 SQL，日常就是四句：</p>
+<pre><code>INSERT INTO users (name, age) VALUES ('小明', 18);   -- 增
+DELETE FROM users WHERE id = 7;                     -- 删
+UPDATE users SET age = 19 WHERE id = 7;             -- 改
+SELECT name FROM users WHERE age &gt; 18;              -- 查（用得最多）
+
+-- 数据分表存时，用 JOIN 把它们按关联字段拼起来查：
+SELECT o.id, u.name FROM orders o JOIN users u ON o.user_id = u.id;</code></pre>
+    <p>注意「查」是这个家族的绝对主力：页面上的列表、详情、统计，落到后端都是一条条 SELECT。所以下面的问题来了——表里有一百万行，<code>WHERE name = '小明'</code> 怎么才能<strong>不从头翻到尾</strong>？这就是索引登场的地方。</p>
+
+    <h3>四、索引：给查询修一条「直达电梯」</h3>
+    <p>没有索引时，数据库只能<strong>全表扫描</strong>：从第一行逐行问「你是小明吗」，最坏问完一百万行。索引的思路是另建一份<strong>有序的小抄</strong>：只存「字段值 → 行的位置」，并组织成一棵 <strong>B+ 树</strong>。B+ 树的特点是「矮而胖」：每个节点可以有几百上千个分叉（数据按页存放，一个分叉约一次磁盘读），一百万行数据的树通常只有三四层——也就是说，定位任何一行只要三四次 IO，而不是一百万次比较。树的叶子节点还首尾相连成链表，所以「查 18~30 岁的用户」这种<strong>范围查询</strong>可以顺着链表一路扫过去，这是它胜过哈希表的关键。</p>
+
+    <h3>五、索引的代价与失效：目录不是白印的</h3>
+    <p>索引不是免费的午餐：它<strong>占磁盘</strong>；每次写入（增删改）都要顺手维护这棵有序树，<strong>写越多的表，索引越要克制</strong>。而且建了索引也可能用不上——B+ 树靠「值有序」来二分定位，一旦破坏了有序性假设就失效了：对索引列套函数（<code>WHERE UPPER(name) = ...</code>）、以通配符开头的模糊查询（<code>LIKE '%明'</code>）、类型不匹配的隐式转换，都会让数据库放弃索引退回全表扫描。多列联合索引还有「最左前缀」规则：查的时候必须从最左列开始连续命中，跳过最左列就用不上。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 查《新华字典》：目录页 vs 从第一页翻起</div>
+      <p>小新要查「驰」字。他先翻到书前的<strong>部首检字表</strong>：马部 → 三画 → 「在第 782 页」，直接翻过去，三步搞定——这张检字表就是<strong>索引</strong>，它自己按部首、笔画<strong>排好了序</strong>，所以能快速定位。</p>
+      <p>要是没有检字表呢？小新只能从第 1 页开始一页页翻，翻到 782 页才找到——这就是<strong>全表扫描</strong>。字典越厚，逐页翻越可怕；而检字表再厚，多翻几层目录也只要几步——这就是索引把查询从「跟数据量成正比」变成「跟数据量的对数成正比」。</p>
+      <p>但代价也写在字典上：检字表自己占了开头几十页的篇幅（索引占磁盘）；而且每出<strong>新版字典</strong>收录或删掉一个字，检字表都得重新排版（写入变慢）。还有，检字表只对「知道读音/部首」的查法管用——如果你只记得「这字左边一个马、右边也念马」却说不清部首规则，检字表就帮不上忙了，这对应数据库里「破坏有序假设」的模糊查询（<code>LIKE '%明'</code>）同样查不动。类比值了然，结论要记准：<strong>索引加速的是「按有序规则定位」，不是任何查询都能加速。</strong></p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：字典查词对比，逐页翻 vs 查目录二分（可单步 + 自动播放，纯 DOM/CSS/JS 手写） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>一本 8 页的迷你字典，词已按序排好，目标是找「词 31」。切两种查法单步对比，数一数各比较了几次：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">逐页翻 = 全表扫描（一页页问过去）；查目录 = 索引二分（每次砍掉一半范围）。看绿色高亮和灰色淘汰页的变化：</p>
+      <div class="anim-controls" style="margin-bottom: 10px;">
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="db-mode-scan">模式：逐页翻</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="db-mode-index">模式：查目录</button>
+      </div>
+      <div class="db-pages" id="db-pages"></div>
+      <div class="anim-console" id="db-console">
+        <div class="anim-line is-muted">选择一种查法，点击「单步执行」开始…</div>
+      </div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="db-step">单步执行</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="db-auto">自动播放</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="db-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（全部为课程数据中的真实 path） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：无，本页是后端基础线的入口之一，可直接开始。</p>
+    <p><strong>向后延伸</strong>：学会存数据之后，下一步是把「取数据」包装成规范的接口，见<a href="./m6-rest.html">RESTful API 设计</a>（分页、过滤、排序参数最终都会翻译成 SQL）。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="../m2/m2-storage.html">浏览器存储</a> —— IndexedDB 就是浏览器里的「迷你数据库」，事务与索引的思想同源</li>
+      <li><a href="./m6-server.html">HTTP 服务：Express 与 Koa</a> —— 接口层收到请求后执行 SQL，再把数据库吐出的行拼成 JSON 响应</li>
+      <li><a href="../m3/m3-vdom.html">虚拟 DOM 与 Diff</a> —— 列表渲染用 key 定位节点，和索引用有序值定位数据行，是同一个「用标识换速度」的思路</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（mode:'main'，判分写入进度仓库） -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后会把最佳成绩写入进度仓库，并推进复习计划：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：数据库是断电也不丢的仓库，索引就像字典前面的检字表——按排好序的目录直达目标页，不用整本翻；代价是目录也占篇幅，而且每改一个字都要顺手维护目录。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前用纸画一棵 4 层的二分定位过程（8 个数找 1 个数，标出每步砍掉哪一半）；1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：B+ 树选型 + 索引建与不建，答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：MySQL 为什么用 B+ 树做索引，而不是哈希表或红黑树？</summary>
+      <ul>
+        <li>先说硬件前提：数据在磁盘上，按「页」读取，每次读页都是一次昂贵的磁盘 IO，索引设计的核心目标是<strong>减少 IO 次数</strong>。</li>
+        <li>B+ 树矮而胖：单节点可容纳大量分叉（上千），千万级数据树高也只有 3~4 层，定位一行只需 3~4 次 IO；红黑树/二叉树每个节点只有 2 个分叉，树高是几十层，IO 次数不可接受。</li>
+        <li>对比哈希表：哈希等值查询快，但<strong>不支持范围查询与排序</strong>；B+ 树叶子节点有序且串成双向链表，范围扫描顺链表走即可。</li>
+        <li>B+ 树非叶子节点只存索引不存数据，单个节点能装更多键，扇出更大树更矮；叶子层才挂完整数据行（聚簇索引）。</li>
+        <li>加分项：能说出「一个节点约等于一个 16KB 数据页」与「树高等于 IO 次数」这两个量化锚点。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：哪些字段适合建索引？索引有哪些代价与失效场景？</summary>
+      <ul>
+        <li>适合建：WHERE / ORDER BY / JOIN ON 里高频出现的列、区分度高的列（如手机号）；不适合：区分度极低（如性别只有两三个值）、频繁更新或几乎不出现在查询条件的列。</li>
+        <li>代价一：占磁盘空间；代价二：每次增删改都要同步维护 B+ 树，写入变慢——写多读少的表要克制建索引。</li>
+        <li>失效场景：对索引列套函数或运算、<code>LIKE '%xx'</code> 前置通配、类型不匹配导致隐式转换、联合索引不满足最左前缀。</li>
+        <li>排查手段：EXPLAIN 看执行计划是否走了索引（type、key、rows 等列）。</li>
+        <li>加分项：指出「索引加速的是有序定位」，任何破坏有序性假设的写法都会让优化器放弃索引。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm6-db'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'）：题目 id 以知识点 id 开头 */
+  var WARMUP = [{
+    id: 'm6-db-warmup-1',
+    type: 'single',
+    stem: '预热：书架上 100 万本书按编号排好，想快速找到编号 42 万的那本，下面哪种思路最像「索引」？',
+    options: [
+      '从第一本开始一本一本往后翻，直到翻到为止',
+      '先看楼层导览图「40 万~45 万在 3 号区」，走过去再折半定位',
+      '把 100 万本书全部复印一份摆在门口',
+      '每次都请管理员把全馆翻一遍'
+    ],
+    answer: [1],
+    explain: '索引的本质就是「先查一份有序的目录，再按目录位置直达」：导览图缩小了范围（类比 B+ 树的非叶子节点），到了目标区再折半定位（类比节点内二分）。A 是全表扫描，C 会浪费一倍空间还没有检索能力，D 是最慢的全表扫描外包版。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm6-db-q1',
+      type: 'single',
+      stem: 'users 表在 name 列上建了 B+ 树索引，下列哪个查询能高效用上它？',
+      options: [
+        "WHERE name = '小明'",
+        "WHERE name LIKE '%明'",
+        "WHERE UPPER(name) = 'MING'",
+        '以上三个都能同样高效地命中'
+      ],
+      answer: [0],
+      explain: 'B+ 树靠「值有序」做二分定位，等值查询和前缀匹配（LIKE \'明%\'）都能顺着有序树定位到起点。B 的通配符在最前面，起点未知只能全表逐行比；C 对索引列套了函数，数据库要逐行计算才能比较，等于把有序性毁掉了；D 的错误在于把「建了索引」当成「必然用上」——优化器要看查询写法是否保住了有序假设。'
+    },
+    {
+      id: 'm6-db-q2',
+      type: 'single',
+      stem: '关于索引的代价，下列说法正确的是？',
+      options: [
+        '索引只占很少空间，而且能让写入变快，建议每张表的每一列都建',
+        '索引会占额外空间，并让增删改变慢（每次写入都要维护有序树），写多的表要克制建索引',
+        '索引不影响写入性能，只影响查询性能',
+        '只要建了索引，任何查询都一定走索引'
+      ],
+      answer: [1],
+      explain: '索引是一份额外的有序数据结构：读变快是有代价的——占空间，且每次写入都要同步插入/调整这棵树。所以「无脑全列建索引」是典型反模式，写多读少的表尤其要克制。D 也是常见误区：前置通配符模糊查询、对索引列套函数等写法会让优化器放弃索引，建了不等于用上。'
+    },
+    {
+      id: 'm6-db-q3',
+      type: 'code',
+      stem: 'B+ 树的每个节点内部其实是一个有序数组，查找与插入都要先算出「第一个大于目标值的位置」（上界），才能决定往哪棵子树走、插进哪个槽。请实现二分查找上界函数 upperBound(arr, target)：返回最小的下标 i 使得 arr[i] > target；若所有元素都不大于 target，返回 arr.length。要求 O(log n)，不要从头遍历。',
+      stub: 'function upperBound(arr, target) {\n  // 要点：二分查找「上界」\n  // 1. 维护 lo、hi 两个指针，hi 初始为 arr.length（答案可能是越界位置）\n  // 2. mid 元素 > target：mid 可能就是答案，收缩右边界为 mid\n  // 3. mid 元素 <= target：答案一定在 mid 右边，收缩左边界为 mid + 1\n  // 4. 循环结束时 lo 即为答案\n  // （注意与「找到就 return」的经典二分区分：这里找的是边界位置）\n}\n',
+      reference: 'function upperBound(arr, target) {\n  var lo = 0, hi = arr.length; // hi 取 length：答案可能是「所有元素之后」的空位\n  while (lo < hi) {\n    var mid = (lo + hi) >> 1;\n    if (arr[mid] > target) {\n      hi = mid;     // mid 本身可能是答案，不能丢掉，只能排除 mid 之后的区间\n    } else {\n      lo = mid + 1; // mid 及其左侧全部 <= target，答案必在更右\n    }\n  }\n  return lo;\n}',
+      asserts: [
+        'upperBound([2,4,6,8,10], 5) === 2',
+        'upperBound([2,4,6,8,10], 10) === 5',
+        'upperBound([2,4,6,8,10], 0) === 0',
+        'upperBound([7], 7) === 1 && upperBound([], 3) === 0'
+      ],
+      explain: '这道题是 B+ 树节点定位的最小内核。四个断言分别卡住四类边界：目标夹在中间时落在「第一个大于它的槽」（2,4 < 5 < 6，答案是下标 2）；目标等于最大元素或超过全部时返回 arr.length（没有比它大的了）；目标比所有元素小时返回 0（上界在最左）；单元素相等与空数组则验证 hi 初值必须是 length 而不是 length-1。两个最常见的错误：写成 hi = arr.length - 1（丢掉「越界空位」这个合法答案），以及 arr[mid] > target 时写成 hi = mid - 1（mid 可能恰是上界，被误删后答案偏左一位）。真实 B+ 树里，等值查找就是「先算上界，再退一格检查是否恰好等于 target」，插入则直接在上界槽位腾位置——一个 upperBound 函数就是节点内二分的全部。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：字典查词对比——逐页翻（全表扫描） vs 查目录（索引二分），纯 DOM 手写 */
+(function () {
+  'use strict';
+  var PAGES = [3, 7, 12, 19, 25, 31, 44, 50]; // 每页上的「词」，已按序排好
+  var TARGET = 31;                            // 要找的目标词
+  var MODE_NAMES = { scan: '逐页翻（全表扫描）', index: '查目录（索引二分）' };
+
+  var mode = 'scan';  // 当前模式
+  var k = 0;          // 逐页翻模式：当前翻到的页下标
+  var lo = 0;         // 二分模式：候选区间左端
+  var hi = PAGES.length - 1; // 候选区间右端
+  var cmp = 0;        // 比较次数
+  var done = false;   // 是否已找到
+  var timer = null;   // 自动播放定时器
+
+  var pagesEl = document.getElementById('db-pages');
+  var consoleEl = document.getElementById('db-console');
+  var stepBtn = document.getElementById('db-step');
+  var autoBtn = document.getElementById('db-auto');
+  var resetBtn = document.getElementById('db-reset');
+  var scanBtn = document.getElementById('db-mode-scan');
+  var idxBtn = document.getElementById('db-mode-index');
+
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* 渲染 8 页字典：b 里是页码，正文是页上的词；用类名标记状态 */
+  function renderPages() {
+    pagesEl.innerHTML = '';
+    for (var i = 0; i < PAGES.length; i++) {
+      var cell = document.createElement('span');
+      cell.className = 'db-page';
+      cell.id = 'db-page-' + i;
+      cell.innerHTML = '<b>第 ' + (i + 1) + ' 页</b>词 ' + PAGES[i];
+      pagesEl.appendChild(cell);
+    }
+  }
+
+  /* 清除全部高亮/淘汰标记 */
+  function clearMarks() {
+    for (var i = 0; i < PAGES.length; i++) {
+      document.getElementById('db-page-' + i).className = 'db-page';
+    }
+  }
+
+  /* 标记某个页面为当前正在查看 */
+  function markActive(i) {
+    document.getElementById('db-page-' + i).classList.add('is-active');
+  }
+
+  /* 标记某段下标区间为「已淘汰」（二分模式砍掉的范围） */
+  function markOut(from, to) {
+    for (var i = from; i <= to; i++) {
+      document.getElementById('db-page-' + i).classList.add('is-out');
+    }
+  }
+
+  /* 找到目标：金色高亮 + 淘汰其余所有页 */
+  function markFound(i) {
+    clearMarks();
+    for (var j = 0; j < PAGES.length; j++) {
+      if (j !== i) document.getElementById('db-page-' + j).classList.add('is-out');
+    }
+    document.getElementById('db-page-' + i).classList.add('is-found');
+  }
+
+  function stopAuto() {
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+      autoBtn.disabled = false;
+    }
+  }
+
+  /* 单步执行：一次只做「查看一页」或「二分一轮比较」 */
+  function step() {
+    if (done) return;
+    stopAuto();
+    cmp += 1;
+    if (mode === 'scan') {
+      /* 逐页翻：按顺序查看下一页 */
+      markActive(k);
+      if (PAGES[k] === TARGET) {
+        log('第 ' + (k + 1) + ' 页：词 ' + PAGES[k] + ' = 目标 ' + TARGET + '，找到了！共比较 ' + cmp + ' 次', 'is-end');
+        markFound(k);
+        finish('全表扫描共比较 ' + cmp + ' 次');
+      } else {
+        log('第 ' + (k + 1) + ' 页：词 ' + PAGES[k] + ' ≠ ' + TARGET + '，只能继续翻下一页…（已比较 ' + cmp + ' 次）');
+        k += 1;
+      }
+    } else {
+      /* 索引二分：查目录，每次砍掉一半范围 */
+      if (lo > hi) {
+        log('目录区间已空，目标不存在', 'is-end');
+        done = true;
+        return;
+      }
+      var mid = (lo + hi) >> 1;
+      markActive(mid);
+      if (PAGES[mid] === TARGET) {
+        log('查目录：翻到第 ' + (mid + 1) + ' 页，词 ' + PAGES[mid] + ' = 目标 ' + TARGET + '，找到了！共比较 ' + cmp + ' 次', 'is-end');
+        markFound(mid);
+        finish('索引二分共比较 ' + cmp + ' 次');
+      } else if (PAGES[mid] < TARGET) {
+        log('查目录：第 ' + (mid + 1) + ' 页词 ' + PAGES[mid] + ' < ' + TARGET + ' → 目标在右半，淘汰第 1~' + (mid + 1) + ' 页');
+        markOut(0, mid);
+        lo = mid + 1;
+      } else {
+        log('查目录：第 ' + (mid + 1) + ' 页词 ' + PAGES[mid] + ' > ' + TARGET + ' → 目标在左半，淘汰第 ' + (mid + 2) + '~8 页');
+        markOut(mid, PAGES.length - 1);
+        hi = mid - 1;
+      }
+    }
+  }
+
+  /* 收尾：禁用按钮并总结两种复杂度的差距 */
+  function finish(prefix) {
+    done = true;
+    stopAuto();
+    stepBtn.disabled = true;
+    autoBtn.disabled = true;
+    log(prefix + '。数据量翻 1 万倍时：逐页翻最坏比较 100 万次，二分只需约 20 次——这就是索引把 O(n) 降到 O(log n) 的意义', 'is-end');
+  }
+
+  function reset() {
+    stopAuto();
+    k = 0; lo = 0; hi = PAGES.length - 1;
+    cmp = 0; done = false;
+    stepBtn.disabled = false;
+    autoBtn.disabled = false;
+    clearMarks();
+    consoleEl.innerHTML = '';
+    log('已切换为「' + MODE_NAMES[mode] + '」，目标：词 ' + TARGET + '。点击「单步执行」开始…', 'is-muted');
+  }
+
+  function autoPlay() {
+    if (done) return;
+    autoBtn.disabled = true;
+    timer = setInterval(function () {
+      step();
+      if (done) stopAuto();
+    }, 850);
+  }
+
+  scanBtn.addEventListener('click', function () { mode = 'scan'; reset(); });
+  idxBtn.addEventListener('click', function () { mode = 'index'; reset(); });
+  stepBtn.addEventListener('click', step);
+  autoBtn.addEventListener('click', autoPlay);
+  resetBtn.addEventListener('click', reset);
+  renderPages();
+  reset();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>Core Web Vitals 性能指标 · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ========== 本页动画专用样式：模拟网页加载里程碑 + INP/CLS 体验 ========== */
+.cwv-screen {
+  border: 1px solid #c6cede;
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+  margin: 10px 0;
+  min-height: 132px;
+}
+.cwv-banner {
+  background: #e8ecf5;
+  border-radius: 4px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: #6b7488;
+  margin-bottom: 8px;
+}
+.cwv-line {
+  height: 10px;
+  border-radius: 4px;
+  background: #eef1f7;
+  margin: 6px 0;
+  width: 78%;
+}
+.cwv-line--short { width: 52%; }
+#cwv-lines .cwv-line { opacity: 0.3; transition: opacity 0.4s ease; }
+#cwv-lines.is-on .cwv-line { opacity: 1; background: #dfe6f2; }
+.cwv-hero {
+  margin-top: 8px;
+  height: 52px;
+  border-radius: 6px;
+  border: 2px dashed #c6cede;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: #9aa3b8;
+  background: repeating-linear-gradient(45deg, #f4f6fb, #f4f6fb 8px, #eef1f7 8px, #eef1f7 16px);
+}
+.cwv-hero.is-on {
+  border: 2px solid #3fae7c;
+  background: #e4f5ec;
+  color: #1e7a52;
+  font-weight: 600;
+  animation: cwv-pop 0.5s ease;
+}
+@keyframes cwv-pop {
+  0% { transform: scale(0.96); opacity: 0.4; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.cwv-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  margin: 8px 0;
+}
+.cwv-slider-row input { flex: 1; accent-color: #f59e0b; }
+.cwv-badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: #eef1f7; color: #6b7488; }
+.cwv-badge--ok { background: #e4f5ec; color: #1e7a52; }
+.cwv-badge--bad { background: #fdeaea; color: #b3364f; }
+.cwv-meters { display: flex; flex-wrap: wrap; gap: 8px; font-size: 13px; margin: 6px 0; }
+.cwv-meters b { font-family: var(--fg-mono); }
+.cwv-cls-target {
+  transition: transform 0.35s ease;
+  background: #fdf6e3;
+  border: 1px solid #e8d9a8;
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: #8a6d1a;
+}
+</style>
+</head>
+<body data-page="m4-cwv">
+
+<!-- 壳层自动渲染区：site.js 检测到 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">「快不快」不能靠感觉吵架：Google 把网页体验压缩成三大核心指标 LCP / INP / CLS，本页带你像看体检报告一样看懂它们。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>建议先过一遍前置知识：<a href="../m2/m2-reflow.html">重排、重绘与合成层</a>——三大指标里的「卡」和「跳动」，根源大多在渲染层。先知道「改哪些东西会引发重新布局」，再看指标会顺畅很多。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：讲解 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>「快」需要一把统一的尺子</h3>
+    <p>你觉得页面快，我觉得页面卡——感受没法吵架，所以需要统一度量。Core Web Vitals（核心网页指标）就是 Google 定的三把尺子，分别回答三个问题：<strong>主要内容多久看到？点了多久有反应？页面稳不稳？</strong></p>
+
+    <h3>LCP：最大内容绘制，主菜多久端上来</h3>
+    <p>LCP（Largest Contentful Paint）记录从用户开始打开页面，到<strong>视口里最大的那块内容</strong>（通常是首屏大图或大标题块）渲染出来的时刻。它之所以取「最大」元素，是因为用户真正想看的就是它。合格线：<strong>2.5 秒内为良好，超过 4 秒为差</strong>。拖慢 LCP 的常见原因：首屏大图太大、关键资源加载慢、服务端响应慢。</p>
+
+    <h3>INP：交互延迟，叫服务员多久有人应</h3>
+    <p>INP（Interaction to Next Paint）衡量用户<strong>点击、点按、输入</strong>之后，页面给出视觉反馈需要多久，取整个页面生命周期里较差的那几次。合格线：<strong>200 毫秒内为良好，超过 500 毫秒为差</strong>。它差，通常是因为 JS 主线程被「长任务」占住——代码还在算，用户的点击只能排队。INP 已于 2024 年接替早期的 FID 成为正式指标，它比 FID 更严格：不只看「开始响应」，还看「反馈画出来没有」。</p>
+
+    <h3>CLS：累积布局偏移，餐桌会不会突然被挪走</h3>
+    <p>CLS（Cumulative Layout Shift）把页面整个生命周期里所有<strong>意外的内容位移</strong>折算成分数累加，合格线：<strong>0.1 以内为良好，超过 0.25 为差</strong>。典型成因：图片没写宽高（加载后把下方内容顶开）、在已渲染内容顶部插入广告横幅、字体晚到导致文字重排。注意：用户点击后紧接着发生的位移算「用户预期内」，不计入 CLS。</p>
+
+    <h3>用什么测？</h3>
+    <ul>
+      <li><strong>Lighthouse</strong>：浏览器开发工具自带，实验室环境跑分，适合开发期自查。</li>
+      <li><strong>PageSpeed Insights</strong>：输入网址出报告，实验室数据 + 真实用户数据（RUM）各给一份。</li>
+      <li><strong>web-vitals 库</strong>：在真实用户浏览器里采集三个指标并上报，是「线上真相」的来源。</li>
+    </ul>
+    <p>记住一句话：<strong>实验室数据帮你定位问题，真实用户数据告诉你问题有多严重。</strong></p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 一顿饭吃出三大指标</div>
+      <p>你和朋友中午进了一家新开的餐厅（打开网页）。报了人数却半天没人领位（连接、收首字节），你已经开始烦躁；坐下后又等了好一阵，招牌主菜才端上来——<strong>从进门到亲眼看见主菜的那一刻，就是 LCP</strong>，超过 2 分半你就想给差评。</p>
+      <p>你举手叫服务员加双筷子，隔了半秒才有人应声——<strong>从「举手」到「被回应」就是 INP</strong>；如果服务员正忙着备一桌大菜（长任务），所有客人的呼叫都得排队。</p>
+      <p>最气的是你正夹菜，服务员突然把一块立式广告牌塞到你桌边，整张桌子被迫挪了挪——<strong>每一次这种「没预告的挪动」就是一次布局偏移</strong>，CLS 相当于把一整顿饭里所有挪动的「气人程度」加起来打个总分。三项都过关，这家餐厅才算「体验良好」。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：拖动时间轴 + 点击按钮，零外部库 -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>下面模拟打开一家「外卖餐厅」网页：拖动时间轴看加载里程碑（LCP 在 2.6s 出现，故意超标）；再点两个按钮分别体验 INP 与 CLS。</p>
+    <div class="anim-stage">
+      <p class="anim-caption">拖动时间轴推进 0~4 秒，观察页面从白屏到主图出现的过程：</p>
+      <div class="cwv-screen">
+        <div class="cwv-banner" id="cwv-banner">白屏中……（正在连接）</div>
+        <div id="cwv-lines">
+          <div class="cwv-line"></div>
+          <div class="cwv-line cwv-line--short"></div>
+        </div>
+        <div class="cwv-hero" id="cwv-hero">招牌主图（LCP 候选元素）</div>
+      </div>
+      <div class="cwv-slider-row">
+        <span>时间轴</span>
+        <input type="range" id="cwv-clock" min="0" max="40" step="1" value="0" aria-label="模拟加载时间轴">
+        <b id="cwv-clock-val">0.0s</b>
+      </div>
+      <div class="cwv-meters">
+        <span>LCP：<b id="cwv-lcp-val">—</b> <span id="cwv-lcp-badge" class="cwv-badge">待主图出现</span></span>
+        <span>CLS：<b id="cwv-cls-val">0.00</b></span>
+      </div>
+      <div class="anim-console" id="cwv-console">
+        <div class="anim-line is-muted">拖动时间轴，或点击下方按钮开始体验…</div>
+      </div>
+      <div class="cwv-cls-target" id="cwv-cls-target">正文内容区（点「插入广告」观察被下推）</div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="cwv-inp-btn">模拟一次点击（体验 INP）</button>
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="cwv-ad-btn">插入一条广告（体验 CLS）</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="cwv-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接 -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="../m2/m2-reflow.html">重排、重绘与合成层</a>——LCP 卡在「绘制」这一步，CLS 本质上是一次计划外的重排，先懂渲染再懂指标。</p>
+    <p><strong>向后延伸</strong>：指标只是「诊断书」，接下来学<a href="./m4-load.html">首屏与资源加载优化</a>去拉低 LCP；再用<a href="./m4-monitor.html">前端监控与错误上报</a>把真实用户的指标采集回来。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="../m2/m2-pipeline.html">浏览器渲染流水线</a> —— LCP 发生在「绘制」之后，理解流水线才知道时间都花在哪</li>
+      <li><a href="../m2/m2-reflow.html">重排、重绘与合成层</a> —— CLS 的每一次偏移，背后都是一次强制重排</li>
+      <li><a href="./m4-monitor.html">前端监控与错误上报</a> —— web-vitals 采集到的指标如何批量上报、怎么用 sendBeacon</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（mode:'main'） -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后把最佳成绩写入进度仓库（见页面底部内联脚本）：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：Core Web Vitals 就是给网页做体检的三大项——主菜多久端上来（LCP）、叫服务员多久有人应（INP）、餐桌会不会突然被挪走（CLS），三项都不差，用户才觉得这个网站「又快又稳」。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前复述 1 次，1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：说说 LCP、INP、CLS 分别衡量什么？合格线是多少？怎么优化？</summary>
+      <ul>
+        <li>LCP：视口内最大内容元素渲染完成的时刻，≤2.5s 良好；优化方向是压缩/预加载首屏大图、提升服务端响应、减少关键资源阻塞。</li>
+        <li>INP：用户交互到界面给出视觉反馈的耗时，≤200ms 良好；优化方向是拆分长任务（切片执行）、减少主线程长计算、延迟非紧急逻辑。</li>
+        <li>CLS：所有意外布局偏移的累积分数，≤0.1 良好；优化方向是图片/视频写死宽高、不往已渲染内容上方插东西、字体用尺寸接近的兜底。</li>
+        <li>加分项：提到「实验室数据（Lighthouse）与真实用户数据（RUM / web-vitals 上报）」两条测量路径的区别。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：Lighthouse 跑分很高，但用户反馈页面很慢，可能是什么原因？</summary>
+      <ul>
+        <li>Lighthouse 是实验室数据：固定设备、固定网络、单次采样；用户实际处在各式手机与弱网环境里。</li>
+        <li>真实用户分布广：低端机、跨洋网络、首次访问无缓存，都会比实验室慢得多，应以 RUM（真实用户监控）为准。</li>
+        <li>采样差异：实验室只测「首开」，真实用户还会遇到运行中的卡顿（INP、CLS 是整个生命周期统计）。</li>
+        <li>结论表述：两份数据各司其职——实验室用来复现和定位，真实数据用来衡量影响面与优化收益。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm4-cwv'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'） */
+  var WARMUP = [{
+    id: 'm4-cwv-warmup-1',
+    type: 'single',
+    stem: '预热：下面哪一项不属于 Core Web Vitals 三大核心指标？',
+    options: ['LCP（最大内容绘制）', 'INP（交互延迟）', 'CLS（累积布局偏移）', 'TTFB（首字节时间）'],
+    answer: [3],
+    explain: '三大核心指标是 LCP、INP、CLS。TTFB 是重要的网络性能指标，也影响 LCP，但它不在 Core Web Vitals 之列。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm4-cwv-q1',
+      type: 'single',
+      stem: '关于 LCP（最大内容绘制），下面哪个说法是正确的？',
+      options: [
+        '它衡量的是服务器返回第一个字节的时间',
+        '它记录视口内最大的内容元素被渲染出来的时刻，2.5 秒内为良好',
+        '它统计首屏图片的数量，图片越少分越高',
+        '它只在页面完全加载完成后才产生一次评分'
+      ],
+      answer: [1],
+      explain: 'LCP 锁定「视口里最大的那块内容」（常见为首屏大图、大标题块），记录它渲染出来的时刻，2.5s 内良好、超 4s 为差。A 描述的是 TTFB；C、D 均不符合定义。'
+    },
+    {
+      id: 'm4-cwv-q2',
+      type: 'multi',
+      stem: '下面哪些做法会拉高 CLS（累积布局偏移）？',
+      options: [
+        '图片不写宽高，加载后把下方内容顶开',
+        '在已经渲染出来的正文上方动态插入一条广告横幅',
+        '给图片预先写死 width 和 height 属性',
+        '网页字体晚到，替换兜底字体后文字重新排版'
+      ],
+      answer: [0, 1, 3],
+      explain: 'A、B、D 都是「用户没有预期」的位移，会累计偏移分数；C 恰恰是防 CLS 的标准做法——浏览器提前知道占多大空间，加载后不再顶开内容。'
+    },
+    {
+      id: 'm4-cwv-q3',
+      type: 'code',
+      stem: '实现简化版 CLS 计算函数 sumCls(entries)：entries 是布局偏移记录数组，每条形如 { value: 0.1, hadRecentInput: false }。规则：用户输入后紧接着发生的偏移（hadRecentInput 为 true）是「用户预期的」，不计入；请返回所有意外偏移的 value 之和。',
+      stub: 'function sumCls(entries) {\n  // 在此实现：累加所有 hadRecentInput 为 false 的 value\n  // 提示：用循环逐条判断，把符合条件的 value 加到一个累计变量上\n}\n',
+      reference: 'function sumCls(entries) {\n  var total = 0;\n  for (var i = 0; i < entries.length; i++) {\n    if (!entries[i].hadRecentInput) {\n      total += entries[i].value; // 只有「意外偏移」才计入总分\n    }\n  }\n  return total;\n}',
+      asserts: [
+        'Math.abs(sumCls([{ value: 0.1, hadRecentInput: false }, { value: 0.2, hadRecentInput: false }]) - 0.3) < 1e-9',
+        'sumCls([{ value: 0.25, hadRecentInput: true }, { value: 0.05, hadRecentInput: false }]) === 0.05',
+        'sumCls([]) === 0'
+      ],
+      explain: '核心规则只有一条：hadRecentInput 为 true 的偏移是用户点了按钮后「自己造成的」，不计分。真实浏览器的 CLS 算法还引入了「会话窗口」（取 5 秒窗口内的最大值而非全程简单求和，避免少数大偏移被多次小偏移稀释），这里用求和帮你抓住「忽略预期偏移」这个主干。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库 */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：拖动时间轴观察加载里程碑，点按钮体验 INP / CLS（纯手写 DOM，无动画库） */
+(function () {
+  'use strict';
+  var LCP_AT = 2.6;              // 演示设定：主图在第 2.6 秒出现（故意超 2.5s 红线）
+  var clockEl = document.getElementById('cwv-clock');
+  var clockVal = document.getElementById('cwv-clock-val');
+  var consoleEl = document.getElementById('cwv-console');
+  var bannerEl = document.getElementById('cwv-banner');
+  var linesEl = document.getElementById('cwv-lines');
+  var heroEl = document.getElementById('cwv-hero');
+  var lcpVal = document.getElementById('cwv-lcp-val');
+  var lcpBadge = document.getElementById('cwv-lcp-badge');
+  var clsVal = document.getElementById('cwv-cls-val');
+  var clsTarget = document.getElementById('cwv-cls-target');
+  var inpBtn = document.getElementById('cwv-inp-btn');
+  var adBtn = document.getElementById('cwv-ad-btn');
+  var resetBtn = document.getElementById('cwv-reset');
+
+  var logged = {};   // 里程碑是否已打印（拖动时防止重复输出）
+  var clsScore = 0;  // 累积布局偏移得分（演示用简化值）
+  var shiftStep = 0; // 已插入广告的次数，决定下推距离
+
+  /* 向控制台追加一行日志并自动滚到底 */
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* 时间轴推进：滑块 0~40 映射到 0.0~4.0 秒，逐个检查里程碑 */
+  function onClock() {
+    var t = Number(clockEl.value) / 10;
+    clockVal.textContent = t.toFixed(1) + 's';
+    if (t >= 0.3 && !logged.dns) {
+      logged.dns = true;
+      bannerEl.textContent = '顶部横幅（骨架占位中）';
+      log('0.3s 连接建立、收到首字节，页面脱离白屏，进入骨架占位状态', 'is-ok');
+    }
+    if (t >= 1.2 && !logged.text) {
+      logged.text = true;
+      linesEl.classList.add('is-on');
+      log('1.2s 标题与文字渲染出来，但用户最想看的主图还没到');
+    }
+    if (t >= LCP_AT && !logged.lcp) {
+      logged.lcp = true;
+      heroEl.classList.add('is-on');
+      lcpVal.textContent = LCP_AT.toFixed(1) + 's';
+      log('2.6s 招牌主图渲染完成——它是视口里最大的元素，被记为 LCP');
+      lcpBadge.textContent = '2.6s 超过 2.5s 红线 ✗';
+      lcpBadge.className = 'cwv-badge cwv-badge--bad';
+      log('LCP = 2.6s 判为「需改进」。优化方向：压缩首屏大图、提前加载关键资源', 'is-end');
+    }
+  }
+
+  /* INP 体验：点击后模拟主线程被长任务占用，320ms 后才给出视觉反馈 */
+  inpBtn.addEventListener('click', function () {
+    log('用户点击按钮，但主线程正被一个长任务占用，反馈只能排队…', 'is-muted');
+    inpBtn.disabled = true;
+    setTimeout(function () {          // 演示用真实定时器模拟长任务结束
+      inpBtn.disabled = false;
+      inpBtn.classList.add('is-flash');
+      setTimeout(function () { inpBtn.classList.remove('is-flash'); }, 400);
+      log('320ms 后按钮才变色给出反馈：INP = 320ms，超过 200ms 红线 ✗（真实站点要把长任务切片）', 'is-end');
+    }, 320);
+  });
+
+  /* CLS 体验：往已渲染内容上方插广告，正文被下推，累计偏移分数 */
+  adBtn.addEventListener('click', function () {
+    shiftStep += 1;
+    clsScore += 0.2;                  // 每次插入记 0.2 分（演示用简化值）
+    clsTarget.style.transform = 'translateY(' + (shiftStep * 46) + 'px)';
+    clsVal.textContent = clsScore.toFixed(2);
+    log('已渲染内容上方插入广告，正文被强行下推 → 本次偏移 +0.20，累计 CLS = ' +
+      clsScore.toFixed(2) + (clsScore > 0.1 ? '，超过 0.1 红线 ✗' : ''), 'is-end');
+  });
+
+  /* 重置：清空里程碑记录与所有视觉状态 */
+  resetBtn.addEventListener('click', function () {
+    logged = {};
+    clsScore = 0;
+    shiftStep = 0;
+    clockEl.value = 0;
+    clockVal.textContent = '0.0s';
+    bannerEl.textContent = '白屏中……（正在连接）';
+    linesEl.classList.remove('is-on');
+    heroEl.classList.remove('is-on');
+    clsTarget.style.transform = 'none';
+    lcpVal.textContent = '—';
+    lcpBadge.textContent = '待主图出现';
+    lcpBadge.className = 'cwv-badge';
+    clsVal.textContent = '0.00';
+    consoleEl.innerHTML = '';
+    log('已重置。拖动时间轴重新体验…', 'is-muted');
+  });
+
+  linesEl.classList.remove('is-on'); // 初始隐藏文字行
+  clockEl.addEventListener('input', onClock);
+})();
+</script>
+</body>
+</html>

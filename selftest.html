@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>判题引擎自测 · 前端领航员</title>
+<link rel="stylesheet" href="assets/css/site.css">
+</head>
+<body>
+<!-- 本页直接驱动 QuizEngine / ProgressStore 做冒烟自测，不依赖真实课程数据；
+     自测会临时占用本地进度数据（开始前备份、结束后自动恢复）。 -->
+<header class="fg-header">
+  <div class="fg-crumb">
+    <a href="index.html">学习地图</a>
+    <span class="fg-crumb-sep">/</span>
+    <strong>判题引擎自测</strong>
+  </div>
+  <div class="fg-header-nav"><span id="sound-slot"></span></div>
+</header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">共 7 个用例，直接驱动 QuizEngine 与 ProgressStore（可 mock 时间与容器，不依赖真实课程数据）。自测期间会临时占用本地进度数据，结束后自动恢复原状。</p>
+
+  <section class="fg-card">
+    <h2>自测结果 <span id="fg-summary" class="fg-muted"></span></h2>
+    <div id="fg-case-list"></div>
+  </section>
+
+  <!-- 判题组件的真实挂载区：移出视口但保持渲染，保证 iframe / 表单可被脚本驱动 -->
+  <div class="fg-selftest-stage" id="fg-stage" aria-hidden="true"></div>
+</main>
+
+<footer class="fg-footer">
+  <p>前端领航员 · 纯静态本地学习站 —— 无网络请求，数据仅存于本机浏览器 localStorage。</p>
+</footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="assets/data/curriculum.js"></script>
+<script src="assets/js/progress-store.js"></script>
+<script src="assets/js/quiz-engine.js"></script>
+<script src="assets/js/site.js"></script>
+<script>
+/* 自测用例（页面内联脚本）：逐条运行并渲染「用例名 + PASS/FAIL + 说明」 */
+(function () {
+  'use strict';
+  var DAY = 24 * 60 * 60 * 1000;
+  var stage = document.getElementById('fg-stage');
+  var listHost = document.getElementById('fg-case-list');
+  var esc = window.FG ? FG.esc : function (s) { return String(s); };
+  var backup = {}; // 自测前的用户数据备份
+
+  /* ---------- 数据备份 / 恢复（避免污染真实学习进度） ---------- */
+  function backupStorage() {
+    ['feguide:progress', 'feguide:wrongbook'].forEach(function (k) {
+      try { backup[k] = window.localStorage.getItem(k); } catch (e) { backup[k] = null; }
+    });
+  }
+  function restoreStorage() {
+    Object.keys(backup).forEach(function (k) {
+      try {
+        if (backup[k] === null) window.localStorage.removeItem(k);
+        else window.localStorage.setItem(k, backup[k]);
+      } catch (e) { /* 忽略 */ }
+    });
+  }
+
+  /* ---------- 用例工具 ---------- */
+  function mkBox() {
+    var box = document.createElement('div');
+    box.className = 'selftest-box';
+    stage.appendChild(box);
+    return box;
+  }
+  function clickOption(box, idx) {
+    var inputs = box.querySelectorAll('.quiz-options input');
+    if (inputs[idx]) inputs[idx].click();
+  }
+  function submitChoice(box) {
+    var btn = box.querySelector('.quiz-actions button');
+    if (btn) btn.click();
+  }
+
+  /* ---------- 用例定义（覆盖：单选对/错、多选部分选对、错题本、遗忘曲线、沙箱通过/失败、沙箱降级） ---------- */
+  var cases = [
+    {
+      name: '① 单选判分：答对得满分',
+      desc: '勾选正确项并提交，期望 score=1/1 且解析展开。',
+      run: function () {
+        ProgressStore.resetAll();
+        var box = mkBox();
+        var r = QuizEngine.mount(box, [{
+          id: 'st-single-ok', type: 'single',
+          stem: '自测：JS 中声明一个不可重新赋值的绑定，用哪个关键字？',
+          options: ['var', 'const', 'let'], answer: [1],
+          explain: 'const 声明的绑定不可重新赋值。'
+        }], { pageId: 'selftest-page', mode: 'main' });
+        clickOption(box, 1);
+        submitChoice(box);
+        var explain = box.querySelector('.quiz-explain');
+        var ok = r.score === 1 && r.total === 1 && explain && !explain.hidden;
+        return { pass: ok, note: 'score=' + r.score + '/' + r.total + '，解析' + (explain && !explain.hidden ? '已展开' : '未展开') };
+      }
+    },
+    {
+      name: '② 单选判分：答错得 0 分并写入错题本',
+      desc: '故意选错，期望 score=0/1，且错题本出现该题（含 3 天重测间隔）。',
+      run: function () {
+        ProgressStore.resetAll();
+        var box = mkBox();
+        var r = QuizEngine.mount(box, [{
+          id: 'st-single-bad', type: 'single',
+          stem: '自测：1 + "1" 的结果是？',
+          options: ['2', '"11"', 'NaN'], answer: [1],
+          explain: '字符串拼接得 "11"。'
+        }], { pageId: 'selftest-page', mode: 'main' });
+        clickOption(box, 0);
+        submitChoice(box);
+        var hit = ProgressStore.wrongList().some(function (w) { return w.qid === 'st-single-bad'; });
+        var gapOk = ProgressStore.wrongList().every(function (w) {
+          return (w.nextRetryAt - w.ts) === 3 * DAY;
+        });
+        var ok = r.score === 0 && r.total === 1 && hit && gapOk;
+        return { pass: ok, note: 'score=' + r.score + '/' + r.total + '，错题本' + (hit ? '已收录' : '未收录') + (gapOk ? '，重测间隔 3 天正确' : '，重测间隔异常') };
+      }
+    },
+    {
+      name: '③ 多选判分：部分选对判错',
+      desc: '正确答案为两项，只选对其中一项，期望判错（score=0/1）。',
+      run: function () {
+        ProgressStore.resetAll();
+        var box = mkBox();
+        var r = QuizEngine.mount(box, [{
+          id: 'st-multi', type: 'multi',
+          stem: '自测：下列哪些是 JS 原始类型？',
+          options: ['number', 'object', 'string'], answer: [0, 2],
+          explain: 'object 是引用类型。'
+        }], { pageId: 'selftest-page', mode: 'main' });
+        clickOption(box, 0); // 只选对一半
+        submitChoice(box);
+        var ok = r.score === 0 && r.total === 1;
+        return { pass: ok, note: '部分选对时 score=' + r.score + '/' + r.total + '（应判错）' };
+      }
+    },
+    {
+      name: '④ 错题本：写入与移除',
+      desc: '直接驱动 ProgressStore：写入后能查到、nextRetryAt=ts+3 天，移除后为空。',
+      run: function () {
+        ProgressStore.resetAll();
+        var entry = ProgressStore.addWrong({
+          qid: 'st-w1', pageId: 'p-x', type: 'single',
+          stem: '题干', options: ['A 选项'], answer: [0], explain: '解析'
+        });
+        var list1 = ProgressStore.wrongList();
+        var gapOk = (entry.nextRetryAt - entry.ts) === 3 * DAY;
+        var removed = ProgressStore.removeWrong('st-w1');
+        var list2 = ProgressStore.wrongList();
+        var ok = list1.length === 1 && gapOk && removed === true && list2.length === 0;
+        return { pass: ok, note: '写入 ' + list1.length + ' 条；nextRetryAt-ts=' + ((entry.nextRetryAt - entry.ts) / DAY) + ' 天；移除后剩 ' + list2.length + ' 条' };
+      }
+    },
+    {
+      name: '⑤ 遗忘曲线：dueList 到期计算（mock 时间）',
+      desc: '注入模拟时钟：首次访问后 1 天间隔未到期，快进 2 天后进入到期列表。',
+      run: function () {
+        ProgressStore.resetAll();
+        var base = Date.now();
+        try {
+          ProgressStore._setClock(function () { return base; }); // mock 当前时间
+          ProgressStore.visit('p-due'); // 首次访问 → 下次复习 = base + 1 天
+          var rec = ProgressStore.get('p-due');
+          var notDueYet = ProgressStore.dueList().indexOf('p-due') < 0;
+          ProgressStore._setClock(function () { return base + 2 * DAY; }); // 快进 2 天
+          var dueNow = ProgressStore.dueList().indexOf('p-due') >= 0;
+          var gapOk = rec.nextReviewAt === base + DAY; // 间隔表 [1,3,7,14,30]，首次复习后 +1 天
+          var ok = notDueYet && dueNow && gapOk;
+          return { pass: ok, note: '1 天后未到期=' + notDueYet + '；2 天后到期=' + dueNow + '；首次间隔=' + ((rec.nextReviewAt - base) / DAY) + ' 天' };
+        } finally {
+          ProgressStore._setClock(null); // 还原真实时钟
+        }
+      }
+    },
+    {
+      name: '⑥ 代码题：沙箱断言通过 + 失败（异步）',
+      desc: '用户代码只满足 2 条断言中的 1 条，期望逐条展示 1 通过 1 失败。',
+      run: function () {
+        ProgressStore.resetAll();
+        var box = mkBox();
+        var r = QuizEngine.mount(box, [{
+          id: 'st-code', type: 'code',
+          stem: '自测：实现 sum(a, b) 返回两数之和。',
+          stub: 'function sum(a, b) {\n  // 在此作答\n}\n',
+          reference: 'function sum(a, b) {\n  return a + b;\n}',
+          asserts: ['sum(1, 2) === 3', 'sum(2, 2) === 5']
+        }], { pageId: 'selftest-page', mode: 'main' });
+        var ta = box.querySelector('.quiz-code-input');
+        if (!ta) return { pass: false, note: '未找到代码作答区（.quiz-code-input）' };
+        ta.value = 'function sum(a, b) {\n  return a + b;\n}'; // 满足断言 1、不满足断言 2
+        var runBtn = box.querySelector('.quiz-actions button');
+        if (runBtn) runBtn.click();
+
+        return new Promise(function (resolve) {
+          var settled = false;
+          function finish(res) {
+            if (settled) return;
+            settled = true;
+            var passRows = box.querySelectorAll('.quiz-assert--pass').length;
+            var failRows = box.querySelectorAll('.quiz-assert--fail').length;
+            var ok = passRows === 1 && failRows === 1 && res.score === 0 && res.total === 1;
+            resolve({
+              pass: ok,
+              note: '断言通过 ' + passRows + ' 条 / 失败 ' + failRows + ' 条，score=' + res.score + '/' + res.total
+            });
+          }
+          r.whenReady(function (res) { finish(res); });
+          setTimeout(function () {
+            finish({ score: -1, total: 1, note: '' }); // 兜底超时（沙箱长时间无回执）
+          }, 8000);
+        });
+      }
+    },
+    {
+      name: '⑦ 代码题：沙箱不可用自动降级',
+      desc: '覆写 _isSandboxAvailable 模拟 sandbox 属性检测失败，期望出现参考实现 + 自评按钮。',
+      run: function () {
+        ProgressStore.resetAll();
+        var original = QuizEngine._isSandboxAvailable;
+        QuizEngine._isSandboxAvailable = function () { return false; }; // 模拟检测失败
+        try {
+          var box = mkBox();
+          var r = QuizEngine.mount(box, [{
+            id: 'st-code-dg', type: 'code',
+            stem: '自测（降级）：实现 sum(a, b)。',
+            stub: '', reference: 'function sum(a, b) {\n  return a + b;\n}',
+            asserts: ['sum(1, 2) === 3']
+          }], { pageId: 'selftest-page', mode: 'main' });
+          var dg = box.querySelector('.quiz-degrade');
+          var ref = box.querySelector('.quiz-reference');
+          var btns = box.querySelectorAll('.quiz-degrade-actions button');
+          if (btns[0]) btns[0].click(); // 自评「已掌握」→ 计 1 分
+          var ok = !!dg && !!ref && btns.length === 2 && r.score === 1 && r.total === 1;
+          return { pass: ok, note: '降级面板' + (dg ? '已出现' : '未出现') + '，自评按钮 ' + btns.length + ' 个；自评「已掌握」后 score=' + r.score + '/' + r.total };
+        } finally {
+          QuizEngine._isSandboxAvailable = original; // 还原真实检测
+        }
+      }
+    }
+  ];
+
+  /* ---------- 逐条运行并渲染 ---------- */
+  function renderRow(c) {
+    var row = document.createElement('div');
+    row.className = 'fg-test-row';
+    row.innerHTML =
+      '<div class="fg-test-head"><span class="fg-test-status is-running">运行中…</span>' +
+      '<span class="fg-test-name">' + esc(c.name) + '</span></div>' +
+      '<p class="fg-test-note">' + esc(c.desc || '') + '</p>';
+    listHost.appendChild(row);
+    return row;
+  }
+
+  function finishRow(row, c, out) {
+    var status = row.querySelector('.fg-test-status');
+    status.textContent = out.pass ? 'PASS' : 'FAIL';
+    status.classList.remove('is-running');
+    status.classList.add(out.pass ? 'is-pass' : 'is-fail');
+    row.querySelector('.fg-test-note').textContent =
+      (c.desc ? c.desc + ' ' : '') + out.note;
+  }
+
+  function runAll() {
+    backupStorage();
+    ProgressStore.resetAll(); // 从干净状态开始（结束后统一恢复备份）
+    var passN = 0;
+    var doneN = 0;
+    var total = cases.length;
+
+    function tryRestore() {
+      if (doneN === total) restoreStorage();
+    }
+
+    cases.forEach(function (c) {
+      var row = renderRow(c);
+      var p;
+      try {
+        p = Promise.resolve(c.run());
+      } catch (e) {
+        p = Promise.resolve({ pass: false, note: '用例同步抛出异常：' + (e && e.message || e) });
+      }
+      p.then(function (out) {
+        finishRow(row, c, out);
+        if (out.pass) passN += 1;
+        doneN += 1;
+        document.getElementById('fg-summary').textContent = '—— ' + passN + ' / ' + total + ' 项通过';
+        tryRestore();
+      }).catch(function (e) {
+        finishRow(row, c, { pass: false, note: '用例抛出异常：' + (e && e.message || e) });
+        doneN += 1;
+        tryRestore();
+      });
+    });
+  }
+
+  /* ---------- 启动 ---------- */
+  runAll();
+  var slot = document.getElementById('sound-slot');
+  if (slot && window.FG) slot.appendChild(FG.sound.button());
+})();
+</script>
+</body>
+</html>

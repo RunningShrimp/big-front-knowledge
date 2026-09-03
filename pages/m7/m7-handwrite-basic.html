@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>手写题·JS 基础篇（防抖节流、深拷贝、柯里化） · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ===== 本页动画专用样式：克隆羊递归复制演示，纯手写 CSS，无任何外部库 ===== */
+.clo-board {
+  display: flex; gap: 14px; flex-wrap: wrap; margin: 12px 0;
+}
+.clo-side {
+  flex: 1 1 240px; min-width: 240px;
+  border: 2px solid #d5dbe7; border-radius: 10px; background: #f7f9fc; padding: 10px;
+}
+.clo-side.is-origin { border-color: #e0813d; background: #fff8f1; }
+.clo-side.is-clone { border-color: #4C6FFF; background: #f5f7ff; }
+.clo-side-title { font-weight: 700; font-size: 13px; margin-bottom: 8px; }
+.clo-side.is-origin .clo-side-title { color: #b35f1e; }
+.clo-side.is-clone .clo-side-title { color: #3450d6; }
+.clo-root {
+  border: 2px solid #8a93a6; border-radius: 8px; background: #fff; padding: 8px;
+  transition: border-color .3s, box-shadow .3s;
+}
+.clo-root.is-hot { border-color: #4C6FFF; box-shadow: 0 0 0 3px rgba(76, 111, 255, .22); }
+.clo-root-label { font-weight: 700; font-size: 13px; color: #2b3a55; margin-bottom: 6px; }
+.clo-box {
+  border: 2px dashed #b7c0d4; border-radius: 8px; background: #fbfcfe; padding: 6px 8px; margin: 6px 0;
+  transition: border-color .3s, background .3s;
+}
+.clo-box.is-hot { border-color: #4C6FFF; background: #eef2ff; box-shadow: 0 0 0 3px rgba(76, 111, 255, .18); }
+.clo-box.is-empty { border-style: dotted; opacity: .7; }
+.clo-box-label { font-size: 12px; font-weight: 700; color: #5b6680; margin-bottom: 4px; }
+.clo-leaf {
+  font-size: 12px; color: #2b3a55; background: #eef2f7; border-radius: 6px;
+  padding: 3px 8px; margin: 3px 0; font-family: ui-monospace, Menlo, monospace;
+  transition: background .3s, color .3s;
+}
+.clo-leaf.is-hot { background: #4C6FFF; color: #fff; }
+.clo-leaf.is-empty { background: #f1f3f8; color: #c2c9d6; }
+.clo-leaf.is-mutated { background: #fdeeee; color: #c2454f; }
+.clo-controls { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+</style>
+</head>
+<body data-page="m7-handwrite-basic">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">知识点：手写题·JS 基础篇（建议学习时长约 30 分钟）——防抖与节流、递归深拷贝、柯里化，以及手写题通用套路：先确认边界，再写主干，最后补防御。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>本页前置依赖：<a href="../../pages/m1/m1-js-scope.html">JS 类型、作用域与闭包</a>——防抖节流的定时器、柯里化的参数收集，全靠闭包存住现场；
+      <a href="../../pages/m4/m4-runtime.html">运行时优化：防抖、节流与计算缓存</a>——先把「什么时候用」想清楚，再来「怎么写」。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：分小标题推进 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、手写题通用套路：先打灯，再起步，最后靠边</h3>
+    <p>手写题挂掉的人，多半不是「不会写」，而是<strong>上来就写</strong>。通用的三步节奏是：</p>
+    <ul>
+      <li><strong>第一步 · 确认边界</strong>：动笔前先和面试官对齐需求——「深拷贝需要处理 Map/Set 吗？数据里有循环引用吗？防抖要支持立即执行吗？」这一步既是收集信息，也是展示工程素养，说一句「我先确认一下边界」面试官印象分立刻上来。</li>
+      <li><strong>第二步 · 主干逻辑</strong>：先写出能覆盖最常见场景的最小实现（对象递归、定时器关闭重开、参数收集），别追求一步到位。</li>
+      <li><strong>第三步 · 补防御</strong>：回头补 null 判断、原型链属性、取消功能等边界，边补边讲「这里如果不处理会发生什么」。</li>
+    </ul>
+
+    <h3>二、防抖与节流：闭包是它们的发动机</h3>
+    <p>两个词解决的是同一个问题——<strong>事件触发太频繁</strong>，但策略相反：</p>
+    <ul>
+      <li><strong>防抖（debounce）</strong>：等触发停止后再执行。每次触发都重置定时器，只有「安静满 wait 毫秒」才真正执行。适合<strong>等用户停下来</strong>的场景：搜索框输入联想、窗口 resize 后重算布局。</li>
+      <li><strong>节流（throttle）</strong>：固定频率执行。不管触发多密，每 wait 毫秒最多执行一次。适合<strong>持续动作保底频率</strong>的场景：滚动加载、拖拽跟随、鼠标移动。</li>
+    </ul>
+    <pre><code>function debounce(fn, wait) {
+  var timer = null;                  // 闭包变量：定时器被「关」在返回函数的作用域里
+  return function () {
+    var args = arguments;
+    clearTimeout(timer);             // 每次触发：先拆掉上一次的闹钟
+    timer = setTimeout(function () { // 再设一个新闹钟——只有连续 wait 毫秒没人触发才会响
+      fn.apply(this, args);
+    }, wait);
+  };
+}</code></pre>
+    <p>为什么必须用闭包？因为 <code>timer</code> 要<strong>跨越多次调用存活</strong>：外部每次触发拿到的是同一个返回函数，它记得上一次的闹钟，才能拆掉重设。如果 timer 写在函数内部，每次触发都新建一个，等于每次都拆自己的新闹钟，防抖就失效了。进阶版加两个能力：<code>immediate</code>（第一次立即执行，之后才进入等待）和 <code>cancel</code>（返回一个取消函数，清掉定时器）。</p>
+
+    <h3>三、深拷贝：递归与「为什么 JSON 那招不够」</h3>
+    <p>先弄清「浅」与「深」：赋值和 <code>Object.assign</code> 只复制第一层——第一层如果是对象，复制过去的只是<strong>引用地址</strong>，改克隆体内部，原件照样受伤，这是浅拷贝。
+      深拷贝要<strong>递归</strong>：遇到对象就新建一个空对象，遇到数组就新建空数组，然后逐个成员继续问「你是基本类型还是引用类型」，直到全是基本类型为止。
+      很多人用 <code>JSON.parse(JSON.stringify(obj))</code> 应付——它能处理纯数据对象，但有硬伤：函数和 <code>undefined</code> 直接消失、<code>Date</code> 变成字符串、<code>RegExp</code> 变空对象、<code>Map/Set</code> 变空壳、遇到<strong>循环引用</strong>直接抛错。所以面试要求手写时，用的是递归版：</p>
+    <ul>
+      <li><strong>出口条件</strong>：<code>value === null || typeof value !== 'object'</code> 时直接返回——注意必须先判 null，因为 <code>typeof null === 'object'</code> 是 JS 的历史 bug，不先拦住它，null 会被当成对象继续递归。</li>
+      <li><strong>数组分支</strong>：<code>Array.isArray(value)</code> 用 map 逐项递归，保证拷出来还是数组。</li>
+      <li><strong>对象分支</strong>：遍历自身可枚举属性（用 <code>hasOwnProperty</code> 排除原型链上的属性），逐键递归。</li>
+      <li><strong>循环引用</strong>：如果 A 引用 B、B 又引用 A，朴素递归会无限套娃直到栈溢出。解法是开一张 <code>WeakMap</code>「已拷登记表」：拷贝前先查表，同一个引用在同一轮拷贝里只建一次副本，再次遇到直接复用——这也是面试最高频的追问点。</li>
+    </ul>
+
+    <h3>四、柯里化：参数收集游戏</h3>
+    <p>柯里化（curry）把 <code>f(a, b, c)</code> 变成可以 <code>f(a)(b)(c)</code>、也接受 <code>f(a, b)(c)</code> 的形式。本质是一个<strong>收集参数的游戏</strong>：
+      返回的函数每被调用一次，就用闭包把收到的参数攒起来，够数（达到原函数的形参个数，即 <code>fn.length</code>）就执行，不够就再返回一个「记得已收参数」的新函数接着收。
+      为什么判断用 <code>&gt;=</code> 而不是严格相等？因为参数可以一次传多个（<code>f(1,2)(3)</code>），攒够就执行。
+      它的实际价值在<strong>参数复用</strong>：<code>log = curry(function(tag, msg){...})</code> 之后，<code>logWarn = log('警告')</code> 就得到一个「只管发警告」的新函数——固定了第一个参数，这正是函数式编程里「偏函数」的雏形。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 科目三路考：考的是流程，不是背诵</div>
+      <p>小周背交规倒背如流，第一次科目三却挂了：上车直接点火起步，忘了系安全带绕车检查；路上开得飞快，变道不打灯；靠边停车压线，结束也不拉手刹。教练点评：「你不是不会开，你是<strong>没有流程</strong>。」</p>
+      <p>第二次小周换了打法：上车前先绕车一圈检查、系安全带、调镜子（<strong>第一步 · 确认边界</strong>，对应手写前先问清需求）；然后平稳起步、匀速行驶、该提速提速（<strong>第二步 · 主干逻辑</strong>，先保证最常规场景跑通）；最后打灯、看镜、缓缓靠边、拉手刹回空挡（<strong>第三步 · 补防御收尾</strong>，把异常和边界处理干净）——通过了。</p>
+      <p>路考官和面试官看的是同一件事：<strong>在压力下你按不按章法来</strong>。交规背得再熟（API 背得再多）不等于能上路（能现场写出正确代码）；而先打灯再起步，哪怕开得慢，考官也知道你稳。手写题的分数，一半在代码里，一半在你动笔前后的那几句话里。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：克隆羊递归深拷贝单步展开（可单步执行 + 修改克隆体验证独立性，纯 DOM/CSS/JS） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>克隆一只「嵌套羊」：<code>{ name, tags(数组), mom(对象) }</code>。点「单步复制」，观察递归如何一层层拆开它；复制完成后点「修改克隆体」，亲眼验证两边的独立性：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">左侧是原件，右侧是克隆体。橙色高亮 = 当前正在处理的节点；虚线框（空，待复制）= 引用类型刚建好副本还没填内容。</p>
+      <div class="clo-board">
+        <div class="clo-side is-origin">
+          <div class="clo-side-title">原件 sheep（内存地址 A）</div>
+          <div id="clo-orig"></div>
+        </div>
+        <div class="clo-side is-clone">
+          <div class="clo-side-title">克隆体 clone（内存地址 B）</div>
+          <div id="clo-clone"></div>
+        </div>
+      </div>
+      <div class="anim-console" id="clo-console">
+        <div class="anim-line is-muted">点击「单步复制」开始递归……</div>
+      </div>
+      <div class="clo-controls">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="clo-step">单步复制</button>
+        <button type="button" class="fg-btn fg-btn--ok fg-btn--sm" id="clo-mutate" disabled>修改克隆体</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="clo-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（全部为课程数据中的真实 path） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="../../pages/m1/m1-js-scope.html">JS 类型、作用域与闭包</a>——三个函数全靠闭包保存状态（定时器、已拷登记表、已收参数）；
+      <a href="../../pages/m4/m4-runtime.html">运行时优化</a>——防抖节流的「为什么用」和完整应用场景清单。</p>
+    <p><strong>向后延伸</strong>：基础手写过关后，进阶到<a href="./m7-handwrite-async.html">手写题·异步篇</a>（Promise、并发控制）和
+      <a href="./m7-handwrite-dom.html">手写题·浏览器篇</a>（事件委托、发布订阅）。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="../../pages/m1/m1-js-es6.html">ES6+ 核心特性</a> —— 深拷贝追问 Map/Set、柯里化写法里的展开运算符，都建立在这页的基础上。</li>
+      <li><a href="../../pages/m1/m1-js-prototype.html">原型链与 this</a> —— curry 里 fn.apply 的 this 处理、hasOwnProperty 的原型链含义，在这里。</li>
+      <li><a href="../../pages/m2/m2-reflow.html">重排、重绘与合成层</a> —— 防抖节流最典型的服务对象：把高频操作挡在渲染流水线之外。</li>
+      <li><a href="./m7-design.html">前端侧系统设计</a> —— 手写题的「确认边界」和设计题的「澄清需求」是同一种工程习惯。</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：1 道选择 + 2 道代码题（含解析），mode:'main' -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>两道代码题请直接在作答区补全实现，「运行判题」会在本地沙箱里逐条跑断言：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：手写题就像驾照路考——考官不看你背交规多熟，看你上路会不会先打灯（确认边界）、再平稳起步（主干逻辑）、最后规范靠边（处理异常）；深拷贝就是把一份嵌套资料连里面的附件一起复印，而不是只复印封面。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前合上页面，把 debounce、deepClone、curry 三个函数各默写一遍并口述「为什么这样写」；1 天、3 天、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：2 个问法，答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：手写深拷贝时，Date、RegExp、Map、Set 怎么处理？循环引用呢？</summary>
+      <ul>
+        <li>思路统一：在递归出口之前加类型分支，用「新建同类型容器 + 逐成员递归」处理。</li>
+        <li>Date：<code>new Date(src.getTime())</code>；RegExp：<code>new RegExp(src.source, src.flags)</code>。</li>
+        <li>Map：新建 Map，遍历每个键值对，键和值都递归深拷贝后 set 进去；Set：新建 Set，逐项递归后 add。</li>
+        <li>循环引用：递归入口先查 WeakMap 登记表——同一次拷贝里同一引用只建一次副本，命中直接返回；拷贝完成前先登记 <code>map.set(src, cloned)</code>。WeakMap 的弱引用特性保证不阻碍垃圾回收。</li>
+        <li>加分项：提一句实际工程可直接用 <code>structuredClone</code>（原生深拷贝，但不支持函数），并说明手写版考察的是原理理解。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：防抖和节流的区别？实现要点有哪些？</summary>
+      <ul>
+        <li>语义区别：防抖 = 停止触发后 wait 毫秒才执行一次（重置闹钟）；节流 = 每 wait 毫秒最多执行一次（锁 + 定时解锁，或时间戳对比）。</li>
+        <li>共同实现核心：闭包保存状态（定时器 id / 上次执行时间戳），返回一个包装函数。</li>
+        <li>进阶参数：immediate（防抖首次立即执行）、cancel（取消 pending 的执行）；节流可选 leading / trailing（首尾是否触发）。</li>
+        <li>选型口诀：等用户停下来用防抖（搜索联想、resize 重算）；持续动作保频率用节流（滚动加载、拖拽跟随）。</li>
+        <li>加分项：指出防抖在「无限滚动触底」这种场景有饿死风险（用户一直滚动就永远不触发），此时必须节流。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm7-handwrite-basic'; // 与 body data-page、curriculum.js 中的 points[].id 一字不差
+
+  /* 预热题（mode:'warmup'） */
+  var WARMUP = [{
+    id: 'm7-handwrite-basic-w1',
+    type: 'single',
+    stem: '预热：搜索框希望「用户停止输入 500 毫秒后才发请求」，应该用哪种手段？',
+    options: [
+      '节流 throttle',
+      '防抖 debounce',
+      '每次输入都发请求，靠后端扛',
+      '把输入框调大一点，让用户打字慢下来'
+    ],
+    answer: [1],
+    explain: '「等用户停下来」是防抖的语义：每次输入都重置定时器，停满 500 毫秒才真正发请求。节流是「固定频率执行」——就算用户停下来了，它也只是照频率跑，无法表达「等停止」。'
+  }];
+
+  /* 正式例题（mode:'main'）：1 道选择 + 2 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm7-handwrite-basic-q1',
+      type: 'single',
+      stem: '页面滚动时希望「每 200 毫秒最多计算一次元素位置」，应该用？',
+      options: [
+        '防抖 debounce：等滚动停下来再算',
+        '节流 throttle：固定每 200 毫秒最多算一次',
+        '深拷贝：把位置数据复制一份再算',
+        '柯里化：把计算函数分步传参'
+      ],
+      answer: [1],
+      explain: '滚动是持续动作，用户可能一直滚不停——防抖的「等停止」会饿死：只要不停触发就永远不执行，元素位置永远不更新。节流保证固定频率执行，既降低了计算频率，又保证持续响应。口诀：等停下来 → 防抖；按频率保底 → 节流。'
+    },
+    {
+      id: 'm7-handwrite-basic-q2',
+      type: 'code',
+      stem: '实现 deepClone(value)：对嵌套的对象和数组做递归深拷贝，基本类型直接返回。要求克隆结果与原件完全独立（改克隆体不影响原件）。',
+      stub: 'function deepClone(value) {\n  // 在此实现：支持嵌套对象与数组的递归深拷贝\n  // 提示 1：value === null || typeof value !== \'object\' 时直接返回（注意先判 null）\n  // 提示 2：Array.isArray(value) 走数组分支，否则走对象分支，逐成员递归\n}\n',
+      reference: 'function deepClone(value) {\n  if (value === null || typeof value !== \'object\') return value; // 基本类型与 null：直接返回\n  if (Array.isArray(value)) {                  // 数组分支：逐项递归\n    return value.map(function (item) { return deepClone(item); });\n  }\n  var cloned = {};                             // 对象分支：逐键递归（只拷自身属性）\n  for (var key in value) {\n    if (Object.prototype.hasOwnProperty.call(value, key)) {\n      cloned[key] = deepClone(value[key]);\n    }\n  }\n  return cloned;\n}',
+      asserts: [
+        '(function(){var s={a:{b:[1,2]}};var c=deepClone(s);c.a.b.push(3);return s.a.b.length===2&&JSON.stringify(c.a.b)==="[1,2,3]";})()',
+        '(function(){var s={n:1};var c=deepClone(s);return c!==s&&c.n===1;})()',
+        'deepClone([1,[2,[3]]])[1][1][0] === 3',
+        'deepClone(42) === 42 && deepClone(null) === null'
+      ],
+      explain: '逐条断言对应四层理解：第 1 条验证「深」——往克隆体最内层数组 push，原件纹丝不动，说明内层不是共享引用；第 2 条验证「新」——克隆体和原件是两个不同的对象（c !== s）；第 3 条验证数组分支——嵌套数组结构被完整复制；第 4 条验证出口条件——基本类型直接返回，且 null 被正确拦住。为什么必须先判 null：typeof null === \'object\' 是 JS 的历史 bug，不先拦截，null 会被当成对象递归遍历而出错。为什么遍历用 hasOwnProperty：for...in 会连原型链上的可枚举属性一起遍历，不加过滤会把别人挂在原型上的东西也拷进自己的对象里。'
+    },
+    {
+      id: 'm7-handwrite-basic-q3',
+      type: 'code',
+      stem: '实现 curry(fn)：返回一个可以分步收集参数的函数——参数数量达到 fn.length 时执行原函数并返回结果；不足时返回新函数继续收集（支持 f(1)(2)(3)、f(1,2)(3) 等混合传参）。目标函数 add3 已给出，不要改动它。',
+      stub: '// 已提供被柯里化的目标函数（不要改动）\nfunction add3(a, b, c) { return a + b + c; }\n\nfunction curry(fn) {\n  // 在此实现：返回一个可分步收集参数的函数\n  // 提示：内部函数用闭包攒参数；args.length >= fn.length 时 fn.apply 执行\n}\n',
+      reference: 'function curry(fn) {\n  return function collect() {\n    var args = Array.prototype.slice.call(arguments); // 已收集到的参数（含本次）\n    if (args.length >= fn.length) {                   // 够数：立即执行原函数\n      return fn.apply(null, args);\n    }\n    return function () {                              // 不够：把新参数拼上去继续收集\n      return collect.apply(null, args.concat(Array.prototype.slice.call(arguments)));\n    };\n  };\n}',
+      asserts: [
+        'curry(add3)(1)(2)(3) === 6',
+        'curry(add3)(1, 2)(3) === 6',
+        'curry(add3)(1)(2, 3) === 6'
+      ],
+      explain: '三条断言对应柯里化的三种合法姿势：全分步 f(1)(2)(3)、先多后少 f(1,2)(3)、先少后多 f(1)(2,3)——所以判断必须用 args.length >= fn.length 而不是 ===，因为一次可以传多个参数。为什么参数能「攒」下来：collect 每次返回的新函数都通过闭包引用着上一次的 args，旧参数跨越多次调用存活，这正是闭包的价值。为什么用 fn.apply 而不是直接 fn(a,b,c)：攒到的参数在数组里，apply 能把数组展开成逐个实参；fn.length 则告诉我们原函数「要几个参数才算够」。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（会推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：克隆羊递归深拷贝单步展开器（纯 DOM 手写，无动画库）。
+   单步复制 = 每点一次推进一步递归（盖副本 → 判断类型 → 填内容）；
+   复制完成后可点「修改克隆体」改克隆体的值，直观验证原件不受影响。 */
+(function () {
+  'use strict';
+
+  /* 原件数据：一只嵌套羊——基本类型、数组（引用类型）、对象（引用类型）各占一样 */
+  var sheep = { name: '多莉', tags: ['克隆', '羊'], mom: { name: '玛丽' } };
+
+  /* 克隆体的数据：初始全为 null（还没复制），随单步复制逐格填充 */
+  var cloneData = { name: null, tags: [null, null], mom: { name: null } };
+
+  /* 递归步骤脚本：hot = 本步左侧高亮的节点 id；fill = 本步往克隆体里填哪个值（null 表示只盖空壳） */
+  var STAGES = [
+    { hot: 'root', fill: null, log: 'deepClone(sheep) 开始：sheep 是对象（引用类型），不能直接赋值了事——先在右侧盖一个空对象作为副本。', cls: 'is-ok' },
+    { hot: 'name', fill: 'name', log: '处理 name：「多莉」是字符串（基本类型），基本类型赋值即复制，直接把值放进克隆体。', cls: 'is-ok' },
+    { hot: 'tags', fill: null, log: '遇到 tags：它是数组（引用类型）——递归！先在克隆体侧盖一个空数组，准备逐项复制。', cls: 'is-ok' },
+    { hot: 'tag0', fill: 'tag0', log: '递归进入数组：第 1 项「克隆」是字符串（基本类型），直接复制进去。', cls: 'is-ok' },
+    { hot: 'tag1', fill: 'tag1', log: '第 2 项「羊」同样是基本类型，直接复制。tags 数组复制完成。', cls: 'is-ok' },
+    { hot: 'mom', fill: null, log: '遇到 mom：它是对象（引用类型）——继续递归，在克隆体侧盖一个空对象。', cls: 'is-ok' },
+    { hot: 'momName', fill: 'momName', log: '处理 mom.name：「玛丽」是基本类型，直接放进克隆体的 mom 里。mom 复制完成。', cls: 'is-ok' },
+    { hot: null, fill: null, log: '递归结束：克隆完成。两个对象结构和内容一样，但内存地址不同——「深」就深在内部的数组、对象也各有独立副本。', cls: 'is-end' }
+  ];
+
+  /* 节点定义：描述这棵对象树的形状（root 是最外层对象，box 是引用类型成员，leaf 是基本类型成员） */
+  var NODES = {
+    root: { label: 'sheep（对象）', children: ['name', 'tags', 'mom'] },
+    tags: { label: 'tags（数组）', children: ['tag0', 'tag1'] },
+    mom: { label: 'mom（对象）', children: ['momName'] }
+  };
+  var LEAVES = {
+    name: { parent: 'root' },
+    tag0: { parent: 'tags' },
+    tag1: { parent: 'tags' },
+    momName: { parent: 'mom' }
+  };
+
+  var stageIndex = 0;      // 已执行到第几步
+  var mutated = false;     // 克隆体是否已被修改（独立性演示）
+  var consoleEl = document.getElementById('clo-console');
+  var stepBtn = document.getElementById('clo-step');
+  var mutateBtn = document.getElementById('clo-mutate');
+  var resetBtn = document.getElementById('clo-reset');
+  var origHost = document.getElementById('clo-orig');
+  var cloneHost = document.getElementById('clo-clone');
+
+  /* 向控制台追加一行日志 */
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* 当前步骤应高亮的节点 id（复制结束后为 null） */
+  function hotId() {
+    return stageIndex > 0 ? STAGES[stageIndex - 1].hot : null;
+  }
+
+  /* 取某个叶子节点的显示文本：isClone 为真时读克隆体数据，null 表示「还没复制到」 */
+  function leafValue(id, isClone) {
+    if (!isClone) {
+      if (id === 'name') return 'name: "多莉"';
+      if (id === 'tag0') return '"克隆"';
+      if (id === 'tag1') return '"羊"';
+      if (id === 'momName') return 'name: "玛丽"';
+      return '';
+    }
+    if (id === 'name') return cloneData.name === null ? null : 'name: "' + cloneData.name + '"';
+    if (id === 'tag0') return cloneData.tags[0] === null ? null : '"' + cloneData.tags[0] + '"';
+    if (id === 'tag1') return cloneData.tags[1] === null ? null : '"' + cloneData.tags[1] + '"';
+    if (id === 'momName') return cloneData.mom.name === null ? null : 'name: "' + cloneData.mom.name + '"';
+    return null;
+  }
+
+  /* 渲染一个叶子节点：未复制显示「…」灰样，当前步骤高亮，被改过的克隆值标红 */
+  function buildLeaf(id, isClone) {
+    var el = document.createElement('div');
+    var val = leafValue(id, isClone);
+    el.className = 'clo-leaf';
+    if (val === null) {
+      el.classList.add('is-empty');
+      el.textContent = '…';
+    } else {
+      el.textContent = val;
+      if (isClone && mutated && (id === 'tag0' || id === 'momName')) el.classList.add('is-mutated');
+    }
+    if (hotId() === id) el.classList.add('is-hot');
+    return el;
+  }
+
+  /* 渲染一个引用类型节点（box）：孩子全部复制完成才算填好，否则显示「空，待复制」。
+     id === 'root' 时渲染最外层对象容器，每次整体重建，避免重复渲染叠加。 */
+  function buildBox(id, isClone) {
+    var spec = NODES[id];
+    var children = spec.children;
+    var filled = true;
+    for (var i = 0; i < children.length; i++) {
+      var cid = children[i];
+      var ok = NODES[cid]
+        ? NODES[cid].children.every(function (g) { return isClone ? leafValue(g, true) !== null : true; })
+        : leafValue(cid, isClone) !== null;
+      if (!ok) { filled = false; break; }
+    }
+
+    var el = document.createElement('div');
+    el.className = id === 'root' ? 'clo-root' : 'clo-box';
+    if (isClone && !filled) el.classList.add('is-empty');
+    if (hotId() === id) el.classList.add('is-hot');
+
+    var label = document.createElement('div');
+    label.className = id === 'root' ? 'clo-root-label' : 'clo-box-label';
+    label.textContent = id === 'root'
+      ? (isClone ? 'clone（对象）' : 'sheep（对象）') + (isClone && !filled ? '（空，待复制）' : '')
+      : spec.label + (isClone && !filled ? '（空，待复制）' : '');
+    el.appendChild(label);
+
+    for (var k = 0; k < children.length; k++) {
+      var c = children[k];
+      el.appendChild(NODES[c] ? buildBox(c, isClone) : buildLeaf(c, isClone));
+    }
+    return el;
+  }
+
+  /* 重绘两侧：清空容器后整体重建，杜绝重复叠加 */
+  function render() {
+    origHost.innerHTML = '';
+    cloneHost.innerHTML = '';
+    origHost.appendChild(buildBox('root', false));
+    cloneHost.appendChild(buildBox('root', true));
+  }
+
+  /* 单步复制：执行当前递归步骤，需要时把值填进克隆体 */
+  function step() {
+    if (stageIndex >= STAGES.length) return;
+    var s = STAGES[stageIndex];
+    if (s.fill === 'name') cloneData.name = sheep.name;
+    if (s.fill === 'tag0') cloneData.tags[0] = sheep.tags[0];
+    if (s.fill === 'tag1') cloneData.tags[1] = sheep.tags[1];
+    if (s.fill === 'momName') cloneData.mom.name = sheep.mom.name;
+    stageIndex += 1;
+    log(s.log, s.cls);
+    render();
+    if (stageIndex >= STAGES.length) {
+      log('验收时刻：点「修改克隆体」，把克隆体的 tags[0] 和 mom.name 改掉，看看原件会不会受伤。', 'is-muted');
+      stepBtn.disabled = true;
+      mutateBtn.disabled = false;
+    }
+  }
+
+  /* 修改克隆体：独立性的最直观证明 */
+  function mutate() {
+    if (mutated) return;
+    mutated = true;
+    cloneData.tags[0] = '改造';
+    cloneData.mom.name = '后妈';
+    render();
+    log('已修改克隆体：clone.tags[0] → "改造"，clone.mom.name → "后妈"。', 'is-end');
+    log('看左侧原件：多莉还是多莉，tags[0] 还是「克隆」，mom 还是「玛丽」——纹丝不动。克隆结果与原件完全独立，这就是深拷贝的验收标准。', 'is-muted');
+    mutateBtn.disabled = true;
+  }
+
+  function reset() {
+    stageIndex = 0;
+    mutated = false;
+    cloneData = { name: null, tags: [null, null], mom: { name: null } };
+    stepBtn.disabled = false;
+    mutateBtn.disabled = true;
+    consoleEl.innerHTML = '';
+    log('已重置：点击「单步复制」重新开始递归……', 'is-muted');
+    render();
+  }
+
+  stepBtn.addEventListener('click', step);
+  mutateBtn.addEventListener('click', mutate);
+  resetBtn.addEventListener('click', reset);
+  render();
+})();
+</script>
+</body>
+</html>

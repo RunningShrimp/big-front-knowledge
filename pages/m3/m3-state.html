@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>状态管理思想 · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ===== 本页动画专用样式（纯手写，无外部资源） ===== */
+.st-wrap { display: flex; flex-wrap: wrap; gap: 14px; margin: 10px 0; align-items: stretch; }
+.st-store {
+  flex: 0 0 190px; border: 2px solid var(--fg-c-primary); border-radius: 10px;
+  background: var(--fg-c-primary-weak); padding: 10px 14px; transition: opacity .3s, border-color .3s;
+}
+.st-store .st-store-title { font-size: 13px; font-weight: 600; }
+.st-store .st-store-state { font-size: 26px; font-weight: 700; font-family: ui-monospace, Menlo, Consolas, monospace; }
+.st-store.is-off { opacity: .45; border-color: var(--fg-c-line); background: var(--fg-c-card); }
+.st-store.is-flash { box-shadow: 0 0 0 3px rgba(48, 86, 211, .3); }
+.st-shops { flex: 1 1 240px; display: flex; gap: 10px; flex-wrap: wrap; }
+.st-shop {
+  flex: 1 1 100px; border: 1px solid var(--fg-c-line); border-radius: 10px;
+  background: var(--fg-c-card); padding: 8px 12px; transition: background .3s, border-color .3s;
+}
+.st-shop .st-shop-name { font-size: 12px; color: var(--fg-c-ink-2); display: block; }
+.st-shop .st-shop-num { font-size: 22px; font-weight: 700; font-family: ui-monospace, Menlo, Consolas, monospace; }
+.st-shop .st-badge {
+  display: none; font-size: 11px; color: var(--fg-c-bad);
+  background: var(--fg-c-bad-weak); border-radius: 4px; padding: 1px 6px; margin-top: 4px;
+}
+.st-shop.is-out .st-badge { display: inline-block; }
+.st-shop.is-flash { background: var(--fg-c-ok-weak); border-color: var(--fg-c-ok); }
+.st-slip {
+  display: none; font-size: 12px; margin: 8px 0; padding: 6px 10px;
+  border: 1px dashed var(--fg-c-primary); border-radius: 6px; background: var(--fg-c-card);
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+.st-slip.is-on { display: block; }
+</style>
+</head>
+<body data-page="m3-state">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">状态管理的本质不是背 Redux API，而是一个决策：状态放在哪、谁能改、怎么保证大家看到的是同一份。本页不引入任何框架。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>前置知识：状态一变视图就得跟着变，这套「state → 视图 → 事件 → setState」的单向流动建议先在
+      <a href="./m3-react.html">React 核心与 Hooks</a>里体会过，再来谈「多组件共享状态」怎么办。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：讲解 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、问题起源：状态放在哪都难受</h3>
+    <p>一个「当前登录用户」会被导航栏、设置页、下单弹窗同时使用。如果每个组件各存一份副本，改了一处其他处就是旧数据；
+      如果靠 props 逐层传，爷爷传爸爸、爸爸传孙子，中间五层组件被迫当「传声筒」（术语叫 props 钻透），拆改一处牵动全身。
+      状态共享的两大痛点：<strong>副本不一致</strong>和<strong>传递链太长</strong>。状态管理库就是为了治这两个病。</p>
+
+    <h3>二、药方：单一数据源 + 单向数据流</h3>
+    <p>核心思想就两句话：<strong>全应用只留一份全局 state</strong>（单一数据源，single source of truth）；
+      <strong>谁都不许直接改它，只能「申报」</strong>。申报的格式叫 action——一个描述「发生了什么」的普通对象，如
+      <code>{ type: 'SELL', n: 2 }</code>。处理申报的叫 reducer——一个纯函数，拿着「旧 state + action」算出「新 state」，绝不顺手改旧数据。
+      store 负责保管 state、执行 dispatch、广播变化。整条链路是闭环：<strong>视图发 action → reducer 算出新 state → store 存下并通知 → 视图刷新</strong>，
+      数据只朝一个方向流，出了问题顺着日志就能定位。</p>
+
+    <h3>三、Redux 三原则，与 Vuex/Pinia、Zustand 的对比</h3>
+    <p>Redux 把上面的思想立成三条规矩：① <strong>单一数据源</strong>——全应用一棵 state 树；
+      ② <strong>state 只读</strong>——唯一修改方式是 dispatch action；③ <strong>纯函数修改</strong>——reducer 输入相同输出必相同。
+      各家方案思想同源，差别在约束强弱与 API 繁简：<strong>Vuex / Pinia</strong> 是 Vue 生态的实现，Pinia 去掉了 Vuex 的 mutation 层、
+      天然支持按模块拆 store、对 TS 更友好；<strong>Zustand</strong> 走极简路线，一个函数创建 store，组件里像用 Hook 一样取值。
+      记住：库只是形式，「集中存放、显式变更、单向流动」才是灵魂。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 公司统一知识库</div>
+      <p>三个部门各自拷贝一份项目文档（组件各存状态副本），一周后版本打架：A 部门改到 v5，B 部门还停在 v3，开会吵成一团。
+        公司于是建立统一知识库：所有人只从<strong>同一份源头</strong>（单一数据源）读取，谁也不许在本地另存「官方版」。</p>
+      <p>要改内容，必须提交一份写明「改什么、为什么改」的申请单（dispatch action）；管理员按固定规则审批定稿
+        （reducer 纯函数：同样申请单 + 同样旧版本，必然得到同样新版本），从不偷偷直接改文件；
+        每张申请单都留档可回溯（action 日志，甚至能按顺序重放出任意历史版本）；文件一更新，订阅的部门自动收到通知（subscribe）。</p>
+    </div>
+
+    <h3>四、状态分类：不是什么状态都值得进全局库</h3>
+    <p>先分两类：<strong>服务端状态</strong>（列表、详情——本质是远端数据的缓存，要考虑去重、失效、重新拉取）和
+      <strong>客户端状态</strong>（主题色、弹窗开关、表单草稿）。服务端状态如今常交给请求缓存库打理，全局库只管真正的客户端共享状态。
+      什么时候才需要引入状态库？出现这些信号再说：多个页面/多个层级要<strong>频繁共享</strong>同一份状态、状态间有<strong>派生关系</strong>、
+      变更需要<strong>留痕调试</strong>。一个按钮自己的开关文字、一个表单没提交的草稿，用组件本地 state 就好——上全局库是杀鸡用牛刀，还添堵。</p>
+  </section>
+
+  <!-- ③ 动画演示：.anim-stage 内的纯手写可交互动画（单步执行 + 模式对比） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>三个分店卖同一种货。先看「各自为政」的乱象，再切到「总仓库统一发货」模式，单步看一张发货单（action）的完整流转：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">商品：苹果，初始 10 件。分店 A 不断「卖出 2 件」，看三个数字是否还一致。</p>
+      <div class="st-wrap">
+        <div class="st-store" id="st-store">
+          <span class="st-store-title">总仓库（唯一数据源）</span>
+          <div class="st-store-state" id="st-state">库存 10</div>
+        </div>
+        <div class="st-shops">
+          <div class="st-shop" id="st-shop-A">
+            <span class="st-shop-name">分店 A（发起卖出）</span>
+            <div class="st-shop-num" id="st-num-A">10</div>
+            <span class="st-badge">与别家不同步！</span>
+          </div>
+          <div class="st-shop" id="st-shop-B">
+            <span class="st-shop-name">分店 B</span>
+            <div class="st-shop-num" id="st-num-B">10</div>
+            <span class="st-badge">与别家不同步！</span>
+          </div>
+          <div class="st-shop" id="st-shop-C">
+            <span class="st-shop-name">分店 C</span>
+            <div class="st-shop-num" id="st-num-C">10</div>
+            <span class="st-badge">与别家不同步！</span>
+          </div>
+        </div>
+      </div>
+      <div class="st-slip" id="st-slip"></div>
+      <div class="anim-console" id="st-console">
+        <div class="anim-line is-muted">当前模式：各自为政。点「分店 A 卖出 2 件」看看会发生什么…</div>
+      </div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="st-sell">分店 A 卖出 2 件</button>
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="st-step" disabled>单步执行</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="st-mode">切换为「单一数据源」模式</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="st-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（真实课程路径） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="./m3-react.html">React 核心与 Hooks</a>——组件内部「state 驱动视图」是地基；
+      全局状态管理只是把「这份 state」从组件里搬到了 store，单向流动的方向从未改变。</p>
+    <p><strong>向后延伸</strong>：路由地址本质上也是一种全局状态（当前视图 = f(当前路由)），去
+      <a href="./m3-router.html">前端路由原理</a>看它如何被管理；多个 store 如何按业务拆分、组件如何消费，
+      见 <a href="./m3-component.html">组件设计原则</a>。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="./m3-vue.html">Vue 响应式原理</a> —— Pinia 依赖 Vue 的响应式做「store 变了视图自动更新」这最后一步。</li>
+      <li><a href="../m1/m1-js-scope.html">作用域与闭包</a> —— createStore 里「state 藏在闭包里、只暴露只读接口」就是闭包的经典应用。</li>
+      <li><a href="../m2/m2-storage.html">浏览器存储</a> —— 全局状态存内存、会话结束即清；要跨刷新持久化，得落 localStorage 一层。</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：1 道多选 + 1 道单选 + 1 道代码题（含解析），mode:'main' -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后把最佳成绩写入进度仓库（见页面底部内联脚本）：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行听 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：状态管理就是给全公司建一个统一知识库——大家只看同一份文件，
+      想改得先交申请单走审批，批下来所有人自动收到新版，谁也不能在本地偷偷改「官方版」。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前画一遍「action → reducer → state → view」闭环图 1 次，1 天后、3 天后、7 天后各回来重做例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：2 个问法，答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：什么场景才真正需要引入全局状态管理？</summary>
+      <ul>
+        <li>看信号：多层级/多页面频繁共享同一份状态（登录信息、购物车、主题）、兄弟组件间要双向同步、变更需要留痕与回溯调试。</li>
+        <li>反面清单：仅组件内部使用的 UI 开关、未提交的表单草稿——本地 state 足够；纯服务端列表数据——请求缓存层更合适。</li>
+        <li>代价要会说：引入库意味着更多样板代码、更高的上手成本；把所有状态塞进全局会失去模块边界，「全局变量」化的代码更难维护。</li>
+        <li>加分项：先按「服务端状态 / 客户端状态」分类，再用组件本地 → 模块共享 → 全局库的顺序升级，而不是一上来就 Redux。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：为什么 reducer 必须是纯函数？违反了会怎样？</summary>
+      <ul>
+        <li>纯函数：相同输入（旧 state + action）永远返回相同输出，且不修改入参、不产生副作用。</li>
+        <li>可预测性：状态变化完全由「action 流水」决定，可以保存每个 action、回放出任意历史时刻（时间旅行调试）。</li>
+        <li>可测试性：reducer 是普通函数，不依赖环境，直接传参断言即可单测。</li>
+        <li>违反的后果：在 reducer 里直接 push 旧数组、发请求、写随机数，会让「同样输入不同输出」，回放失真、渲染时序难排查。</li>
+        <li>加分项：所以 Redux 约定返回全新引用（如展开运算符生成新对象/数组），配合浅比较才能正确触发订阅更新。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 + 总仓库发货动画 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm3-state'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'） */
+  var WARMUP = [{
+    id: 'm3-state-warmup-1',
+    type: 'single',
+    stem: '预热：单向数据流里，一次「改状态、刷视图」的正确顺序是？',
+    options: [
+      '用户触发 action → reducer 算出新 state → 视图根据新 state 重新渲染',
+      '视图先随便改 → 再回头猜状态变成了什么',
+      '每个组件直接修改同一份全局变量的任意字段',
+      '先把界面画出来，再想办法凑状态'
+    ],
+    answer: [0],
+    explain: '单向数据流的铁律：改动只能以 action 的形式发起，reducer 纯函数算出新 state，store 保管并广播，视图永远是 state 的投影。'
+  }];
+
+  /* 正式例题（mode:'main'）：1 道多选 + 1 道单选 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm3-state-q1',
+      type: 'multi',
+      stem: '「Redux 三原则」指的是哪三条？（多选）',
+      options: [
+        '单一数据源：整个应用的 state 只有一棵对象树',
+        'state 只读：唯一修改方式是 dispatch 一个描述「发生了什么」的 action',
+        '使用纯函数 reducer 执行修改：相同输入必得相同输出，且不修改旧 state',
+        '任何组件都可以随时直接给全局 state 的任意字段赋值，图个方便'
+      ],
+      answer: [0, 1, 2],
+      explain: '三原则保证了「可预测」：源只有一份（不会版本打架）、改只能申报（留痕可回溯）、规则是纯函数（同样输入必得同样输出）。D 恰恰是三原则要禁止的事——绕过 action 直接改 state，等于绕开审批改文件，日志失真、问题无法定位。'
+    },
+    {
+      id: 'm3-state-q2',
+      type: 'single',
+      stem: '下面哪种场景最「不需要」引入全局状态管理库？',
+      options: [
+        '深层级的多个页面都要读取并跟随当前登录用户信息',
+        '购物车数据要在商品页、购物车页、结算页之间保持一致',
+        '一个开关按钮组件内部「开 / 关」的文字状态，只有它自己用',
+        '主题色需要被几十个组件同步消费，且能随时切换'
+      ],
+      answer: [2],
+      explain: '判断标准是「共享范围与同步需求」。按钮自己的开关文字是纯粹的本地 UI 状态，放组件内部 useState 一行搞定；强行提升到全局库反而多了样板代码、破坏了模块边界。A、B、D 都是多组件频繁共享、需要保持一致的典型信号，才是状态库的主场。'
+    },
+    {
+      id: 'm3-state-q3',
+      type: 'code',
+      stem: '手写 createStore(reducer, initialState)：返回的 store 包含三个方法——getState() 只读返回当前 state；dispatch(action) 用 reducer 算出新 state 并通知所有订阅者；subscribe(fn) 订阅变化并返回「取消订阅」函数。',
+      stub: 'function createStore(reducer, initialState) {\n  // 提示：把 state 和订阅者数组藏在闭包里\n  // getState：只读返回 state（不要把内部变量直接暴露出去）\n  // dispatch：用 reducer(旧state, action) 算出新 state，再依次调用订阅者\n  // subscribe：把 fn 存进订阅者数组，返回一个「执行后移除 fn」的退订函数\n}\n',
+      reference: 'function createStore(reducer, initialState) {\n  var state = initialState; // 藏在闭包里，外界拿不到引用\n  var subs = [];\n  return {\n    getState: function () {\n      return state;\n    },\n    dispatch: function (action) {\n      state = reducer(state, action); // 纯函数算新 state，不改旧值字段\n      subs.forEach(function (fn) { fn(); }); // 广播给所有订阅者\n    },\n    subscribe: function (fn) {\n      subs.push(fn);\n      return function () { // 退订函数\n        subs = subs.filter(function (f) { return f !== fn; });\n      };\n    }\n  };\n}',
+      asserts: [
+        'function r(s, a) { return a.type === "ADD" ? s + a.n : s; } var store = createStore(r, 0); store.getState() === 0',
+        'store.dispatch({ type: "ADD", n: 3 }); store.getState() === 3',
+        'var hit = 0; var un = store.subscribe(function () { hit = hit + 1; }); store.dispatch({ type: "ADD", n: 1 }); un(); store.dispatch({ type: "ADD", n: 1 }); hit === 1'
+      ],
+      explain: '这是 Redux 心脏的全部代码。三个要点：① state 存在闭包里，外界只能通过 getState 读——这就是「state 只读」原则的实现方式；② dispatch 自己绝不定死逻辑，全部交给外部传入的 reducer，所以同一个 store 换个 reducer 就能服务别的应用（可预测、可测试）；③ subscribe 返回退订函数，断言 3 验证了退订后 dispatch 不再惊动已退订的回调——真实 Redux/Pinia 的订阅机制同源。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（会推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：超市总仓库统一发货 —— 各自为政 vs 单一数据源（纯 DOM 手写） */
+(function () {
+  'use strict';
+
+  var consoleEl = document.getElementById('st-console');
+  var slipEl = document.getElementById('st-slip');
+  var storeEl = document.getElementById('st-store');
+  var stateEl = document.getElementById('st-state');
+  var sellBtn = document.getElementById('st-sell');
+  var stepBtn = document.getElementById('st-step');
+  var modeBtn = document.getElementById('st-mode');
+  var resetBtn = document.getElementById('st-reset');
+
+  var mode = 'chaos';    // chaos=各自为政 / store=单一数据源
+  var global = 10;       // 仓库里的 state（store 模式使用）
+  var chaos = { A: 10, B: 10, C: 10 }; // 三个分店各自的副本（chaos 模式使用）
+  var pending = false;   // store 模式：是否有一张待处理的发货单
+  var stepIdx = 0;       // store 模式：发货单流转到第几步
+
+  /* 输出日志行 */
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* 刷新所有店铺数字与「不同步」徽标（chaos 模式下比较副本是否一致） */
+  function paintShops(synced) {
+    ['A', 'B', 'C'].forEach(function (n) {
+      var num = document.getElementById('st-num-' + n);
+      var box = document.getElementById('st-shop-' + n);
+      num.textContent = mode === 'chaos' ? chaos[n] : global;
+      if (mode === 'chaos') {
+        box.classList.toggle('is-out', chaos[n] !== chaos.A);
+      } else {
+        box.classList.remove('is-out');
+        if (synced && synced.indexOf(n) >= 0) {
+          box.classList.add('is-flash');
+          setTimeout(function () { box.classList.remove('is-flash'); }, 800);
+        }
+      }
+    });
+  }
+
+  function paintStore() {
+    stateEl.textContent = '库存 ' + global;
+    storeEl.classList.add('is-flash');
+    setTimeout(function () { storeEl.classList.remove('is-flash'); }, 800);
+  }
+
+  /* ===== 各自为政模式：分店 A 只改自己那份副本 ===== */
+  function sellChaos() {
+    if (chaos.A < 2) {
+      log('分店 A 库存不足 2 件，卖不动了（各自维护，没人帮它补货）。', 'is-end');
+      return;
+    }
+    chaos.A = chaos.A - 2;
+    paintShops();
+    log('分店 A 悄悄把自己的副本改成 ' + chaos.A + ' —— 分店 B、C 毫不知情，还是 ' + chaos.B + ' / ' + chaos.C + '。', 'is-end');
+    if (chaos.A !== chaos.B) {
+      log('同一个商品，三家店报出三个数：这就是「副本不一致」。顾客信谁？', 'is-end');
+      sellBtn.disabled = true;
+      log('点「切换为单一数据源模式」，看正确的做法。', 'is-muted');
+    }
+  }
+
+  /* ===== 单一数据源模式：第一步，生成发货单（dispatch action） ===== */
+  function sellStore() {
+    if (pending) {
+      log('上一张发货单还在流转中，先点「单步执行」把它走完。', 'is-muted');
+      return;
+    }
+    if (global < 2) {
+      log('仓库只剩 ' + global + ' 件，发货单被打回（reducer 校验未通过）。', 'is-end');
+      return;
+    }
+    pending = true;
+    stepIdx = 0;
+    sellBtn.disabled = true;
+    stepBtn.disabled = false;
+    slipEl.textContent = '发货单（action）：{ type: "SELL", n: 2 }  —— 只描述「发生了什么」';
+    slipEl.classList.add('is-on');
+    log('分店 A 不直接动库存，而是开出一张发货单 dispatch({ type: "SELL", n: 2 })，交给仓库。点「单步执行」继续。', 'is-ok');
+  }
+
+  /* ===== 单一数据源模式：发货单的后续流转 ===== */
+  var FLOW = [
+    'reducer 是纯函数：拿旧 state（10）和 action 算出新 state，绝不涂改旧账本 —— 新 state = 8。',
+    'store 把 state 更新为 8，然后遍历订阅者列表，向三家分店广播「state 变了」。',
+    '三家分店同时收到通知、同时刷新 —— 数字永远一致，谁也不是「别人嘴里的旧消息」。',
+    '操作日志追加一条：SELL 2 → 10 变 8。全程留痕，出问题顺着单据就能回放排查。这就是 action → reducer → state → view 的闭环。'
+  ];
+  function stepStore() {
+    var i = stepIdx;
+    log('第 ' + (i + 2) + ' 步：' + FLOW[i], i === FLOW.length - 1 ? 'is-end' : 'is-ok');
+    if (i === 1) {
+      global = global - 2; // reducer 已算出新 state
+      paintStore();
+    }
+    if (i === 2) paintShops(['A', 'B', 'C']);
+    stepIdx = stepIdx + 1;
+    if (stepIdx >= FLOW.length) {
+      pending = false;
+      stepBtn.disabled = true;
+      slipEl.classList.remove('is-on');
+      if (global >= 2) {
+        sellBtn.disabled = false;
+        log('可以再点「分店 A 卖出 2 件」来一轮，观察留痕累积；库存不足时发货单会被打回。', 'is-muted');
+      } else {
+        log('库存清零。点「重置」或切换模式继续玩。', 'is-muted');
+      }
+    }
+  }
+
+  /* ===== 模式切换与重置 ===== */
+  function setMode(next) {
+    mode = next;
+    if (mode === 'chaos') {
+      storeEl.classList.add('is-off');
+      sellBtn.disabled = false;
+      stepBtn.disabled = true;
+      modeBtn.textContent = '切换为「单一数据源」模式';
+      slipEl.classList.remove('is-on');
+    } else {
+      storeEl.classList.remove('is-off');
+      sellBtn.disabled = false;
+      stepBtn.disabled = true;
+      modeBtn.textContent = '切换为「各自为政」模式';
+    }
+  }
+
+  function reset() {
+    global = 10;
+    chaos = { A: 10, B: 10, C: 10 };
+    pending = false;
+    stepIdx = 0;
+    consoleEl.innerHTML = '';
+    slipEl.classList.remove('is-on');
+    paintShops();
+    paintStore();
+    sellBtn.disabled = false;
+    stepBtn.disabled = true;
+    if (mode === 'chaos') {
+      log('已重置（各自为政模式）：点「分店 A 卖出 2 件」制造一次数据不一致…', 'is-muted');
+    } else {
+      log('已重置（单一数据源模式）：点「分店 A 卖出 2 件」开出一张发货单，再单步看它流转…', 'is-muted');
+    }
+  }
+
+  sellBtn.addEventListener('click', function () {
+    if (mode === 'chaos') sellChaos(); else sellStore();
+  });
+  stepBtn.addEventListener('click', stepStore);
+  modeBtn.addEventListener('click', function () {
+    setMode(mode === 'chaos' ? 'store' : 'chaos');
+    reset();
+  });
+  resetBtn.addEventListener('click', reset);
+
+  setMode('chaos');
+  reset();
+})();
+</script>
+</body>
+</html>

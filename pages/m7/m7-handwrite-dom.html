@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>手写题·浏览器篇（事件委托、发布订阅、序列化） · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ===== 本页动画专用样式：班主任校门口收信·事件委托演示，纯手写 CSS，零外部库 ===== */
+.dm-gate { border: 2px solid #0FB5A6; border-radius: 12px; background: #f0fbf9; padding: 12px; }
+.dm-gate-title { font-size: 13px; font-weight: 700; color: #0b7c72; margin-bottom: 8px; }
+.dm-class { border: 2px dashed #b7c0d4; border-radius: 10px; background: #fff; padding: 10px; display: flex; gap: 12px; flex-wrap: wrap; }
+.dm-student { border: 2px solid #d5dbe7; border-radius: 10px; padding: 8px; background: #f7f9fc; text-align: center; }
+.dm-student.is-new { border-color: #8B5CF6; background: #f6f3ff; }
+.dm-letter {
+  cursor: pointer; background: #fff8f1; border: 2px solid #e0813d; color: #b35f1e;
+  border-radius: 8px; padding: 6px 10px; font-size: 13px; user-select: none;
+  transition: transform .15s, background .2s, border-color .2s;
+}
+.dm-letter:hover { transform: translateY(-2px); }
+.dm-letter.is-done { background: #e9f9f6; border-color: #0FB5A6; color: #0b7c72; }
+.dm-letter.is-dead { opacity: .55; border-style: dashed; } /* 逐个绑定模式下漏绑的信 */
+.dm-name { font-size: 12px; color: #5b6680; margin-top: 6px; }
+.dm-count { font-size: 13px; font-weight: 700; color: #2b3a55; margin: 10px 0 2px; }
+.dm-modes { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.dm-mode.is-on { border-color: #0FB5A6; background: #e9f9f6; color: #0b7c72; font-weight: 700; }
+</style>
+</head>
+<body data-page="m7-handwrite-dom">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">知识点：手写题·浏览器篇（建议学习时长约 30 分钟）——事件委托的冒泡与 closest、发布订阅与观察者之分、序列化的暗坑与简版手写。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>本页前置依赖：<a href="../../pages/m1/m1-js-prototype.html">原型链与 this</a>——序列化时过滤属性的 <code>hasOwnProperty</code>、构造函数挂方法的 <code>prototype</code>，都是这页的地基。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：分小标题推进 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、事件委托：把监听器从 N 个减到 1 个</h3>
+    <p>点击页面上最深的那个元素时，事件并不会只发生在它身上，而是分三段走：<strong>捕获</strong>（从外向内）→
+      <strong>目标阶段</strong>（真正被点的元素）→ <strong>冒泡</strong>（从内向外逐级上浮，默认监听就挂在这一段）。
+      事件委托正是「搭冒泡的顺风车」：<strong>在共同父节点上只绑 1 个监听器</strong>，等子元素的事件冒泡上来统一处理。
+      写法上要认清两个角色：<code>e.target</code> 是「真正被点到的最深元素」，<code>e.currentTarget</code> 是「挂着监听器的元素」；
+      因为点击目标可能是按钮里更深的 <code>span</code>，实际代码几乎总是用 <code>e.target.closest('.xxx')</code> 从最深处向上找回「业务节点」。</p>
+    <ul>
+      <li><strong>优点</strong>：1000 个列表项只需 1 个监听器（省内存）；动态新增的子元素<strong>天然被覆盖</strong>，不用重新绑定；销毁时只解绑一处。</li>
+      <li><strong>局限</strong>：前提是事件会冒泡——<code>blur</code>、<code>mouseenter/mouseleave</code> 这类不冒泡的事件委托不了（可改用 <code>focusin/focusout</code> 或捕获阶段监听）；另外 <code>e.target</code> 可能比你预期的更深，漏写 closest 就会「点子元素失灵」。</li>
+    </ul>
+
+    <h3>二、发布订阅与观察者：先分清，再动手</h3>
+    <p>两个模式都解决「一件事发生后，谁需要知道」，区别在<strong>有没有中间人</strong>：
+      <strong>观察者模式</strong>里，目标（Subject）直接持有观察者列表并逐个调用其更新方法，双方彼此认识（耦合）；
+      <strong>发布订阅模式</strong>则多了一个「事件中心」：发布者只管往中心喊（emit），订阅者只管向中心登记（on），双方互不相识，靠事件名解耦。
+      手写四件套的要点：<code>on</code> 往「事件名 → 监听器数组」里 push；<code>off</code> 用 filter 按引用移除；
+      <code>emit</code> 遍历前先 <strong>slice 拷贝数组</strong>（否则执行中某个 once 把自己删掉，后面的监听器会被跳过）；
+      <code>once</code> 订阅的是一个<strong>包装函数</strong>，触发时先移除自己再执行原函数——解绑时比对的必须是包装函数本身。
+      完整的判题级实现见<a href="./m7-handwrite-async.html">手写题·异步篇</a>的例题。</p>
+
+    <h3>三、序列化进阶：JSON.stringify 的暗坑</h3>
+    <p><code>JSON.stringify</code> 是 localStorage 存储与接口通信的标配，但它有几条「暗规则」经常出现在追问里：</p>
+    <ul>
+      <li>对象里的 <code>undefined</code>、函数、Symbol：<strong>整个键被丢弃</strong>；同样的值出现在数组里则<strong>变成 null</strong>（为了保持索引对齐）。</li>
+      <li><code>Date</code> 变 ISO 字符串；<code>NaN / Infinity</code> 变 null。</li>
+      <li><strong>循环引用直接抛 TypeError</strong>（Converting circular structure to JSON）——原生宁可报错也不输出残缺数据。</li>
+      <li>手写简版的思路：按类型分支（string / number / boolean / null / 数组 / 对象）递归拼字符串，遍历对象时用 <code>hasOwnProperty</code> 只看自身属性；若要支持循环引用，思路与深拷贝相同——用 WeakMap 登记已见对象，再次遇到就抛错或输出占位。</li>
+    </ul>
+
+    <h3>四、延伸考点速览：手写 Ajax 五步</h3>
+    <p>事件委托之外，浏览器手写的另一个常客是 Ajax：<code>XHR</code> →
+      <code>open(method, url, true)</code> → 监听 <code>onreadystatechange</code>（或 <code>onload</code>）并判断 <code>status</code> 为 2xx →
+      <code>send(body)</code> → 读取 <code>responseText</code>。高频追问是把它<strong>Promise 化封装</strong>：成功 resolve 响应、失败（网络错或非 2xx）reject，
+      这正好用上<a href="../../pages/m1/m1-js-promise.html">Promise</a> 一页的知识。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 老小区装上快递柜：快递员再也不用挨家挨户敲门</div>
+      <p>没有快递柜的年代，快递员要挨家挨户敲门送件——100 户就是 100 次打扰（1000 个列表项绑 1000 个监听器），而且常常吃闭门羹：住户不在家，件就送不出去（子元素还没渲染出来，逐个绑定直接失败）。</p>
+      <p>小区装上快递柜之后画风一变：快递员把所有件<strong>统一投进柜子</strong>（事件只绑在共同的父节点上），完全不用关心谁住在几零几；住户回家看到柜子亮灯（事件顺着 DOM 树冒泡到父节点），凭取件码认领自己的件——取件码就是 <code>e.target</code>，顺着柜格号找到住户就是 <code>closest()</code>。</p>
+      <p>最妙的是：新住户搬进来（动态新增的 DOM 节点）<strong>根本不用去物业登记</strong>，柜子照收他的件——这就是「委托对动态子元素自动生效」。但也别神化快递柜：有些物品它收不了（不冒泡的事件，比如 blur），还得专人直送（直接绑定或改走捕获阶段）。记住准确结论：<strong>委托的前提是事件冒泡，判断来源永远以 e.target 为准，定位业务节点用 closest</strong>。下面这个演示，请你当一回班主任。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：班主任只在校门口收全班的信（可点击切换模式 + 点击信件触发冒泡，纯 DOM/CSS/JS） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>全班每人一封信。委托模式下，<strong>班主任只在校门口设 1 个监听器</strong>；先点几封信看冒泡与 closest，再「转入新同学」对比两种模式的命运差异：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">点信 = 模拟点击。委托模式：事件沿「信 → 学生 → 班级 → 校门口」冒泡，门口统一收；逐个绑定模式：每封信各挂各的监听器——转来的新同学没赶上绑定，点他的信<strong>什么都不会发生</strong>，这正是逐个绑定的经典事故。</p>
+      <div class="dm-gate" id="dm-gate">
+        <div class="dm-gate-title">校门口 · 班主任值守处（委托模式下全班唯一的监听器在这里）</div>
+        <div class="dm-class" id="dm-class"></div>
+      </div>
+      <div class="dm-count" id="dm-count"></div>
+      <div class="anim-console" id="dm-console">
+        <div class="anim-line is-muted">点击任意一封信试试；再切换模式、转入新同学，对比两种绑定的差别……</div>
+      </div>
+      <div class="dm-modes">
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm dm-mode is-on" id="dm-mode-delegate">委托模式（1 个监听器）</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm dm-mode" id="dm-mode-direct">逐个绑定模式（N 个监听器）</button>
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="dm-add">新同学转来</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="dm-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（全部为课程数据中的真实 path） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="../../pages/m1/m1-js-prototype.html">原型链与 this</a>——构造函数挂方法、hasOwnProperty 过滤属性，EventEmitter 与 myStringify 全用得上。</p>
+    <p><strong>向后延伸</strong>：发布订阅的判题级实现（含参数透传与 once 自删陷阱）在<a href="./m7-handwrite-async.html">手写题·异步篇</a>；手写 Ajax 发出的请求到底经历了什么，去<a href="../../pages/m2/m2-http.html">HTTP/1.1、HTTP/2 与 HTTP/3</a> 看底层。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="../../pages/m3/m3-vdom.html">虚拟 DOM 与 Diff 算法</a> —— 用 JS 对象描述 DOM、序列化后做比对，和本页的序列化思想同源。</li>
+      <li><a href="../../pages/m2/m2-storage.html">浏览器存储</a> —— localStorage 只能存字符串，JSON 序列化 / 反序列化是它的标准搭配。</li>
+      <li><a href="../../pages/m1/m1-js-eventloop.html">事件循环与任务队列</a> —— 「事件冒泡」是 DOM 事件机制，「事件循环」是 JS 执行调度，两个「事件」别混淆。</li>
+      <li><a href="../../pages/m4/m4-runtime.html">运行时优化：防抖、节流与计算缓存</a> —— 「委托 + 防抖」是滚动/输入场景监听海量子元素的标准组合拳。</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：1 道选择 + 2 道代码题（含解析），mode:'main' -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>两道代码题请在作答区补全实现，「运行判题」会在本地沙箱里同步逐条跑断言（沙箱没有真实 DOM，用普通对象模拟节点树）：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：事件委托就是班主任只在校门口收全班的信——不管班里换了多少人，信都会顺着走廊「冒」到门口，班主任凭落款（e.target）知道是谁的；发布订阅是大喇叭广播，谁订了频道谁听得见；序列化就是把对象这堆「家具」打包成一条字符串快递。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前合上页面，口述「e.target 与 currentTarget 的区别」「为什么 emit 前要拷贝数组」「对象里的 undefined 为什么会丢键」三个问题；1 天、3 天、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：2 个问法，答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：事件委托的原理、优点和局限分别是什么？</summary>
+      <ul>
+        <li>原理：利用事件冒泡，在共同父节点上只绑 1 个监听器；用 e.target 找到真正被点的最深元素，再用 closest 向上定位业务节点。</li>
+        <li>优点：监听器数量从 N 降到 1（省内存）；动态新增子元素天然被覆盖、无需重绑；销毁时只需解绑一处。</li>
+        <li>局限：前提是事件会冒泡——blur、mouseenter/leave 委托不了（可用 focusin/focusout 或捕获阶段替代）；e.target 可能是更深的子节点，漏写 closest 会失灵。</li>
+        <li>经典场景：长列表每行的「删除」按钮、表格单元格点击、千级以上 DOM 的交互监听。</li>
+        <li>加分项：说明 e.target 与 e.currentTarget 的区别（最深被点元素 vs 挂监听器的元素）。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：发布订阅和观察者模式的区别？once 和循环引用序列化怎么处理？</summary>
+      <ul>
+        <li>观察者模式：目标直接持有观察者列表并调用其更新方法，双方耦合；发布订阅多了「事件中心」，发布者与订阅者互不相识，靠事件名解耦。</li>
+        <li>once 实现：订阅一个包装函数，触发时先把自己从监听数组移除、再执行原函数；解绑比对的是包装函数本身，不是原函数。</li>
+        <li>emit 细节：遍历前 slice 拷贝数组，防止执行中 once 自删导致后续监听器被跳过。</li>
+        <li>循环引用序列化：原生 JSON.stringify 直接抛 TypeError；手写可用 WeakMap 登记已见对象，再次遇到同一引用就抛错或输出占位标记。</li>
+        <li>加分项：提到 Vue 的依赖收集更接近观察者（Target 直依赖 Dep），而全局事件总线 mitt/EventEmitter 是典型发布订阅。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm7-handwrite-dom'; // 与 body data-page、curriculum.js 中的 points[].id 一字不差
+
+  /* 预热题（mode:'warmup'） */
+  var WARMUP = [{
+    id: 'm7-handwrite-dom-w1',
+    type: 'single',
+    stem: '预热：点击按钮内部的 <span> 小图标时，这个点击事件最先在哪个元素上被触发？',
+    options: [
+      'document（最外层）',
+      '被点击的 span（目标元素），随后逐级向上冒泡',
+      'button 的父元素',
+      '不会触发任何事件'
+    ],
+    answer: [1],
+    explain: '事件流分三段：捕获（从外向内）→ 目标阶段（真正被点击的元素）→ 冒泡（从内向外）。默认监听挂在冒泡阶段，所以 span 最先收到，然后逐级向父元素冒泡——事件委托正是靠这段「向上冒泡」的路，在父节点统一接住所有子元素的点击。'
+  }];
+
+  /* 正式例题（mode:'main'）：1 道选择 + 2 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm7-handwrite-dom-q1',
+      type: 'single',
+      stem: '在 ul 上绑了一个委托监听器，用户点中的是某个 li 里的 <b>加粗文字</b>。此刻监听器函数里 e.target 和 e.currentTarget 分别指向什么？',
+      options: [
+        '都指向 ul',
+        'e.target 是 b 元素，e.currentTarget 是 ul',
+        'e.target 是 li，e.currentTarget 是 b',
+        '都指向 b 元素'
+      ],
+      answer: [1],
+      explain: 'e.target 永远是「真正被点到的最深元素」——哪怕只是 li 里的一小段 b 文字；e.currentTarget 是「当前正在执行监听器的元素」，即绑定监听器的 ul。所以委托代码里几乎总要写 closest：从 e.target 出发向上找回业务节点（li），而不是直接把 e.target 当成 li 用——漏了这一步，点中文字时整个委托逻辑就失灵。'
+    },
+    {
+      id: 'm7-handwrite-dom-q2',
+      type: 'code',
+      stem: '实现 myClosest(node, isMatch)：模拟事件委托里 closest 的匹配思路——从 node 出发（含自身），沿着 parent 引用一路向上（node.parent 为 null 表示到顶），返回第一个满足 isMatch(节点) 的节点；找不到返回 null。判题用普通对象模拟 DOM 树（沙箱里没有真实 DOM）。',
+      stub: 'function myClosest(node, isMatch) {\n  // 在此实现：沿 parent 链向上查找第一个满足 isMatch 的节点（含自身）\n  // 提示：从 node 自己开始逐层向上，parent 为 null 时停止\n}\n',
+      reference: 'function myClosest(node, isMatch) {\n  var cur = node;                 // closest 语义：从自身开始找（包含自己）\n  while (cur) {\n    if (isMatch(cur)) return cur; // 命中：立即返回当前节点\n    cur = cur.parent;             // 未命中：沿 parent 向上走一步\n  }\n  return null;                    // 走到顶（parent 为 null）仍未命中\n}',
+      asserts: [
+        '(function(){var b={id:"btn",parent:{id:"li",parent:{id:"ul",parent:null}}};var r=myClosest(b,function(n){return n.id==="li";});return !!r&&r.id==="li";})()',
+        '(function(){var b={id:"btn",parent:{id:"li",parent:null}};var r=myClosest(b,function(n){return n.id==="btn";});return !!r&&r.id==="btn";})()',
+        '(function(){var b={id:"btn",parent:null};return myClosest(b,function(n){return n.id==="body";})===null;})()',
+        'myClosest(null,function(){return true;})===null'
+      ],
+      explain: '四条断言对应 closest 的四个语义点：第 1 条是主场景——从最深被点元素（btn）向上找到业务节点（li），这正是事件委托里「e.target 可能很深，要向上找回 li」的那一步；第 2 条验证「包含自身」——closest 的匹配范围含起点本身（点中的恰好就是目标节点时要能直接命中）；第 3 条验证「到顶未命中返回 null」——链走到 parent 为 null 就要停，不能死循环也不能返回 undefined；第 4 条验证入参防御——node 本身为 null 时直接返回 null。真实浏览器里，isMatch 对应 element.matches(selector)，而 while 循环对应沿 parentElement / parentNode 上溯；理解了这层「向上找」的通用思路，closest、jQuery 的 parents、组件库里的「找最近可滚动父容器」都是同一套写法。'
+    },
+    {
+      id: 'm7-handwrite-dom-q3',
+      type: 'code',
+      stem: '实现简版 myStringify(value)：行为与 JSON.stringify 一致——支持字符串 / 数字 / 布尔值 / null / 数组 / 普通对象（可嵌套）。规则：字符串输出带双引号；对象里的 undefined 和函数整个键丢弃；数组里的 undefined 和函数输出为 null。',
+      stub: 'function myStringify(value) {\n  // 在此实现：简版 JSON.stringify\n  // 提示 1：先处理基本类型与 null，再分支数组与对象，递归拼字符串\n  // 提示 2：undefined / 函数 —— 在对象里丢键，在数组里变 "null"\n}\n',
+      reference: 'function myStringify(value) {\n  function encode(v, inArray) {              // inArray：数组内的 undefined / 函数要变 "null"\n    if (v === null) return \'null\';\n    var t = typeof v;\n    if (t === \'string\') return \'"\' + v + \'"\';\n    if (t === \'number\' || t === \'boolean\') return String(v);\n    if (t === \'function\' || v === undefined) return inArray ? \'null\' : null; // 对象里：整个键丢弃\n    if (Array.isArray(v)) {\n      var arr = [];\n      for (var i = 0; i < v.length; i++) arr.push(encode(v[i], true));\n      return \'[\' + arr.join(\',\') + \']\';\n    }\n    var pairs = [];\n    for (var key in v) {\n      if (Object.prototype.hasOwnProperty.call(v, key)) {\n        var s = encode(v[key], false);\n        if (s !== null) pairs.push(\'"\' + key + \'":\' + s); // 值序列化为 null 的键直接丢弃\n      }\n    }\n    return \'{\' + pairs.join(\',\') + \'}\';\n  }\n  return encode(value, false);\n}',
+      asserts: [
+        'myStringify({a:1,b:"x",c:null}) === \'{"a":1,"b":"x","c":null}\'',
+        'myStringify([1,"two",false,null]) === \'[1,"two",false,null]\'',
+        'myStringify({a:undefined,f:function(){},b:2}) === \'{"b":2}\'',
+        'myStringify({list:[{id:1},{id:2}],ok:true}) === \'{"list":[{"id":1},{"id":2}],"ok":true}\''
+      ],
+      explain: '四条断言由浅入深：第 1 条覆盖对象的基本类型值与 null——null 必须输出 "null" 而不是被丢弃（它是有意义的空值）；第 2 条覆盖数组分支，注意数组里的 null 也要原样输出；第 3 条是本题主考点——对象里的 undefined 和函数「整个键丢弃」（原生行为如此，接口按需裁剪字段就靠它），断言里 a 和 f 消失、只剩 b；第 4 条验证嵌套对象数组与多个键的拼接顺序。两个实现要点：遍历对象用 for...in 但必须配 hasOwnProperty 过滤，否则原型链上的可枚举属性会被一起序列化（这正是前置页「原型链」的实战应用）；为什么数组里的 undefined 要补 "null" 而对象里直接丢键——数组靠索引对位，丢掉中间元素会让后面全部错位，所以原生选择占位。工程完整版还要处理循环引用（WeakMap 登记，重复出现即抛错）、Date 转 ISO 字符串、NaN/Infinity 转 null——面试时主动说出这些边界，比写完主干更加分。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（会推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：班主任只在校门口收全班的信——事件委托 vs 逐个绑定（纯 DOM 手写，零外部库）。
+   真实可点击：点信触发真冒泡；委托模式走「门口监听器 + closest」；逐个绑定模式每封信各挂监听器，
+   转来的新同学没赶上绑定，点他的信什么都不会发生——事故现场直观可见。 */
+(function () {
+  'use strict';
+  var students = ['小明', '小红', '小刚', '小丽']; // 班级名单（每人一封信）
+  var addedNew = false;                            // 新同学是否已转入
+  var mode = 'delegate';                           // delegate=委托 / direct=逐个绑定
+  var doneMap = {};                                // 已收的信：学生名 → true（收信打勾）
+
+  var gateEl = document.getElementById('dm-gate');
+  var classEl = document.getElementById('dm-class');
+  var countEl = document.getElementById('dm-count');
+  var consoleEl = document.getElementById('dm-console');
+  var delegateBtn = document.getElementById('dm-mode-delegate');
+  var directBtn = document.getElementById('dm-mode-direct');
+  var addBtn = document.getElementById('dm-add');
+  var resetBtn = document.getElementById('dm-reset');
+
+  /* 向控制台追加一行日志，并自动滚到底部 */
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* 渲染班级：每次整体重建节点——逐个绑定模式下的旧监听器随旧节点一起销毁，天然防重复绑定 */
+  function render() {
+    classEl.innerHTML = '';
+    students.forEach(function (name) {
+      var box = document.createElement('div');
+      box.className = 'dm-student' + (name === '新同学' ? ' is-new' : '');
+
+      var letter = document.createElement('div');
+      letter.className = 'dm-letter';
+      letter.setAttribute('data-name', name);       // 业务信息挂在 data 属性上，模拟真实 DOM 的语义
+      if (doneMap[name]) letter.classList.add('is-done');
+      if (mode === 'direct' && name === '新同学') letter.classList.add('is-dead'); // 漏绑视觉提示
+
+      if (mode === 'direct') {
+        /* 逐个绑定模式：每封信各挂一个监听器（委托模式下信上没有任何监听器） */
+        letter.addEventListener('click', function () {
+          doneMap[name] = true;
+          letter.classList.add('is-done');
+          log('逐个绑定：「' + name + '的信」自己的监听器处理了点击（全班共 ' + students.length + ' 个监听器，各管各的）', 'is-ok');
+        });
+      }
+
+      var nameEl = document.createElement('div');
+      nameEl.className = 'dm-name';
+      nameEl.textContent = name;
+      box.appendChild(letter);
+      box.appendChild(nameEl);
+      classEl.appendChild(box);
+    });
+
+    countEl.textContent = mode === 'delegate'
+      ? '监听器数量：1 个（委托：只设在校门口，覆盖全班含新同学）'
+      : '监听器数量：' + students.length + ' 个（逐个绑定：每封信各挂一个，新同学的信没有）';
+    delegateBtn.classList.toggle('is-on', mode === 'delegate');
+    directBtn.classList.toggle('is-on', mode === 'direct');
+  }
+
+  /* 校门口监听器：整段脚本只挂一次（委托模式的全部核心就是这一处） */
+  gateEl.addEventListener('click', function (ev) {
+    if (mode !== 'delegate') return;                // 逐个绑定模式下门口没人值守：直接放行
+    var target = ev.target;
+    if (!target.classList || !target.classList.contains('dm-letter')) return; // 只关心信，别的不理
+
+    var owner = target.getAttribute('data-name') || '某位同学';
+    var studentEl = target.closest ? target.closest('.dm-student') : null;   // 向上找业务节点
+
+    doneMap[owner] = true;
+    target.classList.add('is-done');
+    log('① 点击发生：e.target =「' + owner + '的信」（真正被点的最深元素）', 'is-ok');
+    log('② 事件冒泡：信 → 学生 → 班级 → 校门口，一路上没有任何监听器接');
+    log('③ 班主任在校门口收信：e.target.closest(".dm-student") 定位到「' +
+      (studentEl ? studentEl.querySelector('.dm-name').textContent : owner) + '」，登记完成', 'is-end');
+  });
+
+  /* 切换绑定模式：重建节点即完成重绑，方便对比两种策略 */
+  function setMode(m) {
+    if (mode === m) return;
+    mode = m;
+    render();
+    if (m === 'delegate') {
+      log('已切换到「委托模式」：全班只有校门口 1 个监听器。', 'is-muted');
+    } else {
+      log('已切换到「逐个绑定模式」：每封信各挂 1 个监听器，共 ' + students.length + ' 个。', 'is-muted');
+    }
+  }
+
+  /* 新同学转入：委托模式零成本覆盖；逐个绑定模式直接漏绑 */
+  addBtn.addEventListener('click', function () {
+    if (addedNew) return;
+    addedNew = true;
+    students.push('新同学');
+    addBtn.disabled = true;
+    render();
+    if (mode === 'delegate') {
+      log('新同学转来！委托模式无需任何重新绑定——校门口的监听器天然覆盖他（动态子元素零成本）', 'is-ok');
+    } else {
+      log('新同学转来！注意：逐个绑定模式下他的信没赶上绑定那一批——现在点他的信，什么都不会发生（漏绑事故）', 'is-end');
+    }
+  });
+
+  function reset() {
+    students = ['小明', '小红', '小刚', '小丽'];
+    addedNew = false;
+    doneMap = {};
+    mode = 'delegate';
+    addBtn.disabled = false;
+    consoleEl.innerHTML = '';
+    log('已重置：委托模式。点击任意一封信，观察冒泡与 closest 的收信过程。', 'is-muted');
+    render();
+  }
+
+  delegateBtn.addEventListener('click', function () { setMode('delegate'); });
+  directBtn.addEventListener('click', function () { setMode('direct'); });
+  resetBtn.addEventListener('click', reset);
+  render();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>跨域与 CORS · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ===== 本页动画专用样式：小区门禁模拟「简单请求 / 预检请求」的放行流程 ===== */
+.co-lane { display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0; }
+.co-role {
+  flex: 1 1 180px; min-width: 170px; padding: 10px 12px; border-radius: 10px;
+  border: 2px solid #d5dbe7; background: #f7f9fc;
+  transition: border-color .25s, box-shadow .25s;
+}
+.co-role.is-active { border-color: #4C6FFF; box-shadow: 0 0 0 3px #eef2ff; }
+.co-role-name { font-weight: 700; font-size: 13px; color: #41506b; margin-bottom: 6px; }
+.co-role-body { font-size: 12px; color: #6a7690; min-height: 34px; line-height: 1.6; }
+.co-slots { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.co-slot {
+  font-size: 12px; padding: 5px 8px; border-radius: 7px; text-align: center;
+  border: 1px dashed #b9c3d6; background: #fff; color: #8a93a6;
+  transition: background .25s, border-color .25s, color .25s;
+}
+.co-slot.is-on { border: 1px solid #4C6FFF; background: #eef2ff; color: #2c47c7; font-weight: 600; }
+.co-kind { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+.co-kind-btn { cursor: default; }
+.co-kind-btn.is-picked { border-color: #4C6FFF; background: #eef2ff; color: #2c47c7; font-weight: 700; }
+</style>
+</head>
+<body data-page="m2-cors">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">知识点：跨域与 CORS（建议学习时长约 25 分钟）——同源策略、简单请求与预检请求、关键响应头与携带 Cookie 的跨域。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>本页前置依赖：<a href="./m2-http.html">HTTP/1.1、HTTP/2 与 HTTP/3</a>——先知道「请求由方法、头部、正文组成」，才能理解「带自定义头的请求为什么要多走一步」。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：分小标题推进 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、同源策略：浏览器的「小区门禁」</h3>
+    <p>两个地址要算<strong>同源</strong>，必须<strong>协议、域名、端口三者完全一致</strong>：协议不同（https 对 http）、域名不同（a.com 对 b.com）、端口不同（443 对 8443），任何一个对不上都算「跨域」。
+      这条规矩叫<strong>同源策略</strong>，是浏览器最核心的安全防线：没有它，你登录过的任何网站，都能被另一个恶意网页用你的身份随意读写。
+      注意两点边界：其一，跨域限制是<strong>浏览器行为</strong>，服务器之间的调用（如后端互调、curl）不存在跨域；其二，<code>img</code>、<code>script</code> 等标签本身可以跨域加载资源（所以能用 CDN），被限制的主要是「<strong>脚本读取跨域响应内容</strong>」这类操作。</p>
+
+    <h3>二、CORS：服务器主动发放的「通行许可」</h3>
+    <p>跨域不是要一刀切禁止，而是要「经过许可」。<strong>CORS（跨源资源共享）</strong>就是这套许可机制：服务器在响应头里写明「我允许哪个来源访问我」，浏览器核对许可后再决定要不要把响应交给页面脚本。
+      三个关键响应头：<code>Access-Control-Allow-Origin</code>（允许的来源，如具体的一个源；带凭证时不能写通配符 <code>*</code>）、
+      <code>Access-Control-Allow-Methods</code>（允许的请求方法）、<code>Access-Control-Allow-Headers</code>（允许的自定义请求头）。</p>
+
+    <h3>三、简单请求：直接放行，事后查票</h3>
+    <p>并非所有跨域请求都要多走一步。同时满足下面条件的算<strong>简单请求</strong>，浏览器直接发出，收到响应后再核对许可：</p>
+    <p>① 方法是 GET、POST、HEAD 之一；② 请求头只包含安全名单里的字段（如 Accept、Accept-Language、Content-Language 等少数几个）；
+      ③ <code>Content-Type</code> 仅限于 <code>text/plain</code>、<code>application/x-www-form-urlencoded</code>、<code>multipart/form-data</code> 三种传统表单类型。
+      这些都是早年间 HTML 表单就能发出的「祖传请求」，服务器本来就得有能力处理它们，所以浏览器放心直接发。</p>
+
+    <h3>四、预检请求：先递签证明，再放正主</h3>
+    <p>不满足简单请求条件的（比如带 <code>X-Token</code> 自定义头、用 PUT/DELETE 方法、Content-Type 是 <code>application/json</code>），浏览器会<strong>先拦下真正的请求</strong>，改发一个 <code>OPTIONS</code> 方法的<strong>预检请求</strong>：
+      「我接下来想用某某方法、某某头来访问你，可以吗？」服务器用 Allow-Origin / Allow-Methods / Allow-Headers 回复许可；预检通过后，浏览器才发出真正的请求。
+      预检是<strong>每个新请求序列开始前的一次额外往返</strong>，可以通过 <code>Access-Control-Max-Age</code> 让浏览器把预检结果缓存一段时间，减少重复 OPTIONS。
+      面试常问「为什么要有 OPTIONS」：因为非简单请求可能携带服务器没预期过的能力（新方法、新头部），先确认可以避免服务器收到它无法安全处理的「写操作」请求。</p>
+
+    <h3>五、跨域携带 Cookie：身份不能随便外借</h3>
+    <p>默认情况下，跨域请求<strong>不带</strong> Cookie。要带上，前后端要同时配合：前端在 fetch 中把 <code>credentials</code> 设为 <code>'include'</code>（XHR 则设 <code>withCredentials = true</code>）；
+      服务端除了允许该来源，还必须返回 <code>Access-Control-Allow-Credentials: true</code>，且此时 <code>Access-Control-Allow-Origin</code> <strong>不能是通配符 <code>*</code></strong>，必须写明确的具体来源——「允许全世界」和「允许刷卡进入」不能同时成立。</p>
+
+    <h3>六、JSONP：老办法与它的退场</h3>
+    <p>在 CORS 普及之前，常用的跨域取数手段是 JSONP：<code>script</code> 标签加载不受同源策略限制，于是让服务器把数据包在一个函数调用里返回，页面提前定义好这个函数就能收到数据。
+      但它<strong>只能 GET</strong>、需要服务端特殊配合、且执行的是「远端返回的代码」，安全性差。如今首选 CORS，JSONP 只在兼容极老浏览器时才考虑。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 阳光小区住户去月光公寓串门</div>
+      <p>小陈住在「阳光小区」（页面所在的源），想去「月光公寓」（另一个源的服务器）拿点东西。月光公寓门口有保安（浏览器）把守——这是小区门禁（同源策略）。
+        小陈直接往里闯是不行的：就算他溜进去了（请求其实发出了），保安也会把他带回来的东西当场扣下（浏览器拦截跨域响应）。
+        除非月光公寓物业在门口贴出告示：「允许阳光小区居民进入」（<code>Access-Control-Allow-Origin</code> 指明来源），保安核对告示后才放行。
+        如果小陈要带一个大箱子（自定义头 X-Token）进去，规矩更严：保安会<strong>先不让正主进门</strong>，而是自己跑去物业前台问一句「这个人能带箱子进吗？」（OPTIONS 预检），
+        物业答复「可以，箱子也报备过了」（Allow-Methods / Allow-Headers），保安这才回去放正主进来——多跑一趟，但保障了公寓安全。
+        至于门禁卡（Cookie）：物业明说「只许阳光小区这位住户刷卡」（具体来源 + Allow-Credentials），而不能挂一块「谁都能刷卡」的牌子（通配符）——身份凭证绝不发给匿名大众。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：门禁放行流程，可切换请求形态并单步执行 -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>切换请求形态，单步观察「简单请求直接放行」与「非简单请求先过预检」的区别：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">三个角色：页面（阳光小区住户）→ 浏览器（保安亭）→ 服务器（月光公寓物业）。
+        先选请求形态，再反复点「单步执行」；对比两种形态的步数，就能看出预检多了一次往返：</p>
+      <div class="co-kind">
+        <span class="fg-muted">请求形态：</span>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm co-kind-btn is-picked" id="co-kind-simple">普通 GET（简单请求）</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm co-kind-btn" id="co-kind-complex">带 X-Token 头（非简单请求）</button>
+      </div>
+      <div class="co-lane">
+        <div class="co-role" id="co-role-page">
+          <div class="co-role-name">页面 · 阳光小区住户</div>
+          <div class="co-role-body" id="co-page-body">在家里，还没出发</div>
+        </div>
+        <div class="co-role" id="co-role-gate">
+          <div class="co-role-name">浏览器 · 保安亭</div>
+          <div class="co-role-body" id="co-gate-body">站岗中，放行前要核对物业告示</div>
+          <div class="co-slots">
+            <span class="co-slot" id="co-slot-pre">预检通道（OPTIONS）</span>
+            <span class="co-slot" id="co-slot-real">正式请求通道</span>
+          </div>
+        </div>
+        <div class="co-role" id="co-role-server">
+          <div class="co-role-name">服务器 · 月光公寓物业</div>
+          <div class="co-role-body" id="co-server-body">物业告示：尚未张贴</div>
+        </div>
+      </div>
+      <div class="anim-console" id="co-console"></div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="co-step">单步执行</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="co-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（全部为课程数据中的真实 path） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="./m2-http.html">HTTP/1.1、HTTP/2 与 HTTP/3</a>——看懂请求方法、请求头与 OPTIONS，才明白预检在检什么。</p>
+    <p><strong>向后延伸</strong>：同源策略挡住的「坏人」只是安全体系的入口，接下来系统学习 XSS / CSRF 防御，见<a href="./m2-security.html">Web 安全：XSS、CSRF 与 CSP</a>；
+      CORS 携带 Cookie 的许可机制，与登录态在服务端如何保管直接相关，见<a href="../m6/m6-session.html">Cookie、Session 与鉴权基础</a>。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="../m6/m6-rest.html">RESTful API 设计</a> —— 前后端分离下 API 常部署在不同源，Allow-Methods 能不能放开 PUT/DELETE 由接口设计决定</li>
+      <li><a href="./m2-storage.html">浏览器存储：Cookie、Web Storage 与 IndexedDB</a> —— Cookie 正是「跨域携带凭证」的主角，其作用域属性与同源判定同源同根</li>
+      <li><a href="./m2-https.html">HTTPS 与 TLS 握手</a> —— 协议不同的两个地址就算跨域，部署时统一走 https 是减少跨域麻烦的第一步</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（mode:'main'，判分写入进度仓库） -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后会把最佳成绩写入进度仓库，并推进复习计划：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：浏览器是个严格的小区保安——别的「小区」想拿你这儿的资源，得由你家物业在门口贴出「欢迎某小区」的告示（CORS 响应头）；来客带的东西多（自定义头等），保安还要先跑去问一趟物业（OPTIONS 预检）才放人。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前复述「简单请求三条件 + 预检三个 Allow 头」；1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：经典问法，答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：为什么会出现 OPTIONS 请求？什么条件算「简单请求」？</summary>
+      <ul>
+        <li>非简单请求在正式发送前，浏览器会先发一个 OPTIONS 方法的预检请求，询问目标服务器「允许这个来源用这些方法、这些头访问吗」。</li>
+        <li>简单请求三条件（同时满足）：方法为 GET / POST / HEAD；请求头仅限安全名单字段（Accept、Accept-Language、Content-Language 等）；Content-Type 仅限 text/plain、application/x-www-form-urlencoded、multipart/form-data。</li>
+        <li>预检的意义：非简单请求可能携带服务器未预期的能力（自定义头、PUT/DELETE 等写操作），先确认可避免服务器收到无法安全处理的请求。</li>
+        <li>预检响应用 Access-Control-Allow-Origin / Allow-Methods / Allow-Headers 表明许可；Access-Control-Max-Age 可让浏览器缓存预检结果，减少重复 OPTIONS。</li>
+        <li>加分项：指出预检是浏览器行为，服务器之间互调、用工具直接请求接口都不会触发。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：跨域请求要带上 Cookie，前后端分别要做什么？JSONP 与 CORS 怎么取舍？</summary>
+      <ul>
+        <li>前端：fetch 把 credentials 设为 'include'（XHR 则 withCredentials = true）；不带凭证的跨域默认不发送 Cookie。</li>
+        <li>服务端：返回 Access-Control-Allow-Credentials: true，且 Access-Control-Allow-Origin 必须是具体来源，不能是通配符 *——「匿名放行」与「凭证放行」互斥。</li>
+        <li>JSONP：利用 script 标签不受同源限制，服务端把数据包进函数调用返回；只能 GET、需服务端配合、执行远端代码有安全隐患。</li>
+        <li>取舍：首选 CORS（方法、头部、凭证支持完整，纯头部协商、不执行远端代码）；JSONP 仅在兼容极老浏览器且只读 GET 的场景下考虑。</li>
+        <li>加分项：提到开发环境的替代思路——由构建工具的开发服务器做代理转发，让请求「同源化」，从源头绕开跨域。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm2-cors'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'）：题目 id 以知识点 id 开头 */
+  var WARMUP = [{
+    id: 'm2-cors-warmup-1',
+    type: 'single',
+    stem: '预热：与「a.com 的 https 页面（默认端口）上的 /index.html」同源的是哪个地址？',
+    options: [
+      'a.com 的 http 页面上的 /api/list（路径不同没关系）',
+      'a.com:8443 的 https 地址上的 /index.html（端口写法不同而已）',
+      '子域 c.a.com 上的 /index.html（主域一样）',
+      'a.com:443 上的 /user/list（路径完全不同）'
+    ],
+    answer: [3],
+    explain: '同源判定只看三件事：协议、域名、端口，路径不参与判定。A 协议不同（https 对 http）；B 端口不同（默认 443 对 8443）；C 域名不同（a.com 对 c.a.com，子域也算不同源）；D 虽然路径不同，但三者完全一致，是同源。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm2-cors-q1',
+      type: 'single',
+      stem: '下列哪种跨域请求会触发浏览器先发出 OPTIONS 预检请求？',
+      options: [
+        '不带任何自定义头的 GET 请求',
+        'Content-Type 为 text/plain 的 POST 请求',
+        '携带自定义头 X-Token 的 GET 请求',
+        '用 img 标签加载另一源的图片'
+      ],
+      answer: [2],
+      explain: '简单请求「直接发出、事后核对」：A 是 GET 且无自定义头，属简单请求；B 的 Content-Type 在三种传统表单类型之列，也算简单请求；C 带了安全名单之外的自定义头，浏览器无法确定服务器是否认识它，必须先发 OPTIONS 预检确认 Allow-Headers；D 的 img 标签加载本身不受 CORS 约束，压根不触发预检。'
+    },
+    {
+      id: 'm2-cors-q2',
+      type: 'multi',
+      stem: '关于「跨域请求携带 Cookie」，下列说法正确的有哪些？（多选，全部选对才得分）',
+      options: [
+        '前端需要把 fetch 的 credentials 设为 include（XHR 则设 withCredentials = true）',
+        '服务端把 Access-Control-Allow-Origin 设为通配符 * 即可支持带 Cookie 的跨域',
+        '服务端还需要返回 Access-Control-Allow-Credentials: true',
+        '只要前端设置了携带 Cookie，浏览器就会自动放开所有跨域限制'
+      ],
+      answer: [0, 2],
+      explain: 'A 对：不带凭证是跨域请求的默认行为，带 Cookie 必须显式声明。C 对：服务端除了允许来源，还要用 Allow-Credentials 明确同意发放凭证。B 错：通配符与凭证互斥——「允许全世界」意味着 Cookie 可能发给任何站点，浏览器强制要求此时写明确的具体来源。D 错：设置凭证只是「携带身份」，响应仍要过 Allow-Origin 等头的核对，其他跨域限制一样不少。'
+    },
+    {
+      id: 'm2-cors-q3',
+      type: 'code',
+      stem: '实现同源判定函数 isSameOrigin(urlA, urlB)：两个 URL 的协议、主机名、端口都相同才算同源；URL 中省略端口时按协议默认端口处理（http 默认 80、https 默认 443）。提示：可以创建一个 a 元素并设置 href，借助浏览器解析出 protocol / hostname / port。',
+      stub: 'function isSameOrigin(urlA, urlB) {\n  // 提示：\n  // 1. 写一个内部函数 parse(url)：创建 a 元素、设置 href，\n  //    返回 { protocol, hostname, port }\n  // 2. port 为空串时补默认值：https 是 443，其余按 80 处理\n  // 3. 三项分别比较，全部相同返回 true\n}\n',
+      reference: 'function isSameOrigin(urlA, urlB) {\n  // 借助 a 元素让浏览器替我们解析 URL（协议 / 主机名 / 端口）\n  function parse(url) {\n    var a = document.createElement(\'a\');\n    a.href = url;\n    var port = a.port; // 省略端口时 a.port 是空串，需补协议默认端口\n    if (!port) {\n      port = (a.protocol === \'https:\') ? \'443\' : \'80\';\n    }\n    return { protocol: a.protocol, hostname: a.hostname, port: port };\n  }\n  var x = parse(urlA);\n  var y = parse(urlB);\n  return x.protocol === y.protocol &&\n         x.hostname === y.hostname &&\n         x.port === y.port;\n}',
+      asserts: [
+        "isSameOrigin('https://a.com/x', 'https://a.com/y/z') === true",
+        "isSameOrigin('https://a.com', 'http://a.com') === false",
+        "isSameOrigin('https://a.com', 'https://a.com:8443') === false",
+        "isSameOrigin('http://a.com:80/x', 'http://a.com') === true"
+      ],
+      explain: '四条断言对应同源判定的四个要点：第一条验证「路径不参与判定」，同源比较的只有协议、主机名、端口；第二条验证协议必须一致，https 与 http 哪怕域名端口都相同也不是同源；第三条验证端口必须一致，8443 不是默认的 443；第四条验证默认端口的归一化——写明 :80 与省略端口是同一个源，这正是「手动拼接字符串比较」容易翻车、需要先归一化再比较的原因。借助 a 元素解析而不是自己写正则，是因为浏览器对 URL 的容错规则（编码、默认值）远比想象复杂，交给浏览器最稳。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：小区门禁模拟「简单请求 / 预检请求」（纯 DOM 手写，无动画库） */
+(function () {
+  'use strict';
+  var consoleEl = document.getElementById('co-console');
+  var rolePageEl = document.getElementById('co-role-page');
+  var roleGateEl = document.getElementById('co-role-gate');
+  var roleServerEl = document.getElementById('co-role-server');
+  var pageBodyEl = document.getElementById('co-page-body');
+  var gateBodyEl = document.getElementById('co-gate-body');
+  var serverBodyEl = document.getElementById('co-server-body');
+  var slotPreEl = document.getElementById('co-slot-pre');
+  var slotRealEl = document.getElementById('co-slot-real');
+  var simpleBtn = document.getElementById('co-kind-simple');
+  var complexBtn = document.getElementById('co-kind-complex');
+  var stepBtn = document.getElementById('co-step');
+  var resetBtn = document.getElementById('co-reset');
+
+  var kind = 'simple';  // 当前请求形态：simple=普通 GET / complex=带 X-Token 自定义头
+  var phase = 0;        // 当前推进到第几步
+  var ended = false;    // 本轮是否已交付完成
+
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  function setActive(el) {
+    rolePageEl.classList.remove('is-active');
+    roleGateEl.classList.remove('is-active');
+    roleServerEl.classList.remove('is-active');
+    if (el) el.classList.add('is-active');
+  }
+
+  function renderKindButtons() {
+    simpleBtn.classList.toggle('is-picked', kind === 'simple');
+    complexBtn.classList.toggle('is-picked', kind === 'complex');
+  }
+
+  /* 重置三个角色的展示状态 */
+  function renderIdle() {
+    pageBodyEl.textContent = '在家里，还没出发';
+    gateBodyEl.textContent = '站岗中，放行前要核对物业告示';
+    serverBodyEl.textContent = '物业告示：尚未张贴';
+    slotPreEl.classList.remove('is-on');
+    slotRealEl.classList.remove('is-on');
+  }
+
+  function reset() {
+    ended = false;
+    phase = 0;
+    stepBtn.disabled = false;
+    consoleEl.innerHTML = '';
+    renderKindButtons();
+    renderIdle();
+    setActive(null);
+    log((kind === 'simple' ? '普通 GET（简单请求）' : '带 X-Token 头（非简单请求）') +
+      ' 已就绪。点「单步执行」逐步观察放行流程…', 'is-muted');
+  }
+
+  /* 单步执行：简单请求 4 步走完；非简单请求因预检多走 2 步（共 6 步），对比一目了然 */
+  function step() {
+    if (ended) return;
+    if (kind === 'simple') {
+      if (phase === 0) {
+        setActive(rolePageEl);
+        pageBodyEl.textContent = '向月光公寓发起 GET 请求（跨域）';
+        log('第 1 步：页面发起跨域 GET 请求（不带自定义头）');
+      } else if (phase === 1) {
+        setActive(roleGateEl);
+        slotRealEl.classList.add('is-on');
+        gateBodyEl.textContent = '判定：GET + 安全头 → 简单请求，免预检';
+        log('第 2 步：保安判定——方法是 GET、头部都在安全名单内 → 简单请求，无需预检，直接转发', 'is-ok');
+      } else if (phase === 2) {
+        setActive(roleServerEl);
+        serverBodyEl.textContent = '物业告示：Allow-Origin: 阳光小区';
+        log('第 3 步：物业处理请求，响应上贴告示「Allow-Origin: 阳光小区」');
+      } else if (phase === 3) {
+        setActive(roleGateEl);
+        gateBodyEl.textContent = '核对告示 → 允许 → 响应交付页面';
+        pageBodyEl.textContent = '拿到数据，页面渲染成功';
+        log('第 4 步：保安核对告示，来源匹配 → 响应交给页面脚本 ✓ 完成（简单请求共 4 步）', 'is-end');
+        ended = true;
+        stepBtn.disabled = true;
+      }
+    } else {
+      if (phase === 0) {
+        setActive(rolePageEl);
+        pageBodyEl.textContent = '发起带 X-Token 头的跨域请求';
+        log('第 1 步：页面发起跨域请求，携带自定义头 X-Token');
+      } else if (phase === 1) {
+        setActive(roleGateEl);
+        slotPreEl.classList.add('is-on');
+        gateBodyEl.textContent = '发现自定义头 → 先拦下正主，改发预检';
+        log('第 2 步：保安发现非简单请求（自定义头在安全名单之外）→ 先拦下正式请求', 'is-end');
+      } else if (phase === 2) {
+        setActive(roleServerEl);
+        serverBodyEl.textContent = '预检答复：Allow-Origin: 阳光小区 / Allow-Headers: X-Token';
+        log('第 3 步：保安代发 OPTIONS 预检：「这位住户能用 X-Token 头进来吗？」物业答复允许');
+      } else if (phase === 3) {
+        setActive(roleGateEl);
+        slotPreEl.classList.remove('is-on');
+        slotRealEl.classList.add('is-on');
+        gateBodyEl.textContent = '预检通过 → 现在才放行正式请求';
+        log('第 4 步：保安核对预检答复，许可齐全 → 这才放行真正的请求（预检多跑了一趟）', 'is-ok');
+      } else if (phase === 4) {
+        setActive(roleServerEl);
+        serverBodyEl.textContent = '物业告示：Allow-Origin: 阳光小区';
+        log('第 5 步：物业处理正式请求，响应上贴告示');
+      } else if (phase === 5) {
+        setActive(roleGateEl);
+        gateBodyEl.textContent = '核对告示 → 允许 → 响应交付页面';
+        pageBodyEl.textContent = '拿到数据，页面渲染成功';
+        log('第 6 步：保安核对告示 → 响应交付页面 ✓ 完成（非简单请求共 6 步，比简单请求多一次预检往返）', 'is-end');
+        ended = true;
+        stepBtn.disabled = true;
+      }
+    }
+    phase += 1;
+  }
+
+  simpleBtn.addEventListener('click', function () {
+    kind = 'simple';
+    reset();
+  });
+  complexBtn.addEventListener('click', function () {
+    kind = 'complex';
+    reset();
+  });
+  stepBtn.addEventListener('click', step);
+  resetBtn.addEventListener('click', reset);
+  reset();
+})();
+</script>
+</body>
+</html>

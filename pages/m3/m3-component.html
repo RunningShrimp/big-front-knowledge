@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>组件设计原则 · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ===== 本页动画专用样式（纯手写，无外部资源） ===== */
+.cp-board {
+  border: 1px solid var(--fg-c-line); border-radius: 8px;
+  background: var(--fg-c-card); padding: 14px; min-height: 120px; margin: 10px 0;
+}
+.cp-monolith {
+  border: 2px solid var(--fg-c-bad); border-radius: 8px; padding: 10px 12px;
+  background: var(--fg-c-bad-weak); font-size: 13px; transition: transform .4s, opacity .4s;
+}
+.cp-monolith.is-split { transform: scale(.86); opacity: .35; }
+.cp-monolith b { color: var(--fg-c-bad); }
+.cp-slots { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+.cp-slot {
+  flex: 1 1 150px; min-height: 64px; border: 2px dashed var(--fg-c-line);
+  border-radius: 8px; padding: 8px 10px; font-size: 12px; color: var(--fg-c-ink-3);
+  transition: border-color .3s, background .3s;
+}
+.cp-slot.is-filled { border-style: solid; border-color: var(--fg-c-ok); background: var(--fg-c-ok-weak); color: var(--fg-c-ink); }
+.cp-slot .cp-slot-name { font-weight: 700; margin-bottom: 4px; }
+.cp-pool { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.cp-block {
+  font-size: 13px; border: 1px solid var(--fg-c-primary); border-radius: 8px;
+  background: var(--fg-c-primary-weak); color: var(--fg-c-primary);
+  padding: 6px 12px; cursor: pointer; user-select: none; transition: all .3s;
+}
+.cp-block:hover { transform: translateY(-2px); }
+.cp-block:disabled { opacity: .35; cursor: default; transform: none; }
+.cp-likes { display: none; margin-top: 10px; padding: 10px; border: 1px solid var(--fg-c-line); border-radius: 8px; font-size: 13px; }
+.cp-likes.is-visible { display: block; }
+.cp-likes-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0; }
+.cp-like-btn { font-size: 16px; }
+.cp-count { font-weight: 700; font-size: 18px; color: var(--fg-c-primary); }
+label.cp-radio { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: var(--fg-c-ink-2); }
+</style>
+</head>
+<body data-page="m3-component">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">会用 React/Vue 之后，真正拉开差距的是「怎么把界面拆成对的块」：单一职责、props 契约、组合优于配置、通用组件的演进。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>前置知识：本页讲的是「设计思想」，需要你至少见过一种框架的组件写法。建议先过
+      <a href="./m3-react.html">React 核心与 Hooks</a> 或 <a href="./m3-vue.html">Vue 响应式原理</a> 任一即可——
+      页面里的 props、state、插槽等词都会在那两页里落地成具体语法。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：讲解 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、组件的边界：一个组件只对一件事负责</h3>
+    <p>组件是把「一段界面 + 它的行为」打包成的独立单元。判断拆没拆对，有个朴素标准：
+      <strong>你能用一句不含「和」「还有」的话描述这个组件干什么吗？</strong>「用户头像」可以；「用户头像和关注按钮和粉丝列表」不行——
+      那是三个组件。职责单一的组件改起来不会牵连别人、测起来不用搭一堆脚手架、换个页面还能直接搬走。
+      拆分粒度也别走极端：拆到「一个组件只渲染一个 span」同样是对体力的浪费——<strong>以「复用或变化的可能」为界</strong>：
+      会单独变化、可能被单独复用的部分，才值得独立成块。</p>
+
+    <h3>二、props 设计：组件对外的「合同条款」</h3>
+    <p>props 是父组件与子组件之间的合同。写好这份合同有三条：<strong>① 类型与默认值</strong>——
+      每个 prop 声明类型、给默认值，让错误在开发期就报出来（PropTypes / TS interface 都是在把口头约定变成白纸黑字）；
+      <strong>② 受控 / 非受控要想清楚</strong>——受控组件的值完全由父层状态决定、组件只通过 onChange「上报修改意图」，
+      数据有唯一源头；非受控组件的值存在自己肚子里（DOM 或内部 state），外部只在需要时来取，
+      适合「只关心提交结果」的简单场景；<strong>③ 只进不出地改</strong>——子组件永远不直接改 props，
+      单向数据流是可预测性的底线（这条在 React 一页的「props 只读契约」里展开过）。</p>
+
+    <h3>三、组合优于配置：别把组件写成一万个开关的遥控器</h3>
+    <p>需求总在变：这张卡片要带图、那张要带按钮、第三张要带角标。菜的做法是给 Card 加
+      <code>showImage</code>、<code>showButton</code>、<code>showBadge</code>……三十个 boolean 之后，
+      组件内部全是 <code>if</code>，谁也不敢动——这叫<strong>配置爆炸</strong>。
+      正确姿势是把「变化的部分」作为<strong>内容交出来</strong>：children（React）或插槽（Vue）让调用方自己往里放东西，
+      Card 只负责「卡片的外壳与布局」，放什么由组合决定。render props / 作用域插槽更进一步，
+      把子组件内部的数据交出来让调用方自定义渲染。一句话：<strong>用「预留位置」代替「预测需求」</strong>。</p>
+
+    <h3>四、通用组件的演进路径与 Headless 思想</h3>
+    <p>通用组件很少一次设计成功，通常是被第三个场景复用时才逼出来的：
+      先在业务里老实写 → 出现第二个使用处时<strong>把业务逻辑剥离</strong>（数据请求、埋点留在业务层，组件只管展示）→
+      参数化样式与行为 → 沉淀成通用组件。<strong>Headless（无头）组件</strong>是这条路的尽头形态：
+      组件只提供行为与状态（下拉的开合、焦点管理、键盘导航），渲染完全交给调用方——
+      「逻辑」与「皮」彻底分离，复用逻辑的同时不被别人的样式绑架。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 乐高积木与遥控机器人</div>
+      <p>好的组件体系像<strong>乐高积木</strong>：每一块形状单一——2×4 的砖就是 2×4 的砖——但正因为单一，
+        才能拼出城堡、赛车、宇宙飞船（无限组合）。砖与砖靠统一的凸点接口咬合（props 契约），
+        拼错尺寸插不进去（类型校验当场失败），拆掉一座塔，砖还能拿去拼港口（复用）。</p>
+      <p>坏的设计像造一台<strong>包揽一切的大型遥控机器人</strong>：想加个「喷水」功能，就得在机身里再焊一套水管，
+        再给遥控器加个按钮；功能越加越多，遥控器上三百个键（30 个 boolean props），最后没人敢碰它——
+        因为动一个键，说不定整个机器人散架。改造它的成本，早已超过用积木重新拼一台。</p>
+      <p>组合优于配置，就是「想要新造型时，去拿几块积木重新拼」，而不是「回厂给机器人焊新功能」。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：乐高积木拆分与组合（纯手写，可点击操作） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>一块「什么都管」的巨石组件，如何按单一职责拆成积木、再组合成卡片——最后用点赞小演示体会受控与非受控的区别。
+      全程可点击：先「拆分」，再依次<strong>点击积木放入对应槽位</strong>。</p>
+    <div class="anim-stage">
+      <p class="anim-caption">场景：社交动态卡片。巨型组件里塞了头像、正文、图片、点赞、评论、转发、广告位、埋点上报……</p>
+      <div class="cp-board">
+        <div class="cp-monolith" id="cp-monolith">
+          <b>巨石组件 UserCard 2.0（896 行）</b><br>
+          头像 + 昵称 + 正文 + 图片九宫格 + 点赞 + 评论 + 转发 + 广告位 + 埋点上报 + 皮肤切换（showXxx 共 14 个 boolean）……
+          任何需求都要改这一个文件，任何人改完都要回归测试全部功能。
+        </div>
+        <div class="cp-slots" id="cp-slots">
+          <div class="cp-slot" id="cp-slot-avatar"><div class="cp-slot-name">槽位① 头部区</div>期待积木：AvatarBlock（头像+昵称）</div>
+          <div class="cp-slot" id="cp-slot-content"><div class="cp-slot-name">槽位② 内容区</div>期待积木：ContentBlock（正文+图片）</div>
+          <div class="cp-slot" id="cp-slot-action"><div class="cp-slot-name">槽位③ 操作区</div>期待积木：ActionBarBlock（点赞/评论/转发）</div>
+          <div class="cp-slot" id="cp-slot-ad"><div class="cp-slot-name">槽位④ 可选插槽</div>空着也完全成立——要不要广告，调用方说了算</div>
+        </div>
+      </div>
+      <div class="cp-pool" id="cp-pool"></div>
+      <div class="cp-likes" id="cp-likes">
+        <b>点赞小演示：值存在谁手里？</b>
+        <div class="cp-likes-row">
+          <label class="cp-radio"><input type="radio" name="cp-mode" value="uncontrolled" checked> 非受控（值存组件内部）</label>
+          <label class="cp-radio"><input type="radio" name="cp-mode" value="controlled"> 受控（值存外部 store，props 流回）</label>
+          <button type="button" class="fg-btn fg-btn--primary fg-btn--sm cp-like-btn" id="cp-like">👍 点赞</button>
+          <span>当前显示的点赞数：<span class="cp-count" id="cp-count">10</span></span>
+        </div>
+      </div>
+      <div class="anim-console" id="cp-console">
+        <div class="anim-line is-muted">点击「按单一职责拆分」开始，然后点击积木块尝试装进槽位…</div>
+      </div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="cp-split">按单一职责拆分</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="cp-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（真实课程路径） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="./m3-react.html">React 核心与 Hooks</a> 与 <a href="./m3-vue.html">Vue 响应式原理</a>
+      （二选一即可）——props 只读契约、单向数据流、插槽语法是本页所有原则的载体。</p>
+    <p><strong>向后延伸</strong>：组件设计往「体系」方向走就是 <a href="../m7/m7-design.html">前端侧系统设计</a>
+      里的组件库设计题（Modal / Select 怎么设计）；往「数据」方向走是 <a href="./m3-state.html">状态管理思想</a>——
+      「哪些状态该下沉到组件、哪些该提升共享」正是拆分粒度问题的另一面。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="./m3-state.html">状态管理思想</a> —— 受控组件的「唯一数据源」推到全局，就是 store；组件设计与状态归属互为镜像。</li>
+      <li><a href="../m4/m4-test.html">单元测试与 E2E 测试</a> —— 职责单一、依赖清晰、纯展示的组件才好测；组件设计质量直接决定测试成本。</li>
+      <li><a href="../m7/m7-design.html">前端侧系统设计</a> —— 「设计一个通用组件/组件库」是系统设计题的高频子题，本页原则就是答题素材。</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（含解析），mode:'main' -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后把最佳成绩写入进度仓库（见页面底部内联脚本）：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行听 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：组件设计像拼乐高——每块积木只做一件事、接口统一，要新造型就重新组合几块积木（组合优于配置），
+      而不是造一台三百个按钮的遥控机器人再回厂焊新功能（配置爆炸）；积木之间靠合同（props）连接，值记在谁的账本上（受控/非受控）要先说清楚。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前复述 1 次「单一职责看复用与变化、props 是合同要类型+默认值+受控分明、组合优于配置、Headless 是逻辑与皮的分离」，1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：2 个问法，答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：让你设计一个通用的 Modal 弹窗组件，你会考虑哪些点？</summary>
+      <ul>
+        <li>开关受控：<code>visible</code> 由外部传入、关闭意图通过 <code>onClose</code> 上报——组件不做主，数据有唯一源头；可同时提供非受控快捷用法（defaultVisible）。</li>
+        <li>组合能力：标题、内容、底部按钮全部开放为 children/插槽或命名插槽，绝不用 <code>footerType="a|b|c"</code> 之类的枚举预测需求。</li>
+        <li>挂载与层级：渲染到 body 下的独立容器（类似 React 的 Portal / Vue 的 Teleport），避免被父级 overflow/z-index 困住；多层弹窗做栈式层级管理。</li>
+        <li>交互与可访问性：Esc 关闭、点遮罩可配置、打开时焦点圈定（focus trap）与关闭后焦点归还、role="dialog" 与 aria 属性。</li>
+        <li>工程细节：动画前后生命周期（关闭动画结束再卸载）、滚动锁定、按需加载不拖累首屏。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：组件拆分粒度怎么把握？听说过 Headless 组件吗？</summary>
+      <ul>
+        <li>粒度判据：会「单独变化」或「单独复用」的部分才值得拆；能用一句话（不含「和」）说清职责的组件是合格的组件。</li>
+        <li>两个信号提醒过度拆分：拆完只为传一堆 props 穿针引线（props 钻透）；或一个组件只包着一行标记。过细与过粗都是债。</li>
+        <li>Headless 组件：只提供行为与状态（开合、焦点、键盘导航、选中逻辑），不提供任何视觉，渲染完全交给调用方（如 render props / hooks 形态）。</li>
+        <li>价值：逻辑复用与样式解耦——同一套下拉行为可以长出公司任何一套皮肤，适合沉淀成团队基础设施。</li>
+        <li>加分项：把 Headless 与「组合优于配置」串起来讲——它是对「皮肤永远猜不中」这个问题的终极回答。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 + 乐高拆分组合动画 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm3-component'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'） */
+  var WARMUP = [{
+    id: 'm3-component-warmup-1',
+    type: 'single',
+    stem: '预热：「单一职责原则」用在组件设计上，指的是？',
+    options: [
+      '每个组件的代码行数必须少于 50 行',
+      '一个组件只负责一件事，能用一句不含「和」的话说清它干什么',
+      '一个项目里不允许出现两个相似的组件',
+      '每个组件只能接收一个 props'
+    ],
+    answer: [1],
+    explain: '单一职责关注的是「职责」而非行数或 props 数量：一个组件只对一件事负责，改它只有一个理由、复用它只需要理解一件事。行数与 props 个数只是表象，判据是职责是否单一。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm3-component-q1',
+      type: 'single',
+      stem: '关于受控与非受控组件，下面哪个说法是正确的？',
+      options: [
+        '受控组件的显示值完全由外部传入的状态（props）决定，组件通过 onChange 上报「修改意图」，数据有唯一源头',
+        '受控组件意味着组件内部绝对不能有任何 state',
+        '非受控组件的值由父组件实时决定',
+        '表单一律应该用非受控，因为它性能一定更好'
+      ],
+      answer: [0],
+      explain: '受控的核心是「值的唯一源头在父层」：组件渲染什么由 props 决定，用户输入时组件只是上报 onChange(newVal)，真正改值的是父层。注意 A 与 B 的差别——受控不妨碍组件拥有「与值无关」的内部 state（如「是否正在聚焦」），所以 B 过于绝对。非受控的值存在组件/DOM 自己肚子里，C 说反了；受控与否应按「是否需要实时联动/校验」来选型，D 的「一律」与性能绝对化都站不住。'
+    },
+    {
+      id: 'm3-component-q2',
+      type: 'single',
+      stem: '一个 Card 组件的需求越来越花：有的要带图、有的要带按钮、有的要角标……于是它长出了 30 个 boolean 开关 props。这种设计最主要的问题与更好的做法是？',
+      options: [
+        '问题只是 props 太多不好看；做法是把开关改写成下拉枚举即可',
+        '配置爆炸：组件内部布满 if、改一处要回归全部组合；应改用 children/插槽把「变化的部分」交给调用方组合',
+        '应该把 30 个开关合并成一个 30 种取值的 type 字符串',
+        '应该复制出 30 个专用 Card 组件，一需求一个'
+      ],
+      answer: [1],
+      explain: '30 个 boolean 意味着理论上 2 的 30 次方种组合，组件内部无法穷举测试，任何改动都可能踩中没人用过的分支——这就是配置爆炸。组合优于配置的解法是把「猜不中的内容」开放为 children/插槽：Card 只负责外壳与布局，放图放按钮由调用方组合，新需求不再回厂改组件。C（巨型枚举）只是把爆炸换个形式；D（复制粘贴）牺牲了统一修 bug 与升级的可能。'
+    },
+    {
+      id: 'm3-component-q3',
+      type: 'code',
+      stem: '动手实现组件的「props 契约校验」：实现 validateProps(props, schema)。schema 形如 { name: \'string\', age: \'number\', tags: \'array?\' }——值为类型名，以 ? 结尾表示可选。校验规则：按 schema 的 key 顺序检查；类型不符时向结果 push 一条「key 应为 类型」格式的字符串（如 \'age 应为 number\'）；必填缺失时 push「key 应为 类型（缺失）」；可选项缺失则不报错。返回错误信息数组，全部通过返回空数组。array 类型用 Array.isArray 判断，其余用 typeof。',
+      stub: 'function validateProps(props, schema) {\n  // 1. 按 Object.keys(schema) 的顺序逐条检查\n  // 2. 规则以 ? 结尾 → 可选；去掉 ? 得到类型名\n  // 3. 值缺失：必填 push「key 应为 类型（缺失）」，可选直接跳过\n  // 4. 类型不符：push「key 应为 类型」；array 用 Array.isArray，其余用 typeof\n  // 5. 返回错误数组（全部通过则返回 []）\n}\n',
+      reference: 'function validateProps(props, schema) {\n  var errs = [];\n  Object.keys(schema).forEach(function (key) {\n    var rule = schema[key];\n    var optional = rule.charAt(rule.length - 1) === "?";\n    var type = optional ? rule.slice(0, -1) : rule;\n    var val = props ? props[key] : undefined;\n    if (val === undefined || val === null) {\n      if (!optional) errs.push(key + " 应为 " + type + "（缺失）");\n      return; // 可选且缺失：不报错\n    }\n    var ok = (type === "array") ? Array.isArray(val) : (typeof val === type);\n    if (!ok) errs.push(key + " 应为 " + type);\n  });\n  return errs;\n}',
+      asserts: [
+        'JSON.stringify(validateProps({ name: "小明", age: 3 }, { name: "string", age: "number" })) === "[]"',
+        'var e1 = validateProps({ age: "三岁" }, { name: "string", age: "number" }); e1.length === 2 && e1[0] === "name 应为 string（缺失）" && e1[1] === "age 应为 number"',
+        'JSON.stringify(validateProps({ name: "小明" }, { name: "string", tags: "array?" })) === "[]"',
+        'validateProps({ name: "小明", tags: "很多" }, { name: "string", tags: "array?" }).length === 1'
+      ],
+      explain: 'props 校验就是把「口头约定」变成开发期就报警的合同。三个实现要点：① 用 Object.keys(schema) 遍历而不是 for-in——既保证校验顺序与 schema 一致，也避免扫到原型链上的键；② 可选标记 ? 的解析要在判断缺失之前完成，才能区分「必填缺失」与「可选缺失」两种结局；③ typeof null === "object" 是历史陷阱，所以把 null 也按缺失处理。真实项目里这一层由 PropTypes（运行时警告）或 TypeScript（编译期直接拦截）承担——思路完全相同，只是把检查从运行时提前到了编译期。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（会推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：巨石组件 → 乐高积木拆分 → 组合 + 受控/非受控点赞（纯 DOM 手写） */
+(function () {
+  'use strict';
+
+  var consoleEl = document.getElementById('cp-console');
+  var monolith = document.getElementById('cp-monolith');
+  var splitBtn = document.getElementById('cp-split');
+  var resetBtn = document.getElementById('cp-reset');
+  var poolEl = document.getElementById('cp-pool');
+  var likesEl = document.getElementById('cp-likes');
+  var countEl = document.getElementById('cp-count');
+  var likeBtn = document.getElementById('cp-like');
+
+  /* 积木定义：去往哪个槽位、放进槽位后显示什么、是否可选插槽 */
+  var BLOCKS = {
+    avatar: { label: 'AvatarBlock（头像+昵称）', slot: 'cp-slot-avatar', fill: '头像 + 昵称 —— 只管「这个人是谁」' },
+    content: { label: 'ContentBlock（正文+图片）', slot: 'cp-slot-content', fill: '正文 + 图片九宫格 —— 只管「发了什么」' },
+    action: { label: 'ActionBarBlock（点赞/评论/转发）', slot: 'cp-slot-action', fill: '点赞 / 评论 / 转发 —— 只管「能做什么互动」' },
+    ad: { label: 'AdSlotBlock（广告位·可选）', slot: 'cp-slot-ad', fill: '广告位 —— 想插就插，不插卡片照样成立', optional: true }
+  };
+
+  var split = false;               // 是否已拆分
+  var store = { likes: 10 };       // 外部「唯一数据源」（受控模式用）
+  var localLikes = 10;             // 组件内部的私有值（非受控模式用）
+
+  /* 输出一行日志 */
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* 根据当前受控/非受控模式，渲染「组件显示的点赞数」 */
+  function renderCount() {
+    var mode = document.querySelector('input[name="cp-mode"]:checked').value;
+    countEl.textContent = mode === 'controlled' ? store.likes : localLikes;
+  }
+
+  /* 拆分：巨石退场，积木进场 */
+  function doSplit() {
+    if (split) return;
+    split = true;
+    monolith.classList.add('is-split');
+    splitBtn.disabled = true;
+    poolEl.innerHTML = '';
+    Object.keys(BLOCKS).forEach(function (key) {
+      var b = BLOCKS[key];
+      var chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'cp-block';
+      chip.textContent = b.label;
+      chip.addEventListener('click', function () { place(key, chip); });
+      poolEl.appendChild(chip);
+    });
+    log('拆分完成：896 行巨石按「单一职责」分成 4 块积木——每块都能用一句不含「和」的话说清自己干什么。点击积木把它们装进卡片槽位。', 'is-ok');
+  }
+
+  /* 把某块积木装进对应槽位（组合优于配置：位置由槽位决定，内容由积木决定） */
+  function place(key, chip) {
+    var b = BLOCKS[key];
+    var slot = document.getElementById(b.slot);
+    if (slot.classList.contains('is-filled')) {
+      log(b.label + ' 已经装过了，每块积木各就各位。', 'is-muted');
+      return;
+    }
+    slot.classList.add('is-filled');
+    slot.innerHTML = '<div class="cp-slot-name">' + b.label + '</div>' + b.fill;
+    chip.disabled = true;
+    if (b.optional) {
+      log('AdSlotBlock 进槽位④。注意：这是「可选插槽」——空着卡片照样成立。想要新内容时拿新积木来插（组合），而不是给 Card 加第 15 个 boolean 开关（配置）。', 'is-ok');
+    } else {
+      log(b.label + ' 进槽位：接口咬合靠的是 props 契约（类型、默认值、只读），而不是把内部实现焊死在一起。', 'is-ok');
+    }
+    if (key === 'action') {
+      likesEl.classList.add('is-visible');
+      log('操作区就位后，看看下面的「点赞小演示」：同一颗 👍，值记在谁手里，行为完全不同。', 'is-end');
+    }
+  }
+
+  /* 点赞：受控与非受控两种数据流向 */
+  function like() {
+    var mode = document.querySelector('input[name="cp-mode"]:checked').value;
+    if (mode === 'uncontrolled') {
+      localLikes = localLikes + 1;
+      renderCount();
+      log('非受控：值存在组件内部（自己的账本 +1）。界面加了，但外部 store 依旧是 ' + store.likes + '——父组件、其他模块读到的还是旧数，两份数据就此分叉。', 'is-end');
+    } else {
+      log('受控：组件不改自己的账本，只上报 onChange(' + (store.likes + 1) + ')，由外部 store 更新，再经 props 流回来。', 'is-ok');
+      store.likes = store.likes + 1;
+      renderCount();
+      log('props 回流完成，显示 ' + store.likes + '。任何地方读 store 拿到的都是同一个数——单一数据源，处处一致。', 'is-ok');
+    }
+  }
+
+  function reset() {
+    split = false;
+    monolith.classList.remove('is-split');
+    poolEl.innerHTML = '';
+    likesEl.classList.remove('is-visible');
+    document.getElementById('cp-slot-avatar').className = 'cp-slot';
+    document.getElementById('cp-slot-avatar').innerHTML = '<div class="cp-slot-name">槽位① 头部区</div>期待积木：AvatarBlock（头像+昵称）';
+    document.getElementById('cp-slot-content').className = 'cp-slot';
+    document.getElementById('cp-slot-content').innerHTML = '<div class="cp-slot-name">槽位② 内容区</div>期待积木：ContentBlock（正文+图片）';
+    document.getElementById('cp-slot-action').className = 'cp-slot';
+    document.getElementById('cp-slot-action').innerHTML = '<div class="cp-slot-name">槽位③ 操作区</div>期待积木：ActionBarBlock（点赞/评论/转发）';
+    document.getElementById('cp-slot-ad').className = 'cp-slot';
+    document.getElementById('cp-slot-ad').innerHTML = '<div class="cp-slot-name">槽位④ 可选插槽</div>空着也完全成立——要不要广告，调用方说了算';
+    splitBtn.disabled = false;
+    store = { likes: 10 };
+    localLikes = 10;
+    renderCount();
+    consoleEl.innerHTML = '';
+    log('已重置：巨石组件回来了。先「拆分」，再按槽位提示点击积木拼装卡片。', 'is-muted');
+  }
+
+  splitBtn.addEventListener('click', doSplit);
+  likeBtn.addEventListener('click', like);
+  resetBtn.addEventListener('click', reset);
+  /* 切换受控/非受控时立即按新数据源渲染显示值，让差异肉眼可见 */
+  document.querySelectorAll('input[name="cp-mode"]').forEach(function (r) {
+    r.addEventListener('change', function () {
+      renderCount();
+      log(r.value === 'controlled'
+        ? '已切到受控：显示值立刻取自外部 store（props 回流的结果）。'
+        : '已切到非受控：显示值取自组件内部账本。', 'is-muted');
+    });
+  });
+  renderCount();
+})();
+</script>
+</body>
+</html>

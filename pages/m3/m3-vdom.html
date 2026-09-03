@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>虚拟 DOM 与 Diff 算法 · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ===== 本页动画专用样式（纯手写，无外部资源） ===== */
+.vd-wrap { display: flex; flex-wrap: wrap; gap: 14px; margin: 10px 0; }
+.vd-col { flex: 1 1 210px; min-width: 200px; }
+.vd-col-title { font-size: 13px; font-weight: 600; margin-bottom: 6px; color: var(--fg-c-ink-2); }
+.vd-node {
+  border: 1px solid var(--fg-c-line); border-radius: 6px;
+  padding: 4px 8px; margin: 4px 0; font-size: 12px;
+  background: var(--fg-c-card);
+  transition: background .25s, border-color .25s, box-shadow .25s;
+}
+.vd-node .vd-node { margin-left: 16px; }
+.vd-node.is-mark { border-color: var(--fg-c-primary); background: var(--fg-c-primary-weak); box-shadow: 0 0 0 2px rgba(48, 86, 211, .18); }
+.vd-tag { font-weight: 600; margin-right: 6px; }
+.vd-text { color: var(--fg-c-ink-2); }
+.vd-node.is-flash { background: var(--fg-c-warn-weak); border-color: var(--fg-c-warn); }
+.vd-real .vd-node.is-gone { text-decoration: line-through; opacity: .45; }
+.vd-patch {
+  font-size: 12px; padding: 3px 8px; margin: 4px 0;
+  border-left: 3px solid var(--fg-c-primary); background: var(--fg-c-primary-weak); border-radius: 0 4px 4px 0;
+}
+</style>
+</head>
+<body data-page="m3-vdom">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">搞懂「为什么要发明虚拟 DOM」：先明白真实 DOM 有多重，再看新旧两棵树怎么比、补丁怎么打。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>前置知识：本页会用大量「JS 对象嵌套对象」来描述页面结构，建议先过一遍
+      <a href="../m1/m1-js-prototype.html">对象与原型</a>，确认你能看懂 <code>{ tag: 'div', children: [...] }</code> 这种写法。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：讲解 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、先看问题：直接操作 DOM 为什么「贵」</h3>
+    <p>你在页面里写的一行 <code>&lt;li&gt;苹果&lt;/li&gt;</code>，在浏览器内部远不止一个标签：它会变成一坨带属性、样式、事件、布局信息的重量级对象。
+      更麻烦的是，很多 DOM 改动（比如改尺寸、插入节点）会触发<strong>重排</strong>——浏览器要重新计算一堆元素的位置和大小，再重新画出来。
+      如果一段代码里连续改 100 处 DOM，浏览器可能就要白白重排很多次。具体重排有多伤性能，可以去看
+      <a href="../m2/m2-reflow.html">重排与重绘</a>那一页，这里记住一句话就够：<strong>DOM 操作次数越多，页面越卡。</strong></p>
+
+    <h3>二、虚拟 DOM：用轻量 JS 对象「描述」页面</h3>
+    <p>既然真 DOM 又重又贵，那就先别急着碰它。框架用一个普通 JS 对象来「画图纸」：</p>
+    <pre><code>{ tag: 'ul', props: { class: 'list' }, children: [
+  { tag: 'li', children: ['苹果'] },
+  { tag: 'li', children: ['香蕉'] }
+] }</code></pre>
+    <p>这棵「对象树」就是<strong>虚拟 DOM</strong>。它是纯 JS 数据：创建、复制、修改、比较都飞快，碰不到昂贵的真实 DOM。
+      页面渲染时，框架把这棵树「翻译」成真实 DOM；数据变化时，先在内存里生成一棵新树，再想办法只更新变化的部分。</p>
+
+    <h3>三、Diff：新旧两棵树怎么比才快</h3>
+    <p>「找出两棵树的差异」如果全量比较，复杂度是天文数字。所以各家框架都遵守三大启发式策略，把比较降到接近 O(n)：</p>
+    <ul>
+      <li><strong>只做同层比较</strong>：旧树第 2 层只和新树第 2 层比，不跨层乱配。一个节点跨层移动，会被当作「旧的删掉、新的新建」处理。</li>
+      <li><strong>类型不同直接重建</strong>：旧的是 <code>&lt;h1&gt;</code>、新的是 <code>&lt;h2&gt;</code>，标签类型都变了，就不再深入比较，整棵子树推倒重建。</li>
+      <li><strong>列表靠 key 精确配对</strong>：同层的一排 <code>&lt;li&gt;</code>，用稳定的 <code>key</code> 当「身份证」对上号——谁该复用、谁该删、谁该增，一目了然。</li>
+    </ul>
+
+    <h3>四、Patch：把差异变成最少的真实 DOM 操作</h3>
+    <p>Diff 的产出不是「重建整棵树」，而是一张<strong>补丁清单</strong>：替换 1 处、改文本 1 处、删 1 处、插 1 处。
+      框架把这张清单批量应用到真实 DOM 上，没出现在清单里的节点一概不动。这就是「最小化 DOM 操作」的更新流程：
+      <strong>数据变化 → 生成新虚拟树 → Diff 出补丁 → 批量 Patch 真实 DOM</strong>。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 装修的效果图</div>
+      <p>虚拟 DOM 就像装修前的设计效果图。你想改造房子（更新页面），不会让工人直接进场边拆边试；
+        而是让设计师在纸面上（内存）把「旧方案」和「新方案」两张效果图逐个房间对比，列出一份改动清单：
+        客厅的电视墙改个颜色、次卧的旧柜子拆掉、阳台新增一个花架。</p>
+      <p>工人（真实 DOM 操作）只按清单干活：没出现在清单里的墙一概不碰。房子不用推倒重装，改动却一处不漏。
+        Diff 就是「逐房间对比出清单」的过程，Patch 就是「按清单施工」的过程。</p>
+    </div>
+
+    <h3>五、诚实地说：虚拟 DOM 不是「最快」的方案</h3>
+    <p>虚拟 DOM 先生成对象树、再 Diff、再打补丁，相当于<strong>多算了一步</strong>。如果你能明确知道哪 3 个节点要改，
+      手写 3 句 <code>dom 操作</code> 肯定比虚拟 DOM 更快。它换来的，是声明式开发下「够用且稳定」的性能：你只管描述「界面应该长什么样」，
+      框架自动算出最少的更新。这是性能与可维护性之间的折中，面试时能说出这层取舍，比背「虚拟 DOM 快」三个字值钱得多。</p>
+  </section>
+
+  <!-- ③ 动画演示：.anim-stage 内的纯手写可交互动画（单步执行） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>下面单步演示一次真实的 Diff 流程：左边旧树、中间新树，紫色高亮表示「正在比较的节点」，
+      右侧是真实 DOM 与打出去的补丁清单。请点「单步执行」一步步看：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">场景：商品列表更新——标题从 h1 换成 h2，「香蕉」改名「葡萄」，下架「樱桃」、上架「榴莲」。</p>
+      <div class="vd-wrap">
+        <div class="vd-col">
+          <div class="vd-col-title">旧虚拟 DOM（改动前）</div>
+          <div id="vd-old"></div>
+        </div>
+        <div class="vd-col">
+          <div class="vd-col-title">新虚拟 DOM（数据变了）</div>
+          <div id="vd-new"></div>
+        </div>
+        <div class="vd-col vd-real">
+          <div class="vd-col-title">真实 DOM（只按补丁施工）</div>
+          <div id="vd-real"></div>
+        </div>
+      </div>
+      <div class="anim-console" id="vd-console">
+        <div class="anim-line is-muted">点击「单步执行」开始逐层比较两棵树…</div>
+      </div>
+      <div class="vd-col-title" style="margin-top:8px;">补丁清单（Diff 的产出）</div>
+      <div id="vd-patches"></div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="vd-step">单步执行</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="vd-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（真实课程路径） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="../m1/m1-js-prototype.html">对象与原型</a>——虚拟 DOM 本质是「对象套对象」的数据结构，
+      属性访问、引用比较这些基础不牢，Diff 的代码会完全看不懂。</p>
+    <p><strong>向后延伸</strong>：学会虚拟 DOM，就拿到了框架的「渲染底盘」。
+      <a href="./m3-react.html">React 核心与 Hooks</a> 靠它实现 setState 后的重渲染；
+      <a href="./m3-vue.html">Vue 响应式原理</a>则更进一步，先精确知道「谁变了」再走虚拟 DOM，两条路线殊途同归。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="../m2/m2-reflow.html">重排与重绘</a> —— 「直接操作 DOM 为什么贵」的底层答案：改布局引发重排，正是虚拟 DOM 想省掉的开销。</li>
+      <li><a href="../m5/m5-mp-arch.html">小程序双线程架构</a> —— 小程序逻辑层碰不到真实 DOM，靠 setData 传「类似虚拟 DOM 的描述」跨线程渲染。</li>
+      <li><a href="../m7/m7-handwrite-dom.html">手写 DOM 操作</a> —— 本页代码题是迷你版 h/render，综合手写题在这一页集中训练。</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（含解析），mode:'main' -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后把最佳成绩写入进度仓库（见页面底部内联脚本）：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：虚拟 DOM 就是先在「草稿纸」上把页面画成一张轻量的数据图，
+      数据一变就先在草稿纸上对比出「到底哪几处要改」，再拿着清单去动真正的页面——改得少、不出错。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前复述 1 次「数据变化 → 新树 → Diff → Patch」流程，1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：2 个问法，答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：列表渲染为什么要有稳定的 key？用数组下标当 key 会怎样？</summary>
+      <ul>
+        <li>key 是同层列表节点的「身份证」，Diff 靠它把旧节点和新节点一一配对，从而正确判断「复用、移动、删除、新增」。</li>
+        <li>用稳定的业务 id：在中间插入/删除一项时，其他项的 id 不变，框架能精准复用旧节点，只做最小更新。</li>
+        <li>用数组下标当 key：头部插入一项会让所有项的 key 集体前移，框架误以为「每一项的内容都变了」，触发大面积多余的更新。</li>
+        <li>更糟的是带内部状态的节点（如输入框）：内容错位复用，会出现「文字串行」的经典 bug。</li>
+        <li>加分项：用随机数当 key 等于每次渲染都「换身份证」，节点全部重建，比 index 更差。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：虚拟 DOM 一定比直接操作真实 DOM 快吗？它的价值到底是什么？</summary>
+      <ul>
+        <li>不一定。虚拟 DOM 要先建对象树、再 Diff、再打补丁，本身有额外计算量；首次渲染甚至比直接 innerHTML 更慢。</li>
+        <li>在「明确知道改哪」的极端场景下，手写精准 DOM 操作可以更快，但代码难写、难维护、容易漏更新。</li>
+        <li>虚拟 DOM 的真正价值：让开发者用声明式写法（只描述界面该长什么样），框架用同层 Diff（接近 O(n)）自动算出接近最少的更新——性能「够用」且大规模可维护。</li>
+        <li>加分项：可对比 Vue 的响应式方案——先精确知道哪个数据变了再小范围更新，是同一种「少碰真实 DOM」思想的不同实现路线。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 + Diff 单步动画 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm3-vdom'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'） */
+  var WARMUP = [{
+    id: 'm3-vdom-warmup-1',
+    type: 'single',
+    stem: '预热：「虚拟 DOM」指的是什么？',
+    options: [
+      '用轻量的 JS 对象树来描述页面节点结构',
+      '浏览器内置的一种图片格式',
+      '一种加密网页代码的技术',
+      '让 CSS 动画更快运行的插件'
+    ],
+    answer: [0],
+    explain: '虚拟 DOM 就是「页面的 JS 数据版」：{ tag, props, children } 描述节点树，创建和比较都发生在内存里，比真实 DOM 轻得多。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm3-vdom-q1',
+      type: 'single',
+      stem: '列表用「数组下标」当 key，在数组头部插入一个新元素，最可能发生什么？',
+      options: [
+        'Diff 精准识别出新元素，旧节点全部原样复用',
+        '所有项的 key 集体错位，框架误判大量节点「内容变了」，触发多余更新，带内部状态的节点还会串位',
+        '浏览器自动忽略 key，不会产生任何影响',
+        '页面直接白屏报错'
+      ],
+      answer: [1],
+      explain: 'key 的使命是把新旧节点配对。下标随位置变化：头部插入后，原来 key=0 的「苹果」现在 key=1，会被拿来和新树里 key=1 的「香蕉」配对——每一项都被判成「内容变了」，于是几乎全部节点都打上无谓的补丁。更隐蔽的是输入框这类有内部状态的节点，复用错了人就会「文字串行」。所以 key 要用稳定不随位置变的业务 id。'
+    },
+    {
+      id: 'm3-vdom-q2',
+      type: 'single',
+      stem: '关于「虚拟 DOM 一定更快吗」，下面哪个说法最准确？',
+      options: [
+        '一定更快，虚拟 DOM 跳过了所有真实 DOM 操作',
+        '不一定；它牺牲一点比对计算，换来声明式开发下「够用且稳定」的更新性能与可维护性',
+        '虚拟 DOM 只影响首屏速度，与更新性能无关',
+        '只要用了虚拟 DOM，就完全不用关心重排重绘'
+      ],
+      answer: [1],
+      explain: '虚拟 DOM 多了「建树 + Diff」两步计算，极端场景下手写精准 DOM 操作更快。它的价值是工程性的：开发者只声明界面长什么样，框架用同层 Diff 自动算出接近最少的真实 DOM 更新，既不用手写细节，性能也不会失控。说「一定更快」或「完全绕开 DOM」都是错的。'
+    },
+    {
+      id: 'm3-vdom-q3',
+      type: 'code',
+      stem: '动手实现迷你虚拟 DOM 的两块基石：h() 生成虚拟节点对象，render() 把虚拟节点变成真实 DOM。字符串子节点要转成文本节点。',
+      stub: 'function h(tag, props, children) {\n  // 返回轻量对象 { tag, props, children }（props 缺省时给 null，children 缺省时给空数组）\n}\n\nfunction render(vnode) {\n  // 按 vnode.tag 创建真实元素；props 用 setAttribute 挂上去；\n  // children 逐个处理：字符串用 document.createTextNode，对象递归 render\n  // 最后返回这个真实元素\n}\n',
+      reference: 'function h(tag, props, children) {\n  return { tag: tag, props: props || null, children: children || [] };\n}\n\nfunction render(vnode) {\n  var el = document.createElement(vnode.tag);\n  var props = vnode.props || {};\n  for (var k in props) {\n    if (props.hasOwnProperty(k)) el.setAttribute(k, props[k]);\n  }\n  vnode.children.forEach(function (c) {\n    el.appendChild(typeof c === \'string\' ? document.createTextNode(c) : render(c));\n  });\n  return el;\n}',
+      asserts: [
+        'h("div", { id: "app" }, []).tag === "div" && h("div", null, []).props === null',
+        'h("ul", null, ["a", "b"]).children.length === 2',
+        'render(h("p", null, ["hi"])).tagName === "P"',
+        'var el = render(h("div", { class: "box" }, ["x"])); el.getAttribute("class") === "box" && el.childNodes.length === 1 && el.childNodes[0].nodeType === 3'
+      ],
+      explain: 'h 是「画图纸」：只造普通对象，不碰 DOM，所以便宜。render 是「按图纸施工」：递归把对象树翻译成真实元素树——字符串子节点不是元素，必须包成文本节点（nodeType 为 3），否则 appendChild 会把字符串当纯文本之外的值处理出意外结果。真实框架的 createElement 与本页思路一致，只是多了事件、样式、key 等复杂分支。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（会推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：新旧两棵虚拟 DOM 树逐层 Diff、打补丁（纯 DOM 手写，单步执行） */
+(function () {
+  'use strict';
+
+  /* 旧树 / 新树：每个节点用轻量对象描述（就是讲解区的虚拟 DOM 结构） */
+  var OLD = { tag: 'div', key: '', text: '', children: [
+    { tag: 'h1', key: '', text: '商品标题', children: [] },
+    { tag: 'ul', key: '', text: '', children: [
+      { tag: 'li', key: 'a', text: '苹果', children: [] },
+      { tag: 'li', key: 'b', text: '香蕉', children: [] },
+      { tag: 'li', key: 'c', text: '樱桃', children: [] }
+    ] }
+  ] };
+  var NEW = { tag: 'div', key: '', text: '', children: [
+    { tag: 'h2', key: '', text: '商品标题', children: [] },
+    { tag: 'ul', key: '', text: '', children: [
+      { tag: 'li', key: 'a', text: '苹果', children: [] },
+      { tag: 'li', key: 'b', text: '葡萄', children: [] },
+      { tag: 'li', key: 'd', text: '榴莲', children: [] }
+    ] }
+  ] };
+
+  var consoleEl = document.getElementById('vd-console');
+  var patchEl = document.getElementById('vd-patches');
+  var stepBtn = document.getElementById('vd-step');
+  var resetBtn = document.getElementById('vd-reset');
+  var idx = 0;        // 当前执行到第几步
+  var done = false;   // Diff 是否已走完
+
+  /* HTML 转义小工具 */
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  /* 把虚拟树渲染成页面上的树形图（div/span 模拟），path 用「0-1-2」这种下标路径当节点编号 */
+  function paintTree(hostId, tree, prefix) {
+    var host = document.getElementById(hostId);
+    host.innerHTML = '';
+    function build(node, path) {
+      var box = document.createElement('div');
+      box.className = 'vd-node';
+      box.id = prefix + path;
+      var label = node.tag + (node.key ? ' [key=' + node.key + ']' : '');
+      box.innerHTML = '<span class="vd-tag">' + esc(label) + '</span>' +
+        (node.text ? '<span class="vd-text">' + esc(node.text) + '</span>' : '');
+      node.children.forEach(function (c, i) { box.appendChild(build(c, path + '-' + i)); });
+      return box;
+    }
+    host.appendChild(build(tree, '0'));
+  }
+
+  /* 用旧树搭出「真实 DOM」面板：节点 id 前缀 r，与旧树路径一一对应，方便精准打补丁 */
+  function buildReal() {
+    var host = document.getElementById('vd-real');
+    host.innerHTML = '';
+    function build(node, path) {
+      var el = document.createElement('div');
+      el.className = 'vd-node';
+      el.id = 'r' + path;
+      el.innerHTML = '<span class="vd-tag">' + esc(node.tag + (node.key ? ' [key=' + node.key + ']' : '')) + '</span>' +
+        (node.text ? '<span class="vd-text">' + esc(node.text) + '</span>' : '');
+      node.children.forEach(function (c, i) { el.appendChild(build(c, path + '-' + i)); });
+      return el;
+    }
+    host.appendChild(build(OLD, '0'));
+  }
+
+  /* 输出一行执行日志 */
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* 往补丁清单里加一条，并让真实 DOM 上被改的节点闪一下 */
+  function addPatch(text, realId, mutate) {
+    var p = document.createElement('div');
+    p.className = 'vd-patch';
+    p.textContent = text;
+    patchEl.appendChild(p);
+    if (realId) {
+      var target = document.getElementById(realId);
+      if (target) {
+        target.classList.add('is-flash');
+        setTimeout(function () { target.classList.remove('is-flash'); }, 900);
+      }
+    }
+    if (mutate) mutate();
+  }
+
+  /* 清除两棵展示树上所有「正在比较」的紫色高亮 */
+  function clearMarks() {
+    var marks = document.querySelectorAll('#vd-old .is-mark, #vd-new .is-mark');
+    for (var i = 0; i < marks.length; i++) marks[i].classList.remove('is-mark');
+  }
+  /* 高亮本步正在比较的旧/新节点 */
+  function mark(pair) {
+    clearMarks();
+    if (pair[0]) { var a = document.getElementById(pair[0]); if (a) a.classList.add('is-mark'); }
+    if (pair[1]) { var b = document.getElementById(pair[1]); if (b) b.classList.add('is-mark'); }
+  }
+
+  /* 单步脚本：每步说明当前比较结果；patch 描述要打到真实 DOM 上的操作 */
+  var STEPS = [
+    { mark: ['o0', 'n0'], msg: '第 1 步：比较根节点 div vs div —— 标签类型相同，复用真实 DOM，继续比较子节点（同层比较，不跨层乱配）。' },
+    { mark: ['o0-0', 'n0-0'],
+      msg: '第 2 步：第 1 个子节点 h1 vs h2 —— 类型不同！不再深入比较，直接记补丁：整棵替换。',
+      patch: function () {
+        addPatch('补丁① 替换：h1 → h2（类型不同，子树整体重建）', 'r0-0', function () {
+          var old = document.getElementById('r0-0');
+          var fresh = document.createElement('div');
+          fresh.className = 'vd-node';
+          fresh.id = 'r0-0';
+          fresh.innerHTML = '<span class="vd-tag">h2</span><span class="vd-text">商品标题</span>';
+          old.parentNode.replaceChild(fresh, old);
+        });
+      } },
+    { mark: ['o0-1', 'n0-1'], msg: '第 3 步：第 2 个子节点 ul vs ul —— 类型相同，进入列表对比，按 key 配对：a↔a、b↔b；旧树的 c 在新树里消失了，新树多出一个 d。' },
+    { mark: ['o0-1-0', 'n0-1-0'], msg: '第 4 步：key=a 的两个 li —— 标签、内容全相同，什么都不做。最好的更新就是「不改」。' },
+    { mark: ['o0-1-1', 'n0-1-1'],
+      msg: '第 5 步：key=b 的两个 li —— 文字从「香蕉」变成「葡萄」，记补丁：只更新文本节点。',
+      patch: function () {
+        addPatch('补丁② 更新文本：key=b 「香蕉」→「葡萄」', 'r0-1-1', function () {
+          document.querySelector('#r0-1-1 .vd-text').textContent = '葡萄';
+        });
+      } },
+    { mark: ['o0-1-2', 'n0-1-2'],
+      msg: '第 6 步：key=c 只在旧树 → 删除；key=d 只在新树 → 插入。一次记两个补丁。',
+      patch: function () {
+        addPatch('补丁③ 删除节点：key=c（樱桃）', 'r0-1-2', function () {
+          var gone = document.getElementById('r0-1-2');
+          gone.classList.add('is-gone');
+        });
+        addPatch('补丁④ 插入节点：key=d（榴莲）', null, function () {
+          var fresh = document.createElement('div');
+          fresh.className = 'vd-node is-flash';
+          fresh.innerHTML = '<span class="vd-tag">li [key=d]</span><span class="vd-text">榴莲</span>';
+          document.getElementById('r0-1').appendChild(fresh);
+          setTimeout(function () { fresh.classList.remove('is-flash'); }, 900);
+        });
+      } },
+    { mark: ['', ''], cls: 'is-end',
+      msg: '完成：Diff 产出 4 个补丁（替换 1、改文本 1、删 1、插 1），真实 DOM 只做这 4 处操作，其余节点全部复用 —— 这就是「最小化更新」。' }
+  ];
+
+  function step() {
+    if (done) return;
+    var s = STEPS[idx];
+    mark(s.mark);
+    log(s.msg, s.cls || 'is-ok');
+    if (s.patch) s.patch();
+    idx = idx + 1;
+    if (idx >= STEPS.length) {
+      done = true;
+      stepBtn.disabled = true;
+      log('点击「重置」可以再看一遍，试着说出每一步对应 Diff 的哪条策略。', 'is-muted');
+    }
+  }
+
+  function reset() {
+    idx = 0;
+    done = false;
+    stepBtn.disabled = false;
+    consoleEl.innerHTML = '';
+    patchEl.innerHTML = '';
+    log('已重置：数据发生变化，框架拿到了一棵新虚拟树，准备和旧树逐层比较…', 'is-muted');
+    paintTree('vd-old', OLD, 'o');
+    paintTree('vd-new', NEW, 'n');
+    buildReal();
+  }
+
+  stepBtn.addEventListener('click', step);
+  resetBtn.addEventListener('click', reset);
+  reset();
+})();
+</script>
+</body>
+</html>

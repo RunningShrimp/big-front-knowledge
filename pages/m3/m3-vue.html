@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>Vue 响应式原理 · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ===== 本页动画专用样式（纯手写，无外部资源） ===== */
+.vs-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; max-width: 320px; margin: 10px 0; }
+.vs-cell {
+  border: 1px solid var(--fg-c-line); border-radius: 8px; background: var(--fg-c-card);
+  padding: 8px 12px; transition: background .3s, border-color .3s, box-shadow .3s;
+}
+.vs-cell .vs-name { font-size: 12px; color: var(--fg-c-ink-3); display: block; }
+.vs-cell .vs-val { font-size: 20px; font-weight: 700; font-family: ui-monospace, Menlo, Consolas, monospace; }
+.vs-cell.is-formula { border-style: dashed; }
+.vs-cell.is-flash { background: var(--fg-c-warn-weak); border-color: var(--fg-c-warn); box-shadow: 0 0 0 2px rgba(178, 98, 5, .2); }
+.vs-edge {
+  display: inline-block; font-size: 12px; padding: 2px 8px; margin: 2px 4px 2px 0;
+  background: var(--fg-c-primary-weak); border-left: 3px solid var(--fg-c-primary); border-radius: 0 4px 4px 0;
+}
+.vs-edge.is-new { background: var(--fg-c-ok-weak); border-left-color: var(--fg-c-ok); }
+.vs-edit { display: flex; align-items: center; gap: 8px; margin: 10px 0; flex-wrap: wrap; }
+.vs-edit input { width: 90px; padding: 5px 8px; border: 1px solid var(--fg-c-line); border-radius: 6px; }
+</style>
+</head>
+<body data-page="m3-vue">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">回答两个问题：Vue 怎么「知道」数据变了？怎么知道「该通知谁」？从 Vue 2 的 defineProperty 讲到 Vue 3 的 Proxy。本页不引入任何框架。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>前置知识：响应式更新最终仍要走「新旧虚拟树对比、最小化更新页面」这套流程，建议先看
+      <a href="./m3-vdom.html">虚拟 DOM 与 Diff 算法</a>。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：讲解 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、响应式要解决什么</h3>
+    <p>朴素写法里，「改数据」和「改界面」是两件事：改了 <code>user.name</code>，还得自己记得去改 <code>span.textContent</code>，漏一处就是 bug。
+      响应式的目标只有一个：<strong>数据一变，用到它的视图自动更新</strong>。要达成它，框架必须回答两个问题：
+      第一，怎么「拦截」到数据被读、被写？（侦测）第二，界面哪几个部分在用这条数据？（依赖）。</p>
+
+    <h3>二、Vue 2 的方案：Object.defineProperty 逐个劫持</h3>
+    <p>Vue 2 用 <code>Object.defineProperty(data, key, { get, set })</code> 把每个属性改造成「带监控的存取器」：
+      读取时走 <code>get</code>（顺便做依赖收集），写入时走 <code>set</code>（顺便派发更新）。思路优雅，但有三个先天缺陷：</p>
+    <ul>
+      <li><strong>新增 / 删除属性监听不到</strong>：getter/setter 必须在属性「已存在」时才能定义，事后 <code>data.newKey = 1</code> 走的是普通赋值，框架毫无感知。Vue 2 只能提供 <code>$set / $delete</code> 这类补丁 API。</li>
+      <li><strong>数组是重灾区</strong>：下标赋值 <code>arr[0] = x</code> 和改 <code>arr.length</code> 无法被劫持，Vue 2 干脆重写了 push、splice 等 7 个数组方法来兜底。</li>
+      <li><strong>初始化开销</strong>：必须在组件初始化时<strong>递归遍历</strong> data 的所有层级、所有属性逐一劫持，数据又大又深时这一步很贵。</li>
+    </ul>
+
+    <h3>三、Vue 3 的方案：Proxy 整体代理 + 惰性响应式</h3>
+    <p>Vue 3 改用 <code>new Proxy(data, handler)</code>：它代理的是「整个对象上的操作」，get、set、has、deleteProperty 等 13 种拦截器随取随用。
+      于是新增、删除属性天然可感知，数组下标和 length 也直接拦截，<code>$set</code> 彻底退场。
+      另一个大优势是<strong>惰性</strong>：初始化只包一层 Proxy，嵌套对象要等到真正被访问时才转成响应式，深山大对象不再一次全部扫描。</p>
+
+    <h3>四、依赖收集与派发更新：track 与 trigger 的接力</h3>
+    <p>拦截到了读写，还差「通知谁」。Vue 的做法是：<strong>谁运行时读了我，我就记住谁</strong>。
+      每个用到数据的渲染函数 / 副作用（effect）运行时，读到 <code>state.count</code> 触发 get 拦截，
+      Vue 执行 <strong>track</strong>：把当前 effect 记为 count 的订阅者（内部用 WeakMap → Map → Set 三层结构按「对象 → 属性 → 效果」存表）。
+      之后 <code>state.count = 新值</code> 触发 set 拦截，执行 <strong>trigger</strong>：按表查出订阅者，逐个重新执行。
+      新一轮渲染又读新值、又收集新依赖——闭环就转起来了。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 两家装修公司的传感器方案</div>
+      <p>响应式就像全屋智能：数据一变（有人推门），灯自动亮（视图更新）。Vue 2 的 defineProperty 像装修公司 A：
+        只给<strong>图纸上本来就有的</strong>门窗装传感器——入住后新开一扇门（新增属性），门上没传感器，推开也无人知晓；
+        而且必须开工时一次性把全屋装满（初始化递归遍历），房子越大前期越费劲。</p>
+      <p>Vue 3 的 Proxy 像请了一位全天候管家站在入户处：任何人从任何门进出、搬动任何家具（get / set / delete）他都记录在案；
+        还是「随叫随到」式服务——你走到哪个房间，他才跟进哪个房间布防（惰性代理），没去过的储物间他绝不提前折腾。</p>
+    </div>
+
+    <h3>五、ref 与 reactive 怎么选</h3>
+    <p><code>reactive(obj)</code> 基于 Proxy，只能包对象、数组这类「能被代理的东西」，基本类型（数字、字符串）拦不住。
+      所以单个值要用 <code>ref(值)</code>：它把值装进 <code>{ value }</code> 这个小对象里，靠 value 的存取器实现响应式——这就是为什么 ref 在 JS 里必须写 <code>.value</code>。
+      经验法则：成体系的对象 / 列表用 reactive 或 ref 包对象皆可；独立的单值、需要整体替换的值、要在函数间传来传去的值，用 ref 更稳妥。</p>
+  </section>
+
+  <!-- ③ 动画演示：.anim-stage 内的纯手写可交互动画（单步执行 + 手动触发） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>把数据池想成一张 Excel 表：A1、A2 是原始数据，B1 = A1 + A2，B2 = B1 × 2。
+      先单步看「依赖收集」怎么建表，再亲手改一个单元格，看全表如何自动联动：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">公式：B1 = A1 + A2，B2 = B1 × 2。黄色闪烁 = 该单元格刚被重新计算。</p>
+      <div class="vs-grid" id="vs-grid"></div>
+      <p class="anim-caption" style="margin-top:8px;">依赖关系（订阅表）：</p>
+      <div id="vs-deps"><span class="anim-line is-muted">还没建立任何联系…</span></div>
+      <div class="anim-console" id="vs-console">
+        <div class="anim-line is-muted">点击「单步执行」，看 track 依赖收集如何一步步建表…</div>
+      </div>
+      <div class="vs-edit">
+        <label for="vs-input">把 A1 改成</label>
+        <input type="number" id="vs-input" value="10" disabled>
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="vs-update" disabled>修改并触发更新</button>
+      </div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="vs-step">单步执行</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="vs-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（真实课程路径） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="./m3-vdom.html">虚拟 DOM 与 Diff 算法</a>——响应式只负责「知道谁变了、通知谁」，
+      真正落到页面的那一下仍是新旧虚拟树 Diff + Patch，两者是一条流水线的上下游。</p>
+    <p><strong>向后延伸</strong>：有了响应式的地基，组件如何消费数据就是下一个话题：
+      <a href="./m3-component.html">组件设计原则</a>讲 props 与状态边界；跨组件共享时，Pinia 一类方案的思想在
+      <a href="./m3-state.html">状态管理思想</a>里展开。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="../m1/m1-js-es6.html">ES6+ 核心语法</a> —— Proxy、Reflect、Map/Set、WeakMap 是 Vue 3 响应式的全部积木。</li>
+      <li><a href="../m1/m1-js-prototype.html">对象与原型</a> —— Object.defineProperty、属性描述符这些 Vue 2 的底层工具在这里讲透。</li>
+      <li><a href="./m3-react.html">React 核心与 Hooks</a> —— 两种自动更新的路线对比：React「数据变就整棵重算」，Vue「先精确知道谁变了再小范围动」。</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：1 道多选 + 1 道单选 + 1 道代码题（含解析），mode:'main' -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后把最佳成绩写入进度仓库（见页面底部内联脚本）：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：Vue 响应式就像 Excel——你在 B1 写好公式「=A1+A2」之后，改 A1 的数字，
+      B1 会自己重算、引用 B1 的格子也跟着变。你改的是「数」，「表」自己会动。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前默写「track 收集依赖 → trigger 派发更新」闭环 1 遍，1 天后、3 天后、7 天后各回来重做例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：2 个问法，答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：Vue 2 和 Vue 3 响应式的核心区别有哪些？</summary>
+      <ul>
+        <li>侦测手段：Vue 2 用 Object.defineProperty 逐属性劫持 get/set；Vue 3 用 Proxy 在对象层面整体代理 13 种操作。</li>
+        <li>能力差异：Vue 2 监听不到新增/删除属性（要 $set/$delete 补）与数组下标、length 赋值（重写 7 个方法兜底）；Vue 3 天然全覆盖，$set 退场。</li>
+        <li>初始化成本：Vue 2 递归遍历整个 data；Vue 3 惰性——嵌套对象访问到才转响应式，首屏开销更小。</li>
+        <li>依赖存储：两者思路一致（读时收集 track、写时派发 trigger），Vue 3 用 WeakMap → Map → Set 存「对象 → 属性 → 副作用」。</li>
+        <li>加分项：Proxy 无法 polyfill 到老浏览器，这是 Vue 3 放弃 IE 的直接原因之一。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：ref 和 reactive 有什么区别？实际项目里怎么选？</summary>
+      <ul>
+        <li>reactive 基于 Proxy，只能代理对象 / 数组 / Map 这类引用类型；基本类型（number、string、boolean）无法被 Proxy 拦截。</li>
+        <li>ref 把值装进 { value } 包装对象，靠 value 的 get/set 实现响应式，所以任何类型都能包；在 JS 里读写必须 .value，模板里自动解包。</li>
+        <li>reactive 有个易踩的坑：解构或整体替换后会失去响应式连接（拿到的是普通值/新对象）。</li>
+        <li>选择经验：独立的单值、需要整体替换或跨模块传递的状态用 ref；成组的对象/列表状态两者皆可，团队统一即可。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 + Excel 联动动画 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm3-vue'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'） */
+  var WARMUP = [{
+    id: 'm3-vue-warmup-1',
+    type: 'single',
+    stem: '预热：「响应式」要解决的核心问题是？',
+    options: [
+      '数据变化后，用到它的视图自动更新，不用手动操作 DOM',
+      '让手机屏幕可以横竖屏旋转',
+      '把网页打包成手机 App',
+      '提高网络请求的并发数量'
+    ],
+    answer: [0],
+    explain: '响应式 = 拦截数据读写（知道变了）+ 记录谁在用这条数据（知道通知谁），从而做到「改数据，视图自己动」。'
+  }];
+
+  /* 正式例题（mode:'main'）：1 道多选 + 1 道单选 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm3-vue-q1',
+      type: 'multi',
+      stem: '下列哪些是 Vue 2 使用 Object.defineProperty 带来的已知缺陷？（多选）',
+      options: [
+        '对象新增属性、删除属性默认监听不到，需要 $set / $delete 特殊处理',
+        '通过下标修改数组项（arr[0] = x）与修改 arr.length 监听不到，Vue 2 只能重写 7 个数组方法兜底',
+        '初始化时要递归遍历 data 的所有层级、所有属性逐一劫持，数据大而深时开销明显',
+        'defineProperty 劫持后的属性连「读取」都无法监听'
+      ],
+      answer: [0, 1, 2],
+      explain: 'A、B、C 正是 Vue 2 的三大经典缺陷：getter/setter 只能给「已存在的属性」定义，所以新增删除失明；Proxy 出现前的规范里下标赋值不可拦截；劫持必须初始化时全量递归完成。D 恰好说反了——get 存取器的本职就是监听「读取」，依赖收集靠的正是它。'
+    },
+    {
+      id: 'm3-vue-q2',
+      type: 'single',
+      stem: 'Vue 3 用 Proxy 替换 defineProperty，下面哪个说法最准确？',
+      options: [
+        'Proxy 在对象层面代理 get/set/delete 等 13 种操作，新增删除属性、数组下标都能拦截，且嵌套对象访问到才转响应式（惰性），初始化更轻',
+        'Proxy 让 JS 代码的运行速度提升了几十倍',
+        'Proxy 可以绕过浏览器的同源策略',
+        'Proxy 让 Vue 3 不再需要虚拟 DOM 和 Diff'
+      ],
+      answer: [0],
+      explain: 'Proxy 的本质优势是「代理操作而非枚举属性」：defineProperty 必须先知道属性名才能劫持，Proxy 则拦截整个对象上的行为，天然覆盖新增/删除、下标、in 运算等。惰性响应式让深层数据「访问到才代理」，解决了 Vue 2 初始化递归的性能包袱。它既不加速计算，也不绕过安全策略；Diff 更新页面的流程依然保留。'
+    },
+    {
+      id: 'm3-vue-q3',
+      type: 'code',
+      stem: '手写一个简化版响应式系统（发布订阅模拟）：reactive(data) 用 Proxy 代理读写，写入时通知该 key 的订阅者；watch(state, key, cb) 手动订阅某个 key（订阅时不立即执行 cb）。',
+      stub: '// 订阅表：{ key: [回调, ...] }\nvar listeners = {};\n\nfunction reactive(data) {\n  // 返回 Proxy 代理：\n  //  get：返回 target[key]（真实 Vue 会在这里做 track 依赖收集）\n  //  set：先写入 target[key] = value，再逐个调用 listeners[key] 里的回调（传入新值），最后 return true\n}\n\nfunction watch(state, key, cb) {\n  // 订阅：把 cb 追加进 listeners[key]（注意：不要立即执行 cb）\n}\n',
+      reference: 'var listeners = {};\n\nfunction reactive(data) {\n  return new Proxy(data, {\n    get: function (target, key) {\n      return target[key]; // 真实 Vue 在这里 track：把正在运行的副作用记为订阅者\n    },\n    set: function (target, key, value) {\n      target[key] = value;\n      (listeners[key] || []).forEach(function (cb) {\n        cb(value); // trigger：派发更新\n      });\n      return true; // Proxy 的 set 必须返回 true，否则严格模式下抛 TypeError\n    }\n  });\n}\n\nfunction watch(state, key, cb) {\n  (listeners[key] = listeners[key] || []).push(cb);\n}',
+      asserts: [
+        'var state = reactive({ count: 0 }); state.count = 5; state.count === 5',
+        'var log2 = []; var s2 = reactive({ n: 1 }); watch(s2, "n", function (v) { log2.push(v); }); s2.n = 2; s2.n = 3; log2.join(",") === "2,3"',
+        'var hits = 0; var s3 = reactive({ a: 1, b: 2 }); watch(s3, "a", function () { hits = hits + 1; }); s3.b = 9; s3.a = 7; hits === 1'
+      ],
+      explain: '这就是「发布订阅 + 拦截」的最小闭环：set 拦截是「知道变了」，订阅表是「知道通知谁」。断言 2 验证派发：两次赋值各触发一次回调且收到新值；断言 3 验证精确性：改 b 不该惊动只订阅了 a 的回调——真实 Vue 正是靠「对象 → 属性 → 副作用」三层表做到精确通知，并且在 get 时自动收集依赖，开发者无需手写 watch。别忘了 set 要 return true，这是 Proxy 的规范要求。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（会推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：Excel 单元格联动 —— track 依赖收集 + trigger 派发更新（纯 DOM 手写） */
+(function () {
+  'use strict';
+
+  /* 数据池与公式：B1 = A1 + A2，B2 = B1 × 2 */
+  var FORMULA = {
+    A1: null,            // 原始数据：没有公式
+    A2: null,            // 原始数据
+    B1: function (c) { return c.A1 + c.A2; },
+    B2: function (c) { return c.B1 * 2; }
+  };
+  /* 依赖方向：算谁要读谁（渲染读取时用于收集依赖） */
+  var READS = { B1: ['A1', 'A2'], B2: ['B1'], A1: [], A2: [] };
+
+  var cells = {};        // 当前各单元格的值
+  var subs = {};         // 订阅表：{ 被读的格子: [依赖它的格子] }
+  var consoleEl = document.getElementById('vs-console');
+  var depsEl = document.getElementById('vs-deps');
+  var gridEl = document.getElementById('vs-grid');
+  var stepBtn = document.getElementById('vs-step');
+  var resetBtn = document.getElementById('vs-reset');
+  var inputEl = document.getElementById('vs-input');
+  var updateBtn = document.getElementById('vs-update');
+  var idx = 0;           // 收集阶段进行到第几步
+  var linked = false;    // 依赖是否已收集完成（完成后才允许手动触发）
+
+  var STEPS = [
+    { msg: '第 1 步：初始化数据池 —— A1 = 2、A2 = 3。此刻它们只是普通数据，还没人和它们产生任何联系。' },
+    { focus: 'B1', edges: [['A1', 'B1'], ['A2', 'B1']],
+      msg: '第 2 步：视图首次渲染要显示 B1。为了算 B1，读取了 A1 和 A2 —— track！订阅表记下：A1 → B1、A2 → B1。' },
+    { focus: 'B2', edges: [['B1', 'B2']],
+      msg: '第 3 步：视图继续渲染要显示 B2。算 B2 读了 B1 —— track！订阅表又记下：B1 → B2。' },
+    { focus: '', cls: 'is-end',
+      msg: '第 4 步：渲染完成，界面显示 A1=2、A2=3、B1=5、B2=10。依赖收集完毕：谁变了该通知谁，表上写得清清楚楚。现在可以在下方输入框里改 A1，亲手触发一次派发更新。' }
+  ];
+
+  /* 初始化数据池（A1、A2 为原始值，B1、B2 按公式求出） */
+  function initData() {
+    cells = { A1: 2, A2: 3, B1: 0, B2: 0 };
+    subs = {};
+    cells.B1 = FORMULA.B1(cells);
+    cells.B2 = FORMULA.B2(cells);
+  }
+
+  /* 渲染 2×2 网格：A 格实线、公式格虚线 */
+  function renderGrid() {
+    gridEl.innerHTML = '';
+    ['A1', 'A2', 'B1', 'B2'].forEach(function (name) {
+      var box = document.createElement('div');
+      box.className = 'vs-cell' + (FORMULA[name] ? ' is-formula' : '');
+      box.id = 'vs-cell-' + name;
+      box.innerHTML = '<span class="vs-name">' + name + (FORMULA[name] ? '（公式格）' : '（原始值）') + '</span>' +
+        '<span class="vs-val">' + cells[name] + '</span>';
+      gridEl.appendChild(box);
+    });
+  }
+
+  /* 让某个单元格闪一下，表示「刚被重新计算」 */
+  function flash(name) {
+    var el = document.getElementById('vs-cell-' + name);
+    if (!el) return;
+    el.querySelector('.vs-val').textContent = cells[name];
+    el.classList.add('is-flash');
+    setTimeout(function () { el.classList.remove('is-flash'); }, 900);
+  }
+
+  /* 输出日志行 */
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* 在依赖图区域追加一条「A → B」关系（新增的高亮显示） */
+  function addEdge(from, to) {
+    var span = document.createElement('span');
+    span.className = 'vs-edge is-new';
+    span.textContent = from + ' → ' + to;
+    depsEl.appendChild(span);
+  }
+
+  /* 单步执行：走完 track 依赖收集阶段 */
+  function step() {
+    if (linked) return;
+    var s = STEPS[idx];
+    if (s.edges) {
+      s.edges.forEach(function (pair) {
+        var key = pair[0];
+        subs[key] = (subs[key] || []).concat(pair[1]);
+        addEdge(pair[0], pair[1]);
+      });
+    }
+    log(s.msg, s.cls || 'is-ok');
+    idx = idx + 1;
+    if (idx >= STEPS.length) {
+      linked = true;
+      stepBtn.disabled = true;
+      inputEl.disabled = false;
+      updateBtn.disabled = false;
+      log('依赖表已就绪：输入新的 A1 值，点「修改并触发更新」看 trigger 的连锁反应。', 'is-muted');
+    }
+  }
+
+  /* 手动触发更新：改 A1 → 沿订阅表级联重算（trigger 派发更新） */
+  function trigger() {
+    if (!linked) return;
+    var v = parseInt(inputEl.value, 10);
+    if (isNaN(v)) {
+      log('请先输入一个数字再触发。', 'is-muted');
+      return;
+    }
+    cells.A1 = v;
+    flash('A1');
+    log('set 拦截到你把 A1 改成了 ' + v + '，trigger 查订阅表：A1 的订阅者是 B1，通知它重算。');
+    cells.B1 = FORMULA.B1(cells);
+    flash('B1');
+    log('B1 重新计算 = A1 + A2 = ' + v + ' + ' + cells.A2 + ' = ' + cells.B1 + '，界面自动更新；B1 自己也是订阅源，继续通知 B2。');
+    cells.B2 = FORMULA.B2(cells);
+    flash('B2');
+    log('B2 重新计算 = B1 × 2 = ' + cells.B2 + '，界面自动更新。全程没有一行「手动改 DOM」的代码 —— 这就是响应式闭环。', 'is-end');
+  }
+
+  /* 重置整个演示 */
+  function reset() {
+    idx = 0;
+    linked = false;
+    stepBtn.disabled = false;
+    inputEl.disabled = true;
+    updateBtn.disabled = true;
+    consoleEl.innerHTML = '';
+    depsEl.innerHTML = '<span class="anim-line is-muted">还没建立任何联系…</span>';
+    initData();
+    renderGrid();
+    log('已重置：点击「单步执行」，看 track 如何一步步建起依赖表…', 'is-muted');
+  }
+
+  stepBtn.addEventListener('click', step);
+  updateBtn.addEventListener('click', trigger);
+  resetBtn.addEventListener('click', reset);
+  reset();
+})();
+</script>
+</body>
+</html>

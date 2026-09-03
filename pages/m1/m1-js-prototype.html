@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>原型链与 this · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ===== 本页动画专用样式：原型链「家谱查属性」演示（纯手写 CSS） ===== */
+.pl-chain { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; }
+.pl-layer {
+  border: 2px solid #d5dbe7;
+  border-radius: 10px;
+  padding: 8px 12px;
+  background: #f7f9fc;
+  transition: border-color .25s, background .25s, transform .25s;
+}
+.pl-layer.is-active { border-color: #4C6FFF; background: #eef2ff; transform: translateX(8px); }
+.pl-layer.is-found  { border-color: #22a06b; background: #ecfdf3; }
+.pl-layer.is-miss   { opacity: .72; }
+.pl-layer.is-dead   { opacity: .55; border-style: dashed; }
+.pl-layer-name { font-weight: 700; font-size: 13px; color: #41506b; }
+.pl-vars { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; min-height: 22px; }
+.pl-var {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px; padding: 2px 8px; border-radius: 6px;
+  background: #fff; border: 1px solid #d5dbe7; color: #41506b;
+  transition: background .2s, color .2s;
+}
+.pl-var.is-hit { background: #22a06b; border-color: #22a06b; color: #fff; }
+.pl-arrow { text-align: center; color: #8a93a6; font-size: 12px; margin: -2px 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+</style>
+</head>
+<body data-page="m1-js-prototype">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">知识点：原型链与 this（建议学习时长约 30 分钟）——prototype 三角关系、属性遮蔽、this 四种绑定与手写 new。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>本页前置依赖：<a href="./m1-js-scope.html">JS 类型、作用域与闭包</a>——先弄清「引用类型变量存的是地址小票」，再看对象之间如何共享方法才不吃力。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：分小标题推进 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、prototype、__proto__、constructor 的三角关系</h3>
+    <p>每个<strong>函数</strong>天生自带一个 <code>prototype</code> 属性——它是一个对象，将来作为「这批实例的公共储物柜」。
+      每个实例身上有一个隐藏通道 <code>__proto__</code>，指向造它的构造函数的 prototype：
+      一句话记住三角关系——<code>实例.__proto__ === 构造函数.prototype</code>；
+      而 prototype 上的 <code>constructor</code> 又指回构造函数本身，方便回答「我是谁造的」。</p>
+
+    <h3>二、原型链查找与属性遮蔽</h3>
+    <p>读一个属性时，先看对象<strong>自己</strong>有没有；没有就顺着 <code>__proto__</code> 找它的原型，再没有继续向上，一路到 <code>Object.prototype</code>，尽头是 <code>null</code>。
+      整条路找完都没有，返回 <code>undefined</code>（注意：读属性不报错，与「读一个未声明变量抛 ReferenceError」不同）。
+      若对象自己有同名属性，就<strong>遮蔽</strong>（shadowing）原型上的版本——先吃自己窝里的。</p>
+
+    <h3>三、this 的四种绑定规则</h3>
+    <p><strong>默认绑定</strong>：独立调用 <code>fn()</code>，非严格模式 this 指向 window（严格模式是 undefined）。
+      <strong>隐式绑定</strong>：<code>obj.fn()</code> 谁点的名就指谁，this 是 obj。
+      <strong>显式绑定</strong>：<code>call/apply</code> 立即调用并强行指定 this（参数列表 vs 数组的差别），<code>bind</code> 则返回一个绑死 this 的新函数。
+      <strong>new 绑定</strong>：this 指向刚创建的新对象。优先级口诀：<strong>new &gt; 显式 &gt; 隐式 &gt; 默认</strong>。</p>
+
+    <h3>四、箭头函数没有自己的 this</h3>
+    <p>箭头函数的 this 在<strong>定义处</strong>就继承自外层作用域，与怎么调用无关，call/apply 也改不动。
+      所以「对象方法里要用外层 this」时它是利器；而「需要看调用者」的方法（如事件回调里的 this）就别用它。</p>
+
+    <h3>五、手写 new 的四步拆解</h3>
+    <p>① 收集除构造函数外的实参；② 用 <code>Object.create(Constructor.prototype)</code> 创建原型指向正确的新对象；
+      ③ 以新对象为 this 执行构造函数，拿到返回值 ret；④ ret 是对象或函数就返回 ret，否则返回新对象。
+      例题区会亲手实现一遍。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 原型链像家谱</div>
+      <p>小柴犬旺财想吃火腿肠：先翻自己窝（实例自身属性），没有；去问妈妈——「狗」这一辈的公共柜子（Dog.prototype），找到了就拿来用；
+        妈妈那辈也没有，就再问外婆——「动物」的公共柜子；一路问到开天辟地的祖宗（Object.prototype）还没有，就耸耸肩说「没有」（undefined），但不会吵起来（不报错）。
+        长辈柜子里的东西旺财都能用；可旺财自己窝里若也藏了一根，它一定先吃自己的——这就是属性遮蔽。</p>
+    </div>
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · this 像「我」这个字</div>
+      <p>「我要吃饭」这句话，你说出口，「我」就是你；你爸说，「我」就是你爸——同一句话（同一个函数），<strong>谁在说（谁调用）决定「我」指谁</strong>，这是隐式绑定。
+        开会时主持人指着小王说「现在这个『我』代表经理发言」（call/apply 强行指定），这是显式绑定。
+        而「我」若是写在出生证明上的（箭头函数），从出生那刻就固定了，事后谁也改不了。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：家谱查属性（可点击属性 + 单步执行，纯手写 DOM/CSS） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>沿着「家谱」亲手查一遍属性，体会原型链与属性遮蔽：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">旺财（一个实例）想用三个属性：name（自己窝里就有，会遮蔽原型）、breed（要到「狗的原型」找）、fly（问遍全家也没有，返回 undefined）。
+        先点一个属性名，再反复点「下一站」看查找如何一层层问长辈：</p>
+      <pre><code>function Dog() {}                       // 构造函数
+Dog.prototype.breed = '柴犬';            // 长辈公共柜：狗的原型
+const wancai = new Dog();
+wancai.name = '旺财';                    // 自己窝里的属性
+// 查找路线：wancai → Dog.prototype → … → Object.prototype → null</code></pre>
+      <div class="pl-chain" id="proto-chain"></div>
+      <div class="anim-console" id="proto-console"></div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm proto-find" data-target="name">查 name</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm proto-find" data-target="breed">查 breed</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm proto-find" data-target="fly">查 fly</button>
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="proto-step" disabled>下一站</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="proto-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（全部为课程数据中的真实 path） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="./m1-js-scope.html">JS 类型、作用域与闭包</a>——引用类型的「地址小票」观念，是理解实例与原型共享关系的地基。</p>
+    <p><strong>向后延伸</strong>：框架为什么能「用轻量对象描述页面」再 diff 更新？根基正是对象与原型——见<a href="../m3/m3-vdom.html">虚拟 DOM 与 Diff 算法</a>；
+      事件委托里用 <code>e.target</code> 认领元素，本质也是在问「这个元素是谁」，见<a href="../m7/m7-handwrite-dom.html">手写题·浏览器篇</a>。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="./m1-js-es6.html">ES6+ 核心特性</a> —— class 只是原型的语法糖，箭头函数的 this 是「出生就定死」的词法 this</li>
+      <li><a href="../m3/m3-react.html">React 核心与 Hooks</a> —— 类组件时代到处是 this 丢失问题（事件回调要 bind），Hooks 则干脆去掉了 this</li>
+      <li><a href="../m7/m7-handwrite-dom.html">手写题·浏览器篇</a> —— 事件委托与发布订阅，都建立在对对象、原型与 this 的准确理解上</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（mode:'main'，判分写入进度仓库） -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后会把最佳成绩写入进度仓库，并推进复习计划：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：每个对象出生时都连着一条「问长辈」的链子，自己没有的东西就沿链子向上找，问遍祖宗还没有就答「没有」；而 this 就是句子里那个「我」——谁说出来（调用）就指谁。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前口述一遍「new 的四步」；1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：new 四步 + this 输出题，答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：new 操作符到底做了什么？class 和原型是什么关系？</summary>
+      <ul>
+        <li>四步：创建一个新对象；把新对象的 __proto__ 指向构造函数的 prototype；以新对象为 this 执行构造函数；构造函数返回对象/函数时用它，否则返回新对象。</li>
+        <li>因为第 2 步建立了原型连接，所以 <code>o instanceof Constructor</code> 成立（instanceof 就是沿原型链找 Constructor.prototype）。</li>
+        <li>class 是原型的语法糖：class 里写的方法实际挂在 prototype 上；extends 底层同样是原型链 + this 的传递。</li>
+        <li>加分项：手写 new 时用 <code>Object.create(Constructor.prototype)</code> 一步完成「建对象 + 连原型」。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：写出下面三行分别输出什么？为什么？</summary>
+<pre><code>var name = 'window';
+var obj = {
+  name: 'obj',
+  say: function () { console.log(this.name); }
+};
+obj.say();      // 第一行
+var f = obj.say;
+f();            // 第二行
+f.call(obj);    // 第三行</code></pre>
+      <ul>
+        <li>第一行输出 'obj'：obj.say() 是隐式绑定，谁点的名（点号前是谁）this 就指谁。</li>
+        <li>第二行输出 'window'：把方法赋给 f 后变成独立调用，隐式绑定丢失，走默认绑定指向全局（非严格模式）。</li>
+        <li>第三行输出 'obj'：call 显式绑定了 this，强行指回 obj。</li>
+        <li>结论口诀：this 看调用点不看定义点；优先级 new &gt; 显式 &gt; 隐式 &gt; 默认；箭头函数例外（词法 this，改不动）。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm1-js-prototype'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'）：题目 id 以知识点 id 开头 */
+  var WARMUP = [{
+    id: 'm1-js-prototype-warmup-1',
+    type: 'single',
+    stem: '预热：var list = [4, 5]; list.push(6); list 对象自己并没有定义 push，为什么能直接用？',
+    options: ['数组天生语法内置，不走任何查找', '沿 list.__proto__ 在 Array.prototype 上找到了 push', 'push 其实定义在 Object.prototype 上', '会抛出错误，只是浏览器悄悄吞掉了'],
+    answer: [1],
+    explain: '实例的原型链第一站就是构造函数的原型：list.__proto__ === Array.prototype，push 就定义在那里；再往上一级才是 Object.prototype。找不到方法时 JS 正是沿这条链查找的。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm1-js-prototype-q1',
+      type: 'single',
+      stem: "var arr = [1, 2, 3]; 表达式 arr.__proto__ === Array.prototype 与 arr.__proto__.__proto__ === Object.prototype 的结果分别是？",
+      options: ['true、true', 'true、false', 'false、true', 'false、false'],
+      answer: [0],
+      explain: "数组的原型链：arr → Array.prototype（push/map 都在这）→ Object.prototype（toString/hasOwnProperty 在这）→ null。两条比较都成立，这正是「数组也是对象」的体现。"
+    },
+    {
+      id: 'm1-js-prototype-q2',
+      type: 'single',
+      stem: "var name = '全局'; var obj = { name: '对象', getName: function () { return this.name; } }; var fn = obj.getName; console.log(fn()); 输出？",
+      options: ["'全局'", "'对象'", 'undefined', '抛出错误'],
+      answer: [0],
+      explain: "fn = obj.getName 只是把函数复制了一份，之后 fn() 是独立调用，走默认绑定，this 指向 window（非严格模式），于是读到全局的 name。隐式绑定看的是「调用那一刻点号前是谁」，把函数拎出来再调，绑定就丢了——这是 this 丢失的最经典场景，解决方案是 bind/call/apply 或箭头函数。"
+    },
+    {
+      id: 'm1-js-prototype-q3',
+      type: 'code',
+      stem: '手写一个简易版 myNew(Constructor, ...args)：不使用 new 关键字，模拟 new 的完整行为（建立原型连接、绑定 this 执行构造函数、遵守返回值规则）。',
+      stub: 'function myNew(Constructor) {\n  // 提示：new 的四步——\n  // 1. 用 [].slice.call(arguments, 1) 取出其余实参\n  // 2. 创建一个原型指向 Constructor.prototype 的新对象\n  // 3. 以新对象为 this 执行构造函数，拿到返回值 ret\n  // 4. ret 是对象或函数就返回 ret，否则返回新对象\n}\n',
+      reference: 'function myNew(Constructor) {\n  var args = [].slice.call(arguments, 1);          // 1. 收集构造函数之外的实参\n  var obj = Object.create(Constructor.prototype);  // 2. 新对象，原型指向构造函数的 prototype\n  var ret = Constructor.apply(obj, args);          // 3. this 绑定到新对象，执行构造函数\n  var isObj = ret !== null && (typeof ret === "object" || typeof ret === "function");\n  return isObj ? ret : obj;                        // 4. 构造函数返回对象时优先用它\n}',
+      asserts: [
+        "function __P(n) { this.n = n; } __P.prototype.double = function () { return this.n * 2; }; var __o = myNew(__P, 3); true",
+        "__o instanceof __P && __o.n === 3 && __o.double() === 6",
+        "function __W() { return { tag: '盒子' }; } myNew(__W).tag === '盒子'",
+        "function __N() { this.x = 1; } myNew(__N).x === 1"
+      ],
+      explain: '断言逐条验证 new 的本质：第二条验证「原型连接 + this 绑定」——instanceof 成立说明 __proto__ 正确指向 prototype，this.n = n 说明构造函数里的 this 是新对象；第三条验证返回值规则——构造函数主动 return 一个对象时，new 的结果就是这个对象（否则一律用新建对象）；第四条验证无返回值时正常拿到实例。第 2 步用 Object.create 一行就完成了「造对象 + 连原型」。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：原型链「家谱查属性」（纯 DOM 手写，无动画库） */
+(function () {
+  'use strict';
+
+  /* 家谱五层：从实例自己一路到链条尽头 null。vars 是每层「公共柜」里的属性 */
+  var LAYERS = [
+    { name: 'wancai 实例自己（旺财的窝）',   vars: { name: "'旺财'" },       end: false },
+    { name: 'Dog.prototype（狗这一辈的柜子）', vars: { breed: "'柴犬'" },     end: false },
+    { name: '动物原型（上一辈的柜子）',       vars: { eat: "'杂食'" },        end: false },
+    { name: 'Object.prototype（祖宗柜）',     vars: { toString: "'内置'" },   end: false },
+    { name: 'null（链条尽头）',               vars: {},                       end: true }
+  ];
+
+  var chainEl = document.getElementById('proto-chain');
+  var consoleEl = document.getElementById('proto-console');
+  var stepBtn = document.getElementById('proto-step');
+  var resetBtn = document.getElementById('proto-reset');
+  var findBtns = document.querySelectorAll('.proto-find');
+
+  var target = null;   // 当前要查的属性名
+  var level = 0;       // 当前问到第几辈
+  var walking = false; // 是否处于查找途中
+
+  /* 把五层家谱渲染出来（只渲染一次，之后只切换高亮类） */
+  function renderChain() {
+    chainEl.innerHTML = '';
+    LAYERS.forEach(function (layer, idx) {
+      var box = document.createElement('div');
+      box.className = 'pl-layer';
+      box.setAttribute('data-level', String(idx));
+      var title = document.createElement('div');
+      title.className = 'pl-layer-name';
+      title.textContent = layer.name;
+      box.appendChild(title);
+      var vars = document.createElement('div');
+      vars.className = 'pl-vars';
+      var keys = Object.keys(layer.vars);
+      if (keys.length === 0) {
+        var empty = document.createElement('span');
+        empty.className = 'pl-var';
+        empty.textContent = layer.end ? '（尽头：再往上没有了）' : '（空柜子）';
+        vars.appendChild(empty);
+      }
+      keys.forEach(function (k) {
+        var chip = document.createElement('span');
+        chip.className = 'pl-var';
+        chip.setAttribute('data-key', k);
+        chip.textContent = k + ' = ' + layer.vars[k];
+        vars.appendChild(chip);
+      });
+      box.appendChild(vars);
+      chainEl.appendChild(box);
+      /* 层与层之间画一条 __proto__ 通道 */
+      if (idx < LAYERS.length - 1) {
+        var arrow = document.createElement('div');
+        arrow.className = 'pl-arrow';
+        arrow.textContent = '↓ 自身没有就沿 __proto__ 找上一辈';
+        chainEl.appendChild(arrow);
+      }
+    });
+  }
+
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  function layerAt(idx) {
+    return chainEl.querySelectorAll('.pl-layer')[idx];
+  }
+
+  function clearMarks() {
+    chainEl.querySelectorAll('.pl-layer').forEach(function (el) {
+      el.classList.remove('is-active', 'is-found', 'is-miss', 'is-dead');
+    });
+    chainEl.querySelectorAll('.pl-var').forEach(function (el) {
+      el.classList.remove('is-hit');
+    });
+  }
+
+  /* 选中一个属性，从实例自己开始问 */
+  function startFind(name) {
+    target = name;
+    level = 0;
+    walking = true;
+    clearMarks();
+    consoleEl.innerHTML = '';
+    log('开始查找 wancai.' + name + '：先翻自己的窝，点击「下一站」逐层问长辈…', 'is-muted');
+    stepBtn.disabled = false;
+  }
+
+  /* 单步：只推进「一层家谱」的判定 */
+  function step() {
+    if (!walking) return;
+    var layer = LAYERS[level];
+    var box = layerAt(level);
+    box.classList.add('is-active');
+    if (Object.prototype.hasOwnProperty.call(layer.vars, target)) {
+      box.classList.add('is-found');
+      var chip = box.querySelector('[data-key="' + target + '"]');
+      if (chip) chip.classList.add('is-hit');
+      if (level === 0) {
+        log('wancai 自己就有 ' + target + ' → 直接返回 ' + layer.vars[target] + '，不再向上问。若原型上也有同名属性，会被它「遮蔽」（shadowing）', 'is-ok');
+      } else {
+        log('在「' + layer.name + '」找到 ' + target + ' = ' + layer.vars[target] + ' → 查找结束。实例没写它也能用，这就是原型共享', 'is-ok');
+      }
+      finish();
+    } else if (layer.end) {
+      /* 问到链条尽头 null 仍没有：属性不存在，返回 undefined（不报错） */
+      log('整条原型链（直到 null）都没有 ' + target + ' → 返回 undefined。注意：读属性不报错，这与「读未声明变量抛 ReferenceError」不同', 'is-end');
+      box.classList.add('is-dead');
+      finish();
+    } else {
+      box.classList.add('is-miss');
+      log('「' + layer.name + '」没有 ' + target + '，沿 __proto__ 问上一辈', 'is-muted');
+      level += 1;
+    }
+  }
+
+  function finish() {
+    walking = false;
+    stepBtn.disabled = true;
+    log('点击其它属性名可再来一次，或点「重置」清空痕迹。', 'is-muted');
+  }
+
+  function reset() {
+    target = null;
+    level = 0;
+    walking = false;
+    stepBtn.disabled = true;
+    clearMarks();
+    consoleEl.innerHTML = '';
+    log('已重置。先选一个属性名，再点「下一站」逐步观察原型链查找…', 'is-muted');
+  }
+
+  findBtns.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      startFind(btn.getAttribute('data-target'));
+    });
+  });
+  stepBtn.addEventListener('click', step);
+  resetBtn.addEventListener('click', reset);
+  renderChain();
+  reset();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>RESTful API 设计 · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ===== 本页动画专用样式：银行柜台——统一的业务单据（动词 + 名词），纯手写 CSS ===== */
+.rst-desk {
+  position: relative; margin: 12px 0; padding: 96px 12px 12px;
+  border: 2px solid #d5dbe7; border-radius: 10px; background: #f7f9fc;
+}
+.rst-doc {
+  position: absolute; top: 16px; left: 16px; z-index: 2;
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; border: 2px solid #41506b; border-radius: 8px; background: #fff;
+  box-shadow: 0 4px 10px rgba(65, 80, 107, .18);
+  transition: transform .6s ease-in-out, opacity .3s;
+  font-size: 13px;
+}
+.rst-doc-method {
+  font-weight: 700; padding: 2px 8px; border-radius: 6px; color: #fff; background: #4C6FFF;
+}
+.rst-doc-method.is-write { background: #e0813d; }
+.rst-doc-method.is-del { background: #d64550; }
+.rst-windows {
+  display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end;
+}
+.rst-window {
+  flex: 1 1 140px; min-width: 140px;
+  border: 2px solid #d5dbe7; border-radius: 10px; background: #fff;
+  padding: 10px; transition: border-color .25s, background .25s, box-shadow .25s;
+}
+.rst-window.is-lit { border-color: #10B981; background: #ecfdf5; box-shadow: 0 0 0 3px rgba(16, 185, 129, .15); }
+.rst-window-name { font-weight: 700; font-size: 13px; color: #2b3a55; }
+.rst-window-desc { font-size: 12px; color: #8a93a6; margin: 3px 0 8px; }
+.rst-stamp {
+  display: inline-block; min-width: 52px; text-align: center;
+  font-weight: 700; font-size: 14px; padding: 3px 8px; border-radius: 6px; color: #fff;
+  opacity: 0; transform: scale(1.6) rotate(-8deg);
+  transition: opacity .25s, transform .3s;
+}
+.rst-stamp.is-shown { opacity: 1; transform: scale(1) rotate(-8deg); }
+.rst-stamp.is-good { background: #10B981; }
+.rst-stamp.is-bad { background: #d64550; }
+.rst-stamp-label { display: block; font-size: 11px; font-weight: 400; color: #41506b; margin-top: 4px; }
+.rst-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.rst-controls select {
+  font-size: 13px; padding: 5px 8px; border: 1px solid #d5dbe7; border-radius: 6px; background: #fff;
+}
+</style>
+</head>
+<body data-page="m6-rest">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">知识点：RESTful API 设计（建议学习时长约 20 分钟）——URL 表资源、HTTP 方法表动作、状态码语义化、统一响应结构与分页设计。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>本页前置依赖：<a href="./m6-server.html">HTTP 服务：Express 与 Koa</a>——会搭路由再学「路由该怎么命名」，就像会写字再来练书法。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：分小标题推进 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、从一个痛点说起：接口命名为什么不能随心所欲</h3>
+    <p>很多新手这样设计接口：<code>/getUserList</code>、<code>/deleteUserById</code>、<code>/createOrder</code>——每个接口自带动词，像每道菜都写满做法。
+      坏处是：对接的人要挨个读文档才知道「谁是谁」，而且同样的动作（查、增、删）每套接口拼法都不同。
+      REST（Representational State Transfer，表述性状态转移）给出的答案是两条分工：<strong>URL 只说「什么东西」（资源，用名词），动作全部交给 HTTP 方法（GET/POST/PUT/DELETE）</strong>。于是同一套规矩覆盖所有接口，看 URL 和方法就能猜出大半行为。</p>
+
+    <h3>二、URL 设计规范：名词复数、层级克制、版本前置</h3>
+    <p>资源用<strong>名词复数</strong>：<code>/users</code> 是「用户集合」，<code>/users/42</code> 是「集合里的第 42 个」——集合与单个天然由 URL 区分，不用再造 <code>/userList</code>。
+      需要「用户的订单」时做一级嵌套 <code>/users/42/orders</code>，但嵌套超过两层建议改用查询参数（<code>/orders?userId=42</code>），否则 URL 越拼越长。
+      接口会有不兼容的改动，所以路径里放版本号 <code>/api/v1/users</code>。过滤、分页、排序都走查询参数，不放路径里。</p>
+
+    <h3>三、HTTP 方法语义表：动词就这五个，别自创</h3>
+    <p>两个关键词先说清：<strong>安全</strong>指不改变服务器状态（只读）；<strong>幂等</strong>指执行一次和执行多次效果相同。
+      <code>GET</code> 读取，安全且幂等，可被缓存；<code>POST</code> 新建/提交，不幂等（点两次可能建两条）；<code>PUT</code> 全量替换，幂等（替换多少次结果一样）；
+      <code>PATCH</code> 局部更新，通常不幂等；<code>DELETE</code> 删除，幂等（删两次还是那个结果）。
+      幂等不是学究概念：网络超时后客户端敢不敢自动重试，就看方法是否幂等。</p>
+
+    <h3>四、状态码语义化：回执要用统一格式</h3>
+    <p>常见误用是「所有响应都返回 200，成功与否再看 body 里的 code 字段」。这会让<strong>监控、网关、浏览器缓存</strong>全部失明——它们只认状态码。
+      该用的几枚印章：<strong>200</strong> 成功；<strong>201</strong> 新建成功（Created）；<strong>204</strong> 成功但无返回体（删除常用）；
+      <strong>400</strong> 参数错误；<strong>401</strong> 未认证（没登录 / 凭证失效）；<strong>403</strong> 已认证但无权限；<strong>404</strong> 资源不存在；<strong>500</strong> 服务端出错。
+      一句话分界：<strong>401 是「查无此人（身份）」，403 是「知道你是谁，但你不配」</strong>。</p>
+
+    <h3>五、统一响应结构与分页过滤排序</h3>
+    <p>列表类接口三件套是约定俗成的查询参数：<code>GET /api/v1/users?page=1&amp;size=20&amp;sort=created_at:desc&amp;status=active</code>——分页（page/size）、排序（sort）、过滤（status）。
+      返回体建议统一外层结构（如 <code>{ code, message, data }</code>，列表再带 <code>total</code> 供前端算页码），前端就能用同一套封装处理所有接口。
+      注意分寸：状态码负责「大类」，body 里的 code/message 负责「业务细节」，两者互补而不是互相取代。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 老钱庄与 RESTful 银行的区别</div>
+      <p>老式钱庄办事全靠打听：办汇兑去东屋找张掌柜，存银子去西屋找李掌柜，每添一个新业务，客户就得重新认识一位掌柜、学一种单据——这就是「动词满天飞」的接口风格。</p>
+      <p>RESTful 银行立了三条店规：第一，单据上先写清「哪个账户」（<strong>URL 表资源</strong>，只写名词，如「储蓄账户 42 号」）；
+        第二，动作从柜台顶上那块固定牌子里勾选——存、取、查、销户，对应 <strong>POST / PUT / GET / DELETE</strong>，柜员看见勾选就知道标准流程，连你讲故事的时间都省了；
+        第三，回执格式全行统一（<strong>状态码语义化</strong>）：盖「办讫」（200/201）、「金额不足」（400）、「账户不存在」（404）、「权限不够」（403），一眼可辨，稽核部门（监控系统）扫一眼回执就能统计全行业务。
+        之后银行推出基金、外汇等新业务，不过是多了几种「资源」，三条店规一字不改——这就是 REST「统一接口」的好处。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：银行柜台——单据上的动词 + 名词，柜员按语义盖章（可交互，纯 DOM/CSS/JS） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>亲手在「单据」上选一个动词（方法）和一个名词（资源），提交到银行柜台，看柜员如何按 REST 语义盖章：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">单据会飞向对应的业务窗口并盖章回执。试试正确组合（如 POST /users），也试试错误组合（如 POST /users/42），观察 405 / 404 什么时候出现：</p>
+      <div class="rst-desk">
+        <div class="rst-doc" id="rst-doc"><span class="rst-doc-method" id="rst-doc-method">—</span><span id="rst-doc-url">（还没生成单据）</span></div>
+        <div class="rst-windows">
+          <div class="rst-window" id="rst-win-GET"><div class="rst-window-name">GET 查询窗口</div><div class="rst-window-desc">只读不动账，结果可缓存</div><span class="rst-stamp" id="rst-stamp-GET"></span></div>
+          <div class="rst-window" id="rst-win-POST"><div class="rst-window-name">POST 开户窗口</div><div class="rst-window-desc">在集合上新建资源，不幂等</div><span class="rst-stamp" id="rst-stamp-POST"></span></div>
+          <div class="rst-window" id="rst-win-PUT"><div class="rst-window-name">PUT 变更窗口</div><div class="rst-window-desc">更新单个资源，须指明 ID</div><span class="rst-stamp" id="rst-stamp-PUT"></span></div>
+          <div class="rst-window" id="rst-win-DELETE"><div class="rst-window-name">DELETE 销户窗口</div><div class="rst-window-desc">删除单个资源，成功常回 204</div><span class="rst-stamp" id="rst-stamp-DELETE"></span></div>
+        </div>
+      </div>
+      <div class="rst-controls" style="margin:10px 0;">
+        <label for="rst-method">动词（方法）：</label>
+        <select id="rst-method"><option>GET</option><option>POST</option><option>PUT</option><option>DELETE</option></select>
+        <label for="rst-url">名词（资源）：</label>
+        <select id="rst-url"><option value="/users">/users（用户集合）</option><option value="/users/42">/users/42（单个用户）</option><option value="/orders">/orders（本行没有的资源）</option></select>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="rst-make">生成请求单</button>
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="rst-send">提交到柜台</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="rst-reset">重置</button>
+      </div>
+      <div class="anim-console" id="rst-console"></div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（全部为课程数据中的真实 path） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="./m6-server.html">HTTP 服务：Express 与 Koa</a>——REST 是「接口该怎么设计」，框架是「接口该怎么实现」。</p>
+    <p><strong>向后延伸</strong>：规范的接口是系统设计的地基，见<a href="../m7/m7-design.html">前端侧系统设计</a>；资源最终要落库，衔接<a href="./m6-db.html">数据库基础与索引</a>。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="../m2/m2-http.html">HTTP 协议基础</a> —— 方法与状态码的本体语法都定义在协议层，REST 只是给它们派了用场</li>
+      <li><a href="../m2/m2-cache.html">HTTP 缓存</a> —— 只有 GET 这类安全幂等的方法才放心缓存，REST 语义直接决定缓存策略</li>
+      <li><a href="./m6-session.html">Cookie、Session 与鉴权基础</a> —— 401 与 403 的分界线，正是「未认证」与「未授权」的分界线</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（mode:'main'，判分写入进度仓库） -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后会把最佳成绩写入进度仓库，并推进复习计划：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：RESTful 就是给所有接口立一套统一暗号——URL 只写「什么东西」（名词复数），动作从固定的几个 HTTP 方法里选，办没办成用统一的状态码回执，任何人对着单据都能看懂全行业务。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前默写 200/201/204/400/401/403/404/500 各自的适用场景，并说出 GET、POST、PUT、DELETE 的幂等性；1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：设计原则 + GET/POST 与幂等，答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：说说你理解的 REST 设计原则？现场设计一个用户模块的 API。</summary>
+      <ul>
+        <li>核心思想：一切皆资源——URL 表资源（名词复数），HTTP 方法表动作，状态码表结果，统一接口降低沟通成本。</li>
+        <li>示范设计：GET /api/v1/users?page=1&amp;size=20（分页列表）、POST /api/v1/users（新建，回 201）、GET/PUT/PATCH/DELETE /api/v1/users/42（详情/全量更新/局部更新/删除，删除回 204）。</li>
+        <li>层级克制：用户订单用 /users/42/orders，超过两层改查询参数 /orders?userId=42。</li>
+        <li>版本化：/api/v1 前缀，不兼容改动升版本而不是原地改语义。</li>
+        <li>加分项：主动谈幂等性（PUT/DELETE 幂等、POST 不幂等）对超时重试安全性的意义。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：GET 和 POST 有什么区别？为什么不能把所有接口都返回 200 再用 body 里的 code 区分？</summary>
+      <ul>
+        <li>GET 语义是获取资源：安全、幂等、可被缓存、可收藏为书签，参数按惯例放 URL 查询串。</li>
+        <li>POST 语义是提交处理：不幂等（可能产生新资源或副作用）、一般不被缓存，数据放请求体。</li>
+        <li>两个常见误区：「GET 比 POST 安全」不成立（URL 反而更易被日志记录，机密靠 HTTPS）；「GET 不能传参」不成立（查询串就是它的传参方式）。</li>
+        <li>全 200 的坏处：网关、监控、浏览器缓存、重试中间件都只认状态码，全 200 等于把所有语义信息私有化到 body，故障率统计与自动重试全部失灵。</li>
+        <li>加分项：401（未认证）与 403（未授权）的分界；201 配合 Location 头返回新资源地址。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm6-rest'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'）：题目 id 以知识点 id 开头 */
+  var WARMUP = [{
+    id: 'm6-rest-warmup-1',
+    type: 'single',
+    stem: '预热：下面哪个用户列表接口最符合 RESTful 风格？',
+    options: [
+      '/api/getUserList',
+      '/api/users',
+      '/api/users/listAll',
+      '/api/queryUsers?name=xxx'
+    ],
+    answer: [1],
+    explain: 'RESTful 的分工是「URL 表资源、方法表动作」：资源用名词复数 /users，动作用 HTTP 方法 GET 表达，不必也不能把动词写进路径。其余三个都把动作（get / list / query）写进了 URL，违反统一接口的约定。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm6-rest-q1',
+      type: 'single',
+      stem: '用户 A 已登录（身份有效），发起 DELETE /api/v1/articles/9 想删除用户 B 写的文章。服务端确认 A 既不是作者也没有管理权限。最恰当的状态码是？',
+      options: [
+        '401，让 A 重新登录',
+        '403，服务器知道 A 是谁，但 A 没有执行该操作的权限',
+        '404，找不到这篇文章',
+        '500，服务端拒绝执行也算出错'
+      ],
+      answer: [1],
+      explain: '401 是「未认证」——身份不明或凭证失效，配合 WWW-Authenticate 提示重新登录；403 是「已认证但未授权」——服务器认识 A，但 A 不配删别人的文章，重登录也没用。500 是服务端自身错误，与权限无关；404 虽然有时被用来隐藏资源存在性，但本题语境下语义化首选 403。'
+    },
+    {
+      id: 'm6-rest-q2',
+      type: 'single',
+      stem: '关于 GET 与 POST 的语义区别，下列说法正确的是？',
+      options: [
+        'GET 比 POST 更安全，因为 GET 参数看得见',
+        'GET 用于获取资源，安全且幂等、可被缓存；POST 用于提交处理，不幂等、一般不缓存',
+        'GET 不能传参数，POST 才能传参数',
+        'POST 的参数放在 URL 查询串里，GET 的参数放在请求体里'
+      ],
+      answer: [1],
+      explain: 'GET 的语义是「取」：不改变服务器状态（安全）、执行多次结果一致（幂等），因此中间层和浏览器可以放心缓存。POST 的语义是「交」：可能创建新资源，重复提交会产生重复数据（不幂等），通常不缓存。误区纠正：GET 参数可见反而更容易泄露，真正的传输安全靠 HTTPS；GET 靠 URL 查询串传参，POST 靠请求体——选项三、四正好说反了。'
+    },
+    {
+      id: 'm6-rest-q3',
+      type: 'code',
+      stem: '手写 RESTful 语义匹配函数 restMatch(method, url)，按本服务的路由约定返回数字状态码（本服务只提供「用户」资源）：GET /users → 200；POST /users → 201；PUT/PATCH /users/:id → 200；DELETE /users/:id → 204；集合上不支持的写操作（如 POST /users/:id、PUT /users、DELETE /users）→ 405；其他资源路径（如 /orders）→ 404。',
+      stub: 'function restMatch(method, url) {\n  // url 只有两种形态：\'/users\'（集合）或 \'/users/<id>\'（单个，id 是非空字符串）\n  // 提示：\n  // 1. 先判断 url 是否匹配用户资源，不匹配 → 404\n  // 2. 按 method 分支：\n  //    GET：集合与单个都返回 200\n  //    POST：只允许在集合上新建（带 id 则 405），成功 201\n  //    PUT / PATCH：必须指明单个 id，成功 200，用在集合上则 405\n  //    DELETE：只允许删单个，成功 204，用在集合上则 405\n  //    其他方法：405\n}\n',
+      reference: 'function restMatch(method, url) {\n  var m = /^\\/users(?:\\/([^\\/]+))?$/.exec(url); // 匹配 /users 或 /users/<id>\n  if (!m) return 404;                // 不是本服务的资源：404 Not Found\n  var hasId = !!m[1];                // 是否带上了具体 id\n\n  if (method === \'GET\') return 200;            // 列表、详情都是查询成功\n  if (method === \'POST\') return hasId ? 405 : 201; // 只允许在集合上新建\n  if (method === \'PUT\' || method === \'PATCH\') {\n    return hasId ? 200 : 405;                  // 更新必须指明单个资源\n  }\n  if (method === \'DELETE\') return hasId ? 204 : 405; // 集合不支持整体删除\n  return 405;                        // 未定义的动作：方法不被允许\n}',
+      asserts: [
+        "restMatch('POST', '/users') === 201",
+        "restMatch('DELETE', '/users/42') === 204",
+        "restMatch('POST', '/users/7') === 405",
+        "restMatch('GET', '/orders') === 404"
+      ],
+      explain: '四条断言对应 REST 语义的四个关键判断：POST /users 返回 201——「在集合上新建」是 POST 的本职，成功要回 Created 而不是笼统的 200；DELETE /users/42 返回 204——删除成功没有返回体，204 No Content 最贴切，也体现了 DELETE 的幂等（再删一次还是同样结果）；POST /users/7 返回 405——单个资源不接受「新建」，资源存在但方法用错了正是 405 Method Not Allowed 的定义；/orders 返回 404——本服务根本没有这个资源，任何动词都只能得到 404。注意 404 与 405 的分界：路径都到不了的报 404，路径存在但动词不匹配的报 405。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：银行柜台——单据（动词 + 名词）提交与盖章回执（纯 DOM 手写，无动画库） */
+(function () {
+  'use strict';
+
+  /* 语义规则表：key 是「方法|资源」，value 是 { 窗口, 状态码, 回执说明, 是否正确用法 } */
+  var RULES = {
+    'GET|/users':       { win: 'GET',    code: 200, good: true,  why: 'GET + 集合 = 查询用户列表，安全幂等' },
+    'GET|/users/42':    { win: 'GET',    code: 200, good: true,  why: 'GET + 单个 = 查询 42 号详情' },
+    'POST|/users':      { win: 'POST',   code: 201, good: true,  why: '在集合上新建用户，成功应回 201 Created' },
+    'POST|/users/42':   { win: 'POST',   code: 405, good: false, why: '单个资源不接受「新建」——资源在但动词不匹配，回 405' },
+    'PUT|/users':       { win: 'PUT',    code: 405, good: false, why: '更新必须指明单个资源（/users/42），用在集合上回 405' },
+    'PUT|/users/42':    { win: 'PUT',    code: 200, good: true,  why: '全量更新 42 号用户，PUT 幂等，重复执行结果一致' },
+    'DELETE|/users':    { win: 'DELETE', code: 405, good: false, why: '集合不支持「整体销户」，必须指明删谁，回 405' },
+    'DELETE|/users/42': { win: 'DELETE', code: 204, good: true,  why: '删除 42 号成功且无返回体，204 No Content' }
+  };
+
+  var docEl = document.getElementById('rst-doc');
+  var docMethodEl = document.getElementById('rst-doc-method');
+  var docUrlEl = document.getElementById('rst-doc-url');
+  var consoleEl = document.getElementById('rst-console');
+  var makeBtn = document.getElementById('rst-make');
+  var sendBtn = document.getElementById('rst-send');
+  var resetBtn = document.getElementById('rst-reset');
+  var methodSel = document.getElementById('rst-method');
+  var urlSel = document.getElementById('rst-url');
+
+  var made = false;   // 是否已生成单据
+  var deskEl = docEl.parentNode; // 计算飞行位移用
+
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* 清空全部窗口的印章与高亮 */
+  function clearStamps() {
+    ['GET', 'POST', 'PUT', 'DELETE'].forEach(function (m) {
+      var win = document.getElementById('rst-win-' + m);
+      win.classList.remove('is-lit');
+      var stamp = document.getElementById('rst-stamp-' + m);
+      stamp.className = 'rst-stamp';
+      stamp.innerHTML = '';
+    });
+  }
+
+  /* 生成请求单：把选中的方法 + 资源写到单据上，单据归位 */
+  function make() {
+    clearStamps();
+    var m = methodSel.value;
+    var u = urlSel.value;
+    docMethodEl.textContent = m;
+    docMethodEl.className = 'rst-doc-method' + (m === 'POST' ? ' is-write' : (m === 'DELETE' ? ' is-del' : ''));
+    docUrlEl.textContent = u;
+    docEl.style.transform = 'translateX(0)';
+    made = true;
+    log('生成请求单：' + m + ' ' + u + '（动词定动作，名词定目标）', 'is-muted');
+  }
+
+  /* 提交到柜台：单据飞向对应窗口并盖章 */
+  function send() {
+    if (!made) {
+      log('请先点「生成请求单」', 'is-end');
+      return;
+    }
+    made = false;
+    var m = methodSel.value;
+    var u = urlSel.value;
+    var rule = RULES[m + '|' + u];
+    if (!rule) {
+      /* 本行没有的资源：统一 404，不落入任何窗口 */
+      log(m + ' ' + u + ' → 查无此资源：404 Not Found。任何动词都救不了一个不存在的名词', 'is-end');
+      return;
+    }
+    var winEl = document.getElementById('rst-win-' + rule.win);
+    /* 计算单据飞行位移：目标窗口中心 - 单据当前位置 */
+    var dx = (winEl.offsetLeft + winEl.offsetWidth / 2) - (docEl.offsetLeft + docEl.offsetWidth / 2);
+    docEl.style.transform = 'translateX(' + dx + 'px)';
+    log('单据飞向「' + rule.win + ' 窗口」……', 'is-muted');
+
+    /* 飞行动画结束后盖章（与 CSS transition 时长一致） */
+    setTimeout(function () {
+      winEl.classList.add('is-lit');
+      var stamp = document.getElementById('rst-stamp-' + rule.win);
+      stamp.innerHTML = rule.code + '<span class="rst-stamp-label">' + (rule.good ? '符合语义' : '语义不符') + '</span>';
+      stamp.classList.add(rule.good ? 'is-good' : 'is-bad');
+      stamp.classList.add('is-shown');
+      log(m + ' ' + u + ' → 柜员盖章 ' + rule.code + '：' + rule.why, rule.good ? 'is-ok' : 'is-end');
+      /* 盖完章把单据送回起点，方便玩下一单 */
+      setTimeout(function () {
+        docEl.style.transform = 'translateX(0)';
+      }, 600);
+    }, 620);
+  }
+
+  function reset() {
+    clearStamps();
+    docMethodEl.textContent = '—';
+    docMethodEl.className = 'rst-doc-method';
+    docUrlEl.textContent = '（还没生成单据）';
+    docEl.style.transform = 'translateX(0)';
+    made = false;
+    consoleEl.innerHTML = '';
+    log('银行开门。先选动词和名词，点「生成请求单」，再点「提交到柜台」看柜员怎么盖章…', 'is-muted');
+  }
+
+  makeBtn.addEventListener('click', make);
+  sendBtn.addEventListener('click', send);
+  resetBtn.addEventListener('click', reset);
+  reset();
+})();
+</script>
+</body>
+</html>

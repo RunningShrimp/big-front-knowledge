@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>HTML 语义化与页面结构 · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ===== 本页专属：语义化演示舞台样式（纯手写 CSS，无任何外部资源） ===== */
+/* 迷你报纸：纵向堆叠的五个可点击分区 */
+.hs-board { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+.hs-block {
+  border: 2px solid var(--fg-c-line); border-radius: 8px; padding: 8px 12px;
+  cursor: pointer; background: var(--fg-c-card); text-align: left; font: inherit; line-height: 1.5;
+  transition: border-color .15s, background .15s;
+}
+.hs-block:hover { border-color: var(--fg-c-primary); }
+.hs-block.is-active { border-color: var(--fg-c-primary); background: var(--fg-c-primary-weak); }
+.hs-block-name { font-weight: 600; font-size: 13px; }
+.hs-block-tag { font-family: var(--fg-mono); font-size: 12px; color: var(--fg-c-ink-3); margin-left: 8px; }
+.hs-block.is-active .hs-block-tag { color: var(--fg-c-primary-deep); font-weight: 600; }
+/* div 面条页模式：整版灰蒙蒙，每个分区都只是无含义的 div */
+.hs-board.is-divmode .hs-block { background: #f1f2f5; }
+.hs-toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+</style>
+</head>
+<body data-page="m1-html-semantic">
+
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">HTML 是页面的骨架。本页只解决一个问题：怎么把骨架搭得「一眼能看懂」——给人看、给搜索引擎看、也给读屏器看。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p><strong>前置知识</strong>：无，可直接开始。HTML 语义化是本站知识地图的起点，你只需要会用浏览器打开网页即可。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：讲解 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>先看一个「面条页」</h3>
+    <p>很多初学者写页面时只认识两个标签：<code>&lt;div&gt;</code> 和 <code>&lt;span&gt;</code>，于是整个页面长这样：
+      头部是 <code>&lt;div class="top"&gt;</code>，导航是 <code>&lt;div class="menu"&gt;</code>，正文还是 <code>&lt;div&gt;</code>……
+      页面渲染出来毫无问题——但代码里只有我们自己（凭 class 名）知道哪块是什么。
+      浏览器、搜索引擎和读屏器看到的是一排排「无名盒子」，它们只能靠猜。</p>
+
+    <h3>语义化标签全景：一张报纸的五个分区</h3>
+    <p>把网页想象成一张报纸，语义化标签就是「印在版面上的栏目名」：</p>
+    <ul>
+      <li><code>&lt;header&gt;</code>：报头。页面或某个区块的头部，放 Logo、站名、导语；</li>
+      <li><code>&lt;nav&gt;</code>：目录栏。主导航链接的集合，读屏器可以一键跳过或直达；</li>
+      <li><code>&lt;main&gt;</code>：正文版面。页面最核心的内容，整个页面<strong>通常只出现一次</strong>；</li>
+      <li><code>&lt;article&gt;</code>：一篇独立成篇的稿子（新闻、评论、博客文章），抽出去单独看也完整；</li>
+      <li><code>&lt;section&gt;</code>：稿子里的一个章节，通常带自己的标题；</li>
+      <li><code>&lt;aside&gt;</code>：边栏。与主体关联较弱的内容：相关推荐、标签、广告；</li>
+      <li><code>&lt;footer&gt;</code>：报尾。版权信息、备案号、联系方式。</li>
+    </ul>
+    <p>注意：<code>&lt;div&gt;</code> 和 <code>&lt;span&gt;</code> 并没有被废弃——当一块内容找不到合适的语义标签、纯粹为了排版分组时，用它们完全正确。语义化的意思是「有含义时用有含义的标签」，而不是「永远不许用 div」。</p>
+
+    <h3>语义化的三大收益</h3>
+    <ol>
+      <li><strong>SEO 友好</strong>：搜索引擎靠标签理解页面。爬虫读到 <code>&lt;nav&gt;</code> 就知道这是导航、读到 <code>&lt;article&gt;</code> 里的 <code>&lt;h1&gt;</code> 就认为这是文章主题——结构越清晰，收录和排名越占便宜；</li>
+      <li><strong>无障碍可访问</strong>：读屏器用户可以按「地标（landmark）」和「标题层级」快速跳转。全是 div 的页面没有地标，只能从头逐行听完；</li>
+      <li><strong>代码可维护</strong>：半年后回看 <code>&lt;header&gt;</code> 不需要注释就能懂，而 <code>&lt;div class="top-2-new"&gt;</code> 连作者自己都要回忆半天。</li>
+    </ol>
+
+    <h3>标题层级 h1~h6：大纲不能跳级</h3>
+    <p>h1 到 h6 表达的是<strong>文档大纲的层级</strong>，不是「字号从大到小」。正确用法：h1 是文章主标题（一页通常一个）；h2 是它下面的小节；h3 是 h2 的再细分——逐级递进，不跳级。
+      「从 h1 直接跳到 h4」会让读屏器用户误以为缺了一整层内容；「页面里塞十几个 h1」则会稀释每个标题的权重。想要大字号，请用 CSS 改样式，而不是选一个字号大的标签。</p>
+
+    <h3>strong/b 与 em/i：重要性和单纯样式是两回事</h3>
+    <p><code>&lt;strong&gt;</code> 表示「内容上很重要」，<code>&lt;em&gt;</code> 表示「语气上的强调」，读屏器会用更重的语气朗读它们；
+      而 <code>&lt;b&gt;</code> 和 <code>&lt;i&gt;</code> 只改变视觉样式（加粗、斜体），不表达任何强调含义，适合关键词高亮、外来词、书名号这类场景。拿不准就用语义版本。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 超市货架</div>
+      <p>想象你第一次进一家新超市：门口挂着「生鲜 / 日用品 / 零食」的分区指示牌，你不用问店员，顺着牌子三步就找到牛奶。语义化标签就是这些指示牌——<code>&lt;header&gt;</code> 是入口导购牌，<code>&lt;nav&gt;</code> 是悬挂的分区指示，<code>&lt;main&gt;</code> 是主货架区，<code>&lt;aside&gt;</code> 是收银台旁的促销架。</p>
+      <p>搜索引擎像一个只能「看牌子」的新顾客：牌子清楚，它就能把「牛奶在生鲜区」记进小本本（收录与排名）；读屏器像一位闭着眼睛的顾客，全靠广播播报「生鲜区到了」来逛店——全是 div 的超市等于所有货堆在一个大箱子里，还都贴着「箱子1」「箱子2」的标签，两种顾客都寸步难行。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：迷你报纸 · 语义化对比实验台（纯 DOM 手写，可点击 / 可切换模式） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>下面是一张「迷你报纸」，五个分区都可以点击。切换「语义化模式 / div 面条页模式」观察标签差异，再点「读屏器跳转演示」体验两种页面在天壤之别的无障碍体验：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">先选一种页面模式，再点击任意分区查看它的标签与分工：</p>
+      <div class="hs-toolbar">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="hs-mode-sem">语义化模式</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="hs-mode-div">div 面条页模式</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="hs-reader">读屏器跳转演示</button>
+      </div>
+      <div class="hs-board" id="hs-board"></div>
+      <div class="anim-console" id="hs-console">
+        <div class="anim-line is-muted">点击分区或按钮开始实验……</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（真实课程路径） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：无，可直接开始（本页是整张知识地图的起点）。</p>
+    <p><strong>向后延伸</strong>：骨架搭好后，下一步是给结构「穿衣服」——盒模型与 Flex·Grid 布局；再往后，你会学到浏览器如何把你写的 HTML 解析成 DOM 并一步步画到屏幕上。M1 的 JS 篇也都默认你已能读懂 HTML 结构。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="./m1-css-box.html">CSS 盒模型与 Flex·Grid 布局</a> —— 给语义化骨架排版：每个标签都是一个「快递箱」</li>
+      <li><a href="../../pages/m2/m2-pipeline.html">浏览器渲染流水线</a> —— HTML 如何被解析成 DOM，语义化结构在渲染树里长什么样</li>
+      <li><a href="./m1-js-scope.html">JS 类型、作用域与闭包</a> —— 用 JS 操作 DOM 的前提，是先看懂标签嵌套出的树形结构</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（含解析），mode:'main' -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后把最佳成绩写入进度仓库（见页面底部内联脚本）：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：语义化就是用「写着名字的标签」给页面分区——报头、导航、正文、边栏、页脚各归各位，让人、搜索引擎和读屏器都一眼看懂页面结构，而不是一堆无名的黑盒子。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前合上页面，凭记忆画出「一张报纸五个分区」对应的 5 个标签；1 天、3 天、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：问法 + 答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：为什么要强调语义化？语义化带来了什么好处？</summary>
+      <ul>
+        <li>对机器：标签自带含义，搜索引擎据此理解页面结构与内容权重（SEO）；读屏器靠标签生成地标与标题大纲，支持快捷跳转（无障碍）。</li>
+        <li>对人：代码即文档，header/nav/main 自解释，降低团队维护成本。</li>
+        <li>加分项：能说出 main 全页唯一、section 应带标题、div 用于「无语义的纯排版分组」等边界用法。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：strong 与 b、em 与 i 有什么区别？h1~h6 该怎么用？</summary>
+      <ul>
+        <li>strong/em 是语义标签：分别表示「内容重要」与「语气强调」，读屏器会重读；b/i 只改视觉样式，不含强调语义，适合关键词、外来词等纯排版场景。</li>
+        <li>h1~h6 表达文档大纲层级：逐级递进不跳级；h1 通常全页一个（article 内可各自拥有）；字号大小交给 CSS，不靠选标签。</li>
+        <li>加分项：提到跳级会让读屏器大纲断裂、滥用 h1 会稀释标题权重。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm1-html-semantic'; // 与 body[data-page] 保持一致
+
+  /* 预热题（mode:'warmup'）：题目 id 以知识点 id 开头 */
+  var WARMUP = [{
+    id: 'm1-html-semantic-warmup-1',
+    type: 'single',
+    stem: '预热：新闻网站顶部的「报头」区域（含 Logo 与站名），最适合用哪个标签包裹？',
+    options: [
+      '<div>',
+      '<header>',
+      '<section>',
+      '<footer>'
+    ],
+    answer: [1],
+    explain: 'header 就是「页面或区块的头部」，报头是它的典型场景；div 无含义，section 表示章节，footer 是页脚。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm1-html-semantic-q1',
+      type: 'single',
+      stem: '关于标题层级 h1~h6 的使用，下列说法正确的是？',
+      options: [
+        '一个页面 h1 越多，SEO 权重就越高',
+        '标题可以从 h1 直接跳到 h4，浏览器会自动补齐层级',
+        'h1~h6 应按内容层级逐级递进、不跳级；字号大小交给 CSS 控制',
+        'h1 默认字号最大，所以页面上最大的字都应该用 h1 标记'
+      ],
+      answer: [2],
+      explain: '标题是文档大纲：h2 应是 h1 的小节，h3 应是 h2 的细分，跳级会让读屏器大纲断裂、让用户误以为缺了一整层内容。堆砌 h1 反而会稀释权重；样式大小永远交给 CSS，选标签只看结构含义，与字号无关。'
+    },
+    {
+      id: 'm1-html-semantic-q2',
+      type: 'multi',
+      stem: '关于语义化标签与收益，下列说法正确的有（多选）？',
+      options: [
+        'main 表示页面主体内容，一个页面通常只应出现一次',
+        'strong 表示内容上的重要性，b 只做视觉加粗、不表达强调',
+        '语义化标签会显著增加页面体积，生产环境应尽量少用',
+        '读屏器用户可按地标（landmark）快速跳转，语义化标签正是地标的来源'
+      ],
+      answer: [0, 1, 3],
+      explain: 'A 对：main 是全页唯一的核心内容容器；B 对：strong/em 携带强调语义，b/i 只是样式；C 错：语义标签与 div 体积几乎相同，「少用」恰恰会牺牲 SEO 与无障碍；D 对：header/nav/main/aside/footer 会映射为读屏器的地标，支持一键跳转。'
+    },
+    {
+      id: 'm1-html-semantic-q3',
+      type: 'code',
+      stem: '手写题：文章编辑器导出的标题层级常出现「跳级」。实现 fixHeadings(levels)，按两条规则修正并返回新数组：① 第一个标题一律修正为 1；② 后续标题若比「前一个 + 1」还深，则钳制为「前一个 + 1」，变浅或同级则保持不变。',
+      stub: 'function fixHeadings(levels) {\n  // 规则 1：第一个标题必须是 1\n  // 规则 2：后续若比前一个深超过 1 级，钳制为「前一个 + 1」\n  // 返回修正后的新数组，不要修改原数组\n}\n',
+      reference: 'function fixHeadings(levels) {\n  var out = [];\n  var prev = 0; // 记录上一个修正后的层级\n  for (var i = 0; i < levels.length; i++) {\n    var h = levels[i];\n    if (i === 0) h = 1;            // 规则 1：首个一律压成 1\n    else if (h > prev + 1) h = prev + 1; // 规则 2：跳级则钳制\n    out.push(h);\n    prev = h;\n  }\n  return out;\n}',
+      asserts: [
+        'JSON.stringify(fixHeadings([1, 2, 4])) === "[1,2,3]"',
+        'JSON.stringify(fixHeadings([3])) === "[1]"',
+        'JSON.stringify(fixHeadings([1, 3, 3, 5])) === "[1,2,3,4]"',
+        'JSON.stringify(fixHeadings([1, 1, 2])) === "[1,1,2]"'
+      ],
+      explain: '这道题的本质是「顺序扫描 + 记住前一个状态」：大纲是从上往下逐级生长的，所以只需一个 prev 变量记住上一个修正结果——首题压成 1；之后任何比 prev+1 还深的跳级都钳回 prev+1（如 [1,2,4] 的 4 变 3）；变浅或同级（如第 4 条断言里的第二个 1）天然合法，原样保留。这也正是读屏器阅读大纲的方式：逐个标题检查与上一级的层级差。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（会推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：迷你报纸 · 语义化对比实验台（纯 DOM 手写，无动画库） */
+(function () {
+  'use strict';
+  /* 五个分区：视觉名称 / 语义化标签 / div 模式下的假类名 / 分工说明 */
+  var SECTIONS = [
+    { name: '报头（Logo + 站名）', tag: 'header', divcls: 'div.box-1', duty: '页面或区块的头部：放 Logo、站名、导语' },
+    { name: '栏目导航（要闻 / 财经 / 体育）', tag: 'nav', divcls: 'div.box-2', duty: '导航链接集合，读屏器可一键直达或跳过' },
+    { name: '头条正文（今天的大新闻）', tag: 'main + article', divcls: 'div.box-3', duty: 'main 是全页唯一主体；article 是可独立成篇的内容' },
+    { name: '相关推荐侧栏', tag: 'aside', divcls: 'div.box-4', duty: '与主体关联较弱的内容：推荐位、标签、广告' },
+    { name: '版权页脚', tag: 'footer', divcls: 'div.box-5', duty: '页脚：版权、备案号、联系方式' }
+  ];
+  var mode = 'sem';          // 当前模式：sem=语义化 / div=面条页
+  var readerRunning = false; // 读屏器演示进行中标志（防重复触发）
+  var boardEl = document.getElementById('hs-board');
+  var consoleEl = document.getElementById('hs-console');
+  var btnSem = document.getElementById('hs-mode-sem');
+  var btnDiv = document.getElementById('hs-mode-div');
+  var btnReader = document.getElementById('hs-reader');
+
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* 渲染五个分区：语义化模式显示真实标签，面条页模式显示无含义的 div 假类名 */
+  function renderBoard() {
+    boardEl.innerHTML = '';
+    boardEl.classList.toggle('is-divmode', mode === 'div');
+    SECTIONS.forEach(function (s, i) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'hs-block';
+      var name = document.createElement('span');
+      name.className = 'hs-block-name';
+      name.textContent = s.name;
+      var tag = document.createElement('span');
+      tag.className = 'hs-block-tag';
+      tag.textContent = mode === 'sem' ? '<' + s.tag + '>' : '<' + s.divcls + '>';
+      b.appendChild(name);
+      b.appendChild(tag);
+      b.addEventListener('click', function () {
+        clearActive();
+        b.classList.add('is-active');
+        if (mode === 'sem') {
+          log('「' + s.name + '」→ <' + s.tag + '>：' + s.duty, 'is-ok');
+        } else {
+          log('「' + s.name + '」→ <' + s.divcls + '>：div 本身没有任何含义，人要靠猜，机器也只能猜', 'is-end');
+        }
+      });
+      boardEl.appendChild(b);
+    });
+  }
+
+  function clearActive() {
+    var act = boardEl.querySelectorAll('.hs-block.is-active');
+    for (var i = 0; i < act.length; i++) act[i].classList.remove('is-active');
+  }
+
+  function setMode(next) {
+    mode = next;
+    renderBoard();
+    consoleEl.innerHTML = '';
+    if (mode === 'sem') {
+      log('已切换为语义化模式：每个分区都有带着含义的标签', 'is-muted');
+      btnSem.className = 'fg-btn fg-btn--primary fg-btn--sm';
+      btnDiv.className = 'fg-btn fg-btn--ghost fg-btn--sm';
+    } else {
+      log('已切换为 div 面条页模式：整版都是无名盒子（渲染效果一模一样，但机器看不懂）', 'is-muted');
+      btnSem.className = 'fg-btn fg-btn--ghost fg-btn--sm';
+      btnDiv.className = 'fg-btn fg-btn--primary fg-btn--sm';
+    }
+  }
+
+  /* 读屏器跳转演示：语义化页面按地标直达；面条页只能逐行朗读 */
+  function readerDemo() {
+    if (readerRunning) return;
+    clearActive();
+    consoleEl.innerHTML = '';
+    if (mode === 'sem') {
+      readerRunning = true;
+      log('读屏器用户按下「下一个地标」快捷键……', 'is-muted');
+      var i = 0;
+      (function next() {
+        if (i >= SECTIONS.length) {
+          log('共 5 跳全部直达目标区域——这就是语义化的无障碍收益', 'is-end');
+          readerRunning = false;
+          return;
+        }
+        var block = boardEl.children[i];
+        block.classList.add('is-active');
+        log('第 ' + (i + 1) + ' 跳 → <' + SECTIONS[i].tag + '> ' + SECTIONS[i].name, 'is-ok');
+        i = i + 1;
+        setTimeout(next, 650); // 逐个高亮，模拟逐跳播报
+      })();
+    } else {
+      log('读屏器扫描整页……未发现任何 header / nav / main / aside / footer 地标', 'is-end');
+      log('只能从头逐行朗读全部内容，用户要听完大量无关文字才能找到目标', 'is-end');
+    }
+  }
+
+  btnSem.addEventListener('click', function () { setMode('sem'); });
+  btnDiv.addEventListener('click', function () { setMode('div'); });
+  btnReader.addEventListener('click', readerDemo);
+  renderBoard();
+})();
+</script>
+</body>
+</html>

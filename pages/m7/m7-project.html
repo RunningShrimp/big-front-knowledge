@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>项目拆解与亮点提炼 · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ===== 本页动画专用样式：STAR 四格拆解器，纯手写 CSS，无任何外部库 ===== */
+.prj-board {
+  display: flex; gap: 14px; flex-wrap: wrap; margin: 12px 0;
+}
+.prj-raw {
+  flex: 1 1 220px; min-width: 220px;
+  border: 2px dashed #b7c0d4; border-radius: 10px; background: #fbfcfe;
+  padding: 12px; font-size: 13px; color: #5b6680;
+}
+.prj-raw-title { font-weight: 700; color: #41506b; margin-bottom: 6px; }
+.prj-raw-text { color: #6b7280; line-height: 1.7; }
+.prj-cells {
+  flex: 1.4 1 320px; min-width: 300px;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+}
+.prj-cell {
+  border: 2px solid #d5dbe7; border-radius: 10px; background: #fff;
+  padding: 10px; min-height: 96px; cursor: pointer;
+  transition: border-color .25s, background .25s, box-shadow .25s, transform .15s;
+}
+.prj-cell:hover { transform: translateY(-2px); }
+.prj-cell.is-filled { border-color: #10B981; background: #ecfdf5; }
+.prj-cell.is-hot { box-shadow: 0 0 0 3px rgba(76, 111, 255, .25); border-color: #4C6FFF; }
+.prj-cell-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.prj-cell-key {
+  width: 22px; height: 22px; border-radius: 6px; color: #fff; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center; font-size: 13px;
+  background: #b7c0d4; transition: background .25s;
+}
+.prj-cell.is-filled .prj-cell-key { background: #10B981; }
+.prj-cell-key.is-s { background: #4C6FFF; }
+.prj-cell-key.is-t { background: #7c5cff; }
+.prj-cell-key.is-a { background: #e0813d; }
+.prj-cell-key.is-r { background: #10B981; }
+.prj-cell-name { font-weight: 700; font-size: 13px; color: #2b3a55; }
+.prj-cell-text { font-size: 12px; color: #6b7280; line-height: 1.6; }
+.prj-cell.is-empty .prj-cell-text { color: #c2c9d6; }
+.prj-controls { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+</style>
+</head>
+<body data-page="m7-project">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">知识点：项目拆解与亮点提炼（建议学习时长约 25 分钟）——项目描述公式、从「做了什么」到「解决了什么」、亮点挖掘清单、用数据证明价值。</p>
+
+  <!-- ① 导入：前置知识说明 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>本知识点是「综合实战与面试」模块的起点，课程数据中没有硬性前置依赖——但「用数据说话」的底气来自监控指标，
+      建议先翻一眼<a href="../../pages/m4/m4-monitor.html">前端监控与错误上报</a>和<a href="../../pages/m4/m4-cwv.html">Core Web Vitals 性能指标</a>，
+      知道秒开率、耗时这些数字是怎么来的，讲项目时才不会心虚。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：分小标题推进 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、面试官到底想听什么：一道「翻译题」</h3>
+    <p>新手讲项目，讲的是「做了什么」：我用了 Vue、Webpack、Node，写了几十个页面，改了很多 bug。
+      面试官心里的评价却是「解决了什么」：你的工作让哪个业务问题变好了？变好了多少？
+      所以讲项目的本质是一道<strong>翻译题</strong>——把「我干过的活」翻译成「我创造的价值」。
+      「修了 30 个线上 bug」是活，「把线上白屏率从 3% 压到 0.2%，客服投诉少了一大半」才是价值。
+      翻译的关键在两处：一是找到这个活背后对应的<strong>业务问题</strong>（用户体验差？开发效率低？线上不稳？），二是用<strong>数据</strong>证明问题确实被改善了。</p>
+
+    <h3>二、项目描述公式：背景 + 难点 + 方案 + 可量化结果</h3>
+    <p>把一段项目经历组织成四句话，就是最稳的讲法：</p>
+    <ul>
+      <li><strong>背景</strong>：项目当时处在什么状况？（首屏要 6 秒、发版全靠人肉、投诉变多）——交代起点，才有对比。</li>
+      <li><strong>难点</strong>：难在哪？（资源太多、历史代码不敢动、没有现成方案）——难点决定含金量，没有难点的工作谁都能做。</li>
+      <li><strong>方案</strong>：你具体做了什么？（路由级代码分割、图片懒加载、接口合并）——这是唯一属于「我」的部分，要具体、要有取舍。</li>
+      <li><strong>可量化结果</strong>：数据前后怎么变？（首屏 6 秒降到 1.8 秒、秒开率 34% 升到 81%）——用数字收尾，让价值可被验证。</li>
+    </ul>
+    <p>注意顺序不能乱：先讲背景难点再讲方案，面试官才能「听懂你的难」，最后的结果才有冲击力。反过来先甩方案，面试官连你为什么要这么做都不知道。</p>
+
+    <h3>三、亮点挖掘清单：四个方向翻自己的项目</h3>
+    <p>很多人说「我的项目太普通，没有亮点」——其实不是没有，是没翻。拿这四个方向逐条对照你的项目：</p>
+    <ul>
+      <li><strong>性能提升</strong>：加载更快了？（首屏耗时、秒开率、包体积、接口耗时）</li>
+      <li><strong>工程提效</strong>：开发更快了？（封装通用组件/请求库，让新页面接入从 1 天缩到 2 小时；搭脚手架省掉重复配置）</li>
+      <li><strong>稳定性建设</strong>：更少出事了？（错误监控 + 兜底降级，把白屏率从 3% 压到 0.2%）</li>
+      <li><strong>体验优化</strong>：用户更舒服了？（骨架屏消灭白屏、虚拟列表让长列表不卡、表单自动保存防丢数据）</li>
+    </ul>
+    <p>每翻出一条，就套一遍第二节的三要素：难点 + 方案 + 数据。凑不出数据的，退一步说「对比关系」也行（之前用户每次都要手动重填，现在自动保存）。</p>
+
+    <h3>四、数据意识：让指标替你说话</h3>
+    <p>「快了很多」「稳定了不少」这类话在面试官耳中等于没说，因为无法验证。要练成<strong>开口带数字</strong>的习惯：
+      秒开率、首屏耗时（LCP）、JS 错误率、接口成功率、构建耗时——哪怕数据是估算的（「大概从 5 秒降到 2 秒」），也比形容词有力。
+      另外要会算<strong>相对提升</strong>：从 60% 提到 92% 叫「提升了 32 个百分点」，也可以叫「相对提升约 53%」——后者冲击力更强，但别把两种口径混着说。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 两家中介卖同一套房</div>
+      <p>老王要把房挂出去卖。中介小张带看时只会念房本：「三室一厅，89 平，朝南。」——信息没错，但每个买家听完都无感，因为这是<strong>功能罗列</strong>，不是价值。</p>
+      <p>中介小李是这么讲的：「这套房在实验小学学区里（<strong>背景</strong>：一句话定位价值点）；同小区挂出去的房普遍临街吵，这套在院内最里排，还刚换了隔音窗（<strong>难点</strong>：稀缺在哪）；房东去年花 8 万重做了厨卫水电，您拎包入住（<strong>方案</strong>：做了什么）；同户型上个月成交价 410 万，这套挂 398 万，楼下地铁口步行 5 分钟（<strong>可量化结果</strong>：数据对比）。」买家当场约了第二次看房。</p>
+      <p>注意：两家中介卖的是<strong>同一套房</strong>。房子没变，变的是讲述方式——买家（面试官）买的从来不是「面积」（你干过多少活），而是「这套房能帮我解决什么」（你解决过什么问题、凭数据可信）。这就是「项目拆解与亮点提炼」的全部要义。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：把一段「口水话项目经历」单步装进 STAR 四个格子（可单步执行 + 点击复习，纯 DOM/CSS/JS） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>左边是一段典型的「口水话」项目经历。点「单步填充」，看它如何被一句句拆进 S-T-A-R 四个格子，每一步都会解释这句话为什么放进这一格：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">STAR 拆解器： Situation 背景 → Task 任务 → Action 行动 → Result 结果。填充完还可以点击任意格子复习「为什么」。</p>
+      <div class="prj-board">
+        <div class="prj-raw">
+          <div class="prj-raw-title">原材料（没拆解前的讲法）</div>
+          <div class="prj-raw-text">「我参与了一个商城项目，主要用 Vue 和 Webpack，做了不少需求，也做过一些性能优化，还处理过线上问题，后来项目上线挺稳定的。」——听着都干了，但一句也没被记住。</div>
+        </div>
+        <div class="prj-cells">
+          <div class="prj-cell is-empty" id="prj-cell-0"><div class="prj-cell-head"><span class="prj-cell-key is-s">S</span><span class="prj-cell-name">背景 Situation</span></div><div class="prj-cell-text">待填充</div></div>
+          <div class="prj-cell is-empty" id="prj-cell-1"><div class="prj-cell-head"><span class="prj-cell-key is-t">T</span><span class="prj-cell-name">任务 Task</span></div><div class="prj-cell-text">待填充</div></div>
+          <div class="prj-cell is-empty" id="prj-cell-2"><div class="prj-cell-head"><span class="prj-cell-key is-a">A</span><span class="prj-cell-name">行动 Action</span></div><div class="prj-cell-text">待填充</div></div>
+          <div class="prj-cell is-empty" id="prj-cell-3"><div class="prj-cell-head"><span class="prj-cell-key is-r">R</span><span class="prj-cell-name">结果 Result</span></div><div class="prj-cell-text">待填充</div></div>
+        </div>
+      </div>
+      <div class="anim-console" id="prj-console">
+        <div class="anim-line is-muted">点击「单步填充」开始，逐句把原材料拆进四个格子……</div>
+      </div>
+      <div class="prj-controls">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="prj-step">单步填充</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="prj-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（全部为课程数据中的真实 path） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：本点无硬性前置（M7 起点）。软前置是「数据从哪来」——
+      <a href="../../pages/m4/m4-monitor.html">前端监控与错误上报</a>教你采集秒开率、错误率，
+      <a href="../../pages/m4/m4-cwv.html">Core Web Vitals</a> 教你读懂 LCP/INP 这些指标的含义。</p>
+    <p><strong>向后延伸</strong>：会讲单个项目之后，下一步是<a href="./m7-design.html">前端侧系统设计</a>——把「讲清楚一件做过的事」升级为「设计一件没做过的事」；
+      再往后的<a href="./m7-soft.html">面试沟通与反问技巧</a>，则把内容能力升级为临场表达能力。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="./m7-design.html">前端侧系统设计</a> —— 项目里的方案选择，正是系统设计题「权衡思维」的练习材料。</li>
+      <li><a href="../../pages/m4/m4-monitor.html">前端监控与错误上报</a> —— 你的「错误率下降 90%」数据要可信，得先懂监控怎么采集。</li>
+      <li><a href="../../pages/m4/m4-cwv.html">Core Web Vitals 性能指标</a> —— 面试官追问「秒开率怎么定义的」，答案在这里。</li>
+      <li><a href="../../pages/m4/m4-runtime.html">运行时优化：防抖、节流与计算缓存</a> —— 「性能提升」类亮点的具体技术来源之一。</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（含解析），mode:'main' -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后把最佳成绩写入进度仓库（见页面底部内联脚本）：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：讲项目就像卖房子——别只报面积（功能清单），要说清这套房好在哪、难卖在哪、你装修花了什么心思、隔壁同户型成交多少（背景、难点、方案、数据）。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前用自己的真实项目口头讲一遍「四句话版本」（录音回听效果更好）；1 天、3 天、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：2 个问法，答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：「介绍一个你最有成就感的项目」——怎么组织回答？</summary>
+      <ul>
+        <li>套四句话公式：背景（起点多差）→ 难点（难在哪，决定含金量）→ 方案（我具体做了什么，含取舍）→ 可量化结果（前后数据对比）。</li>
+        <li>全程控制在 2~3 分钟，先给结论式开头：「这个项目我把首屏时间从 6 秒压到 1.8 秒」，再展开。</li>
+        <li>方案部分用「我」开头而不是「我们」，说清哪些决策是你做的；团队功劳要认，但你的贡献要能被切出来。</li>
+        <li>结果只说可验证的数据：秒开率、耗时、错误率；估算数据要诚实说明口径。</li>
+        <li>加分项：结尾主动说「这里面有个取舍我觉得挺有意思，您要听吗」——把话题引到自己最熟的领域。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：「这个项目最大的难点是什么？」——什么样的回答算好？</summary>
+      <ul>
+        <li>难点 = 技术挑战 + 你的决策过程，而不是「需求急、人手少、工期短」——后者是苦劳，不是难点。</li>
+        <li>好难点的样子：没有现成方案需要调研、多方案权衡、有风险要兜底。例：「10 万条列表直接渲染会卡死，虚拟列表在嵌套布局下有高度计算难题」。</li>
+        <li>回答结构：难点是什么 → 当时考虑过哪几条路 → 为什么选这条 → 结果如何验证有效。</li>
+        <li>常见扣分：把「学会了新框架」当难点（那是成长不是难点）；难点讲完没有闭环（没说怎么解决的）。</li>
+        <li>加分项：说出「如果重来一次会怎么做」——体现复盘能力。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm7-project'; // 与 body data-page、curriculum.js 中的 points[].id 一字不差
+
+  /* 预热题（mode:'warmup'） */
+  var WARMUP = [{
+    id: 'm7-project-w1',
+    type: 'single',
+    stem: '预热：面试官说「介绍一个你最有成就感的项目」，下面哪种开场最不合适？',
+    options: [
+      '先交代项目背景和当时的难点',
+      '先把用过的技术栈名词全罗列一遍，越全越好',
+      '先说清这个项目解决了什么业务问题',
+      '先给一个量化结果做结论式开场'
+    ],
+    answer: [1],
+    explain: '技术栈清单是「面积」，不是「价值」。面试官想听的是你解决了什么问题、难在哪、结果如何——技术名词只是方案部分的支撑材料，单独罗列等于把房本念一遍。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm7-project-q1',
+      type: 'single',
+      stem: '「项目描述公式」的正确组成是？',
+      options: [
+        '背景 + 难点 + 方案 + 可量化结果',
+        '技术栈 + 工时 + 代码量 + 上线日期',
+        '需求文档 + UI 稿 + 接口文档 + 测试报告',
+        '功能列表 + 截图 + 演示视频 + 团队合影'
+      ],
+      answer: [0],
+      explain: '四个部分的顺序就是面试官的认知顺序：背景让面试官知道起点，难点决定含金量，方案证明是你的能力，数据结果验证价值。工时和代码量衡量的是成本不是价值——同一件事，写得越久不代表做得越好。'
+    },
+    {
+      id: 'm7-project-q2',
+      type: 'multi',
+      stem: '下面哪些属于「亮点挖掘清单」里的有效亮点方向？',
+      options: [
+        '首屏耗时从 6 秒降到 1.8 秒（性能提升）',
+        '封装通用请求库，新页面接入从 1 天缩短到 2 小时（工程提效）',
+        '错误监控加兜底降级，白屏率从 3% 压到 0.2%（稳定性建设）',
+        '这个项目我加班最多、用到的技术栈最多'
+      ],
+      answer: [0, 1, 2],
+      explain: '四个官方方向：性能提升、工程提效、稳定性建设、体验优化，共同特征是「对业务有可验证的改善」。加班时长是成本，技术栈数量是手段，都不构成亮点——面试官问的是「你让什么变好了」，不是「你付出了多少」。'
+    },
+    {
+      id: 'm7-project-q3',
+      type: 'code',
+      stem: '数据意识练习：写一个 quantify(before, after)，返回某指标从 before 到 after 的「相对提升百分比」，四舍五入取整；指标退化时返回负数。例如首屏耗时 60 优化到 92 分，quantify(60, 92) 应返回 53。',
+      stub: 'function quantify(before, after) {\n  // 在此实现：返回相对提升百分比（四舍五入取整，下降为负数）\n  // 提示：相对提升 = (after - before) / before * 100，再用 Math.round 取整\n}\n',
+      reference: 'function quantify(before, after) {\n  return Math.round((after - before) / before * 100);\n}',
+      asserts: [
+        'quantify(60, 92) === 53',
+        'quantify(100, 100) === 0',
+        'quantify(80, 40) === -50'
+      ],
+      explain: '为什么用「相对提升」而不是差值：从 60 到 92 涨了 32，但基数不同冲击力不同——(92-60)/60*100 ≈ 53% 的相对提升更能体现改善幅度，这也是「数据意识」的一部分：同一个事实，选对口径才说得清。实现上注意两点：一是用 Math.round 四舍五入而不是 Math.floor（floor 会把 53.33 砍成 53 纯属巧合，换成 53.67 就露馅）；二是下降时公式自然得到负数（(40-80)/80*100 = -50），不需要额外写 if——退化也是有效数据，汇报时负数反而是诚实的表现。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（会推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：STAR 四格拆解器（纯 DOM 手写，无动画库）。
+   单步填充 = 每点一次按钮，把原材料中的一句话装进一个格子并在控制台解释「为什么放这格」；
+   已填充的格子可点击，复习该格的要点。 */
+(function () {
+  'use strict';
+
+  /* 四步拆解数据：sentence 是从原材料里翻译出的那句话，why 是「为什么放进这格」 */
+  var STEPS = [
+    {
+      key: 'S', cls: 'is-s', name: '背景 Situation',
+      sentence: '接手一个老商城项目，首屏要 6 秒才能看到商品列表，用户流失明显。',
+      why: '先把起点交代清楚：面试官只有知道「原来有多差」，才能衡量你后面动作的价值。没有 S，就没有对比。'
+    },
+    {
+      key: 'T', cls: 'is-t', name: '任务 Task',
+      sentence: '我的目标：把首屏时间压下来，降低商品页的流失率。',
+      why: '说清「你要对什么结果负责」，面试官才知道你在团队里扮演什么角色。目标要和业务指标（流失率）挂钩，而不是「把优化做完」。'
+    },
+    {
+      key: 'A', cls: 'is-a', name: '行动 Action',
+      sentence: '做了路由级代码分割、图片懒加载、接口合并，首屏请求从 23 个减到 8 个。',
+      why: '这是唯一属于「我」的部分：具体动作 + 关键数字（23 减到 8）。注意原材料里的「用 Vue 和 Webpack」没资格进这格——工具不是行动，决策和落地才是。'
+    },
+    {
+      key: 'R', cls: 'is-r', name: '结果 Result',
+      sentence: '首屏从 6 秒降到 1.8 秒，秒开率从 34% 升到 81%，流失率下降 19%。',
+      why: '用前后对比的数据收尾。没有 R，前面的 A 只是「干过活」；有了 R，才证明你「干成了事」——数据也让整个故事可以被验证。'
+    }
+  ];
+
+  var stepIndex = 0;                          // 已填充到第几格
+  var cells = [];                             // 四个格子元素
+  for (var c = 0; c < 4; c++) cells.push(document.getElementById('prj-cell-' + c));
+  var consoleEl = document.getElementById('prj-console');
+  var stepBtn = document.getElementById('prj-step');
+  var resetBtn = document.getElementById('prj-reset');
+
+  /* 向控制台追加一行日志 */
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight; // 控制台自动滚到底部
+  }
+
+  /* 把第 i 格渲染成「已填充」状态 */
+  function fillCell(i) {
+    var s = STEPS[i];
+    var cell = cells[i];
+    cell.classList.remove('is-empty');
+    cell.classList.add('is-filled', 'is-hot');
+    cell.querySelector('.prj-cell-text').textContent = s.sentence;
+  }
+
+  /* 清除所有格子的当前高亮 */
+  function clearHot() {
+    cells.forEach(function (cell) { cell.classList.remove('is-hot'); });
+  }
+
+  /* 单步填充：一次只装一句，便于观察「翻译」怎么发生 */
+  function step() {
+    if (stepIndex >= STEPS.length) return;
+    clearHot();
+    fillCell(stepIndex);
+    var s = STEPS[stepIndex];
+    log('【' + s.key + ' · ' + s.name + '】' + s.sentence, 'is-ok');
+    log('　　为什么放这格：' + s.why, 'is-muted');
+    stepIndex += 1;
+    if (stepIndex >= STEPS.length) {
+      log('拆解完成：同一段经历，四句话讲完背景、目标、行动、结果。面试时按 S→T→A→R 的顺序说，就是最稳的骨架。', 'is-end');
+      log('复习方式：点击任意绿色格子，可以再看一遍「为什么放这格」。', 'is-muted');
+      stepBtn.disabled = true;
+    }
+  }
+
+  /* 点击已填充的格子：重讲一遍该格的「为什么」（复习用） */
+  function onCellClick(i) {
+    if (i >= stepIndex) return; // 还没填充的格子不响应
+    clearHot();
+    cells[i].classList.add('is-hot');
+    log('复习【' + STEPS[i].key + ' · ' + STEPS[i].name + '】：' + STEPS[i].why, 'is-muted');
+  }
+
+  function reset() {
+    stepIndex = 0;
+    stepBtn.disabled = false;
+    cells.forEach(function (cell, i) {
+      cell.className = 'prj-cell is-empty';
+      cell.querySelector('.prj-cell-text').textContent = '待填充';
+    });
+    consoleEl.innerHTML = '';
+    log('已重置：点击「单步填充」重新开始拆解……', 'is-muted');
+  }
+
+  cells.forEach(function (cell, i) {
+    cell.addEventListener('click', function () { onCellClick(i); });
+  });
+  stepBtn.addEventListener('click', step);
+  resetBtn.addEventListener('click', reset);
+})();
+</script>
+</body>
+</html>

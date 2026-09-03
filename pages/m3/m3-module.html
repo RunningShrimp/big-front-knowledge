@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>模块化：ESM 与 CommonJS · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ===== 本页动画专用样式（纯手写，无外部资源） ===== */
+.md-wrap { display: flex; flex-wrap: wrap; gap: 14px; margin: 10px 0; }
+.md-col { flex: 1 1 260px; min-width: 250px; }
+.md-col-title { font-size: 13px; font-weight: 600; margin-bottom: 6px; color: var(--fg-c-ink-2); }
+.md-file {
+  border: 1px solid var(--fg-c-line); border-radius: 8px; overflow: hidden;
+  background: var(--fg-c-card); font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+.md-file-head {
+  padding: 5px 10px; font-size: 12px; color: var(--fg-c-ink-2);
+  background: var(--fg-c-bg); border-bottom: 1px solid var(--fg-c-line);
+}
+.md-line { padding: 5px 10px; font-size: 12px; white-space: pre-wrap; color: var(--fg-c-ink); transition: background .3s, box-shadow .3s; }
+.md-line.is-lit { background: var(--fg-c-primary-weak); box-shadow: inset 3px 0 0 var(--fg-c-primary); }
+.md-line.is-dim { opacity: .55; }
+.md-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
+.md-chip {
+  font-size: 12px; border: 1px solid var(--fg-c-line); border-radius: 14px;
+  padding: 2px 10px; background: var(--fg-c-bg); transition: all .35s;
+}
+.md-chip.is-used { border-color: var(--fg-c-ok); color: var(--fg-c-ok); background: var(--fg-c-ok-weak); }
+.md-chip.is-shaken { text-decoration: line-through; opacity: .4; border-color: var(--fg-c-line); }
+.md-chip.is-kept { border-color: var(--fg-c-warn); color: var(--fg-c-warn); background: var(--fg-c-warn-weak); }
+.md-chip-note { font-size: 12px; color: var(--fg-c-ink-3); }
+</style>
+</head>
+<body data-page="m3-module">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">为什么 JS 需要模块化？CommonJS 与 ESM 同样能拆文件，命运却完全不同——加载时机、值拷贝与活引用、Tree Shaking，一次看懂。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>前置知识：建议先过一遍 <a href="../m1/m1-js-es6.html">ES6+ 核心特性</a>——本页会直接使用
+      <code>import / export</code> 语法、解构赋值和箭头函数，这些都在那一页打过底。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：讲解 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、先看没有模块的世界有多乱</h3>
+    <p>最早的网页把所有 JS 堆在 <code>&lt;script&gt;</code> 标签里，所有变量都挂在全局：页面引了 10 个脚本，
+      就有 10 份代码在抢同一批全局变量名。你在 <code>utils.js</code> 里定义了 <code>format</code>，
+      同事在 <code>chart.js</code> 里也定义了 <code>format</code>——后加载的悄悄覆盖先加载的，报错的地方却离案发现场十万八千里。
+      而且「谁依赖谁」全靠人肉记住标签顺序，引错顺序直接运行时报错。<strong>模块化</strong>就是给代码建立「文件即仓库」的制度：
+      每个模块有自己的独立作用域，想给别人用什么就显式 <strong>导出</strong>，想用别人的东西就显式 <strong>导入</strong>——依赖关系写在纸面上，一目了然。</p>
+
+    <h3>二、CommonJS：Node 世界的「运行时现拿」</h3>
+    <p>CommonJS（CJS）是 Node.js 的模块制度，核心是 <code>require</code> 和 <code>module.exports</code>。
+      它有两个关键性格：<strong>① 运行时才加载</strong>——代码执行到 <code>require('./math')</code> 这一行，
+      才停下来同步读取并执行 math 模块，所以 CJS 的依赖可以是任何表达式，比如 <code>require(name)</code> 动态拼接；
+      <strong>② 导出的是值的拷贝</strong>——require 拿到的是 exports 对象「此刻内容」的一份引用快照，
+      之后原模块内部把值改了，已经 require 到手的那份不会被牵动。</p>
+
+    <h3>三、ESM：语言标准的「编译期看清一切」</h3>
+    <p>ESM（ES Module）是 JS 语言官方的模块制度，核心是 <code>import / export</code>。
+      它的性格几乎处处相反：<strong>① 编译期静态分析</strong>——<code>import</code> 是声明式语法、必须写在顶层，
+      模块名只能是字符串字面量，所以引擎<strong>不执行任何代码</strong>就能通读全文、画出完整依赖图；
+      <strong>② 导出的是「活引用」（live binding）</strong>——import 进来的不是拷贝，而是指向原模块导出的只读视图，
+      原模块内部的值变了，import 方看到的就是新值。顺带两个常考细节：import 声明会被<strong>提升</strong>到模块顶部；
+      ESM 顶层的 <code>this</code> 是 <code>undefined</code>（CJS 顶层 this 是 <code>module.exports</code>）。</p>
+
+    <h3>四、Tree Shaking：静态结构换来的「删代码特权」</h3>
+    <p>打包时最想要的超能力是「把没人用的导出直接删掉」（Tree Shaking，摇掉枯叶）。
+      ESM 依赖图在编译期就完全确定、导出被谁用了清清楚楚，打包器能放心删掉 <code>sub</code>、<code>mul</code> 这些无人引用的导出。
+      而 CJS 的 exports 可能被 <code>exports[变量名]</code> 动态访问、模块可能在运行时才决定导出什么，
+      打包器「不敢保证删了没人找」，只能整包保留——<strong>这正是「ESM 能 Tree Shaking 而 CJS 很难」的根源</strong>。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 食堂打菜与共享菜谱</div>
+      <p>CommonJS 像<strong>食堂打菜</strong>：你端着餐盘走到窗口（执行到 require 这一行），师傅把你指的那道菜
+        「此刻的样子」盛一份给你（值拷贝）。端走之后，后厨把这道菜改了配方、加了辣，你盘子里那份纹丝不动——
+        拷贝就是拷贝，跟原件再无关系。而且你必须走到窗口（运行时）才知道今天有哪些菜，菜谱没法提前拿到。</p>
+      <p>ESM 像<strong>共享菜谱</strong>：开店之前（编译期），所有人先把手里的菜谱交上来通读一遍，
+        管理者不用炒任何一道菜，就知道「A 菜谱要用到 B 菜谱的三道菜」——依赖图开工前就画好了。
+        大家看的是<strong>同一份原文</strong>（活引用）：原菜谱今天把「少糖」改成「无糖」，照着做的人立刻全都知道，
+        不存在「有人还拿着旧抄本」的问题。也正因为菜谱开工前就齐了，管理者一眼看出「mul 这道菜从头到尾没人点」，
+        开席时干脆不做它——这就是 Tree Shaking。</p>
+    </div>
+
+    <h3>五、循环依赖：两套制度的不同表现</h3>
+    <p>A 依赖 B、B 又依赖 A，就形成了循环依赖。CJS 下先被加载的一方执行到 require 时，
+      另一方可能还没执行完，拿到的是<strong>不完整的导出拷贝</strong>，用时容易 undefined；
+      ESM 靠「声明提升 + 活引用」，import 方拿到的是引用本身，等真正<strong>使用</strong>时（而非导入时）原值多半已就位，
+      所以很多循环在 ESM 下能自然工作。结论一致：<strong>循环依赖能用，但都该靠重构避免</strong>。</p>
+  </section>
+
+  <!-- ③ 动画演示：CJS 与 ESM 处理同一份代码的单步对比（纯手写，单步执行） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>下面左右两栏是「同一份业务代码」的两种写法。请点「单步执行」，对比两套制度在
+      「发现依赖 → 拿到什么 → 能否删掉没人用的导出」三个环节上的差异：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">场景：页面只需要 math 模块里的 add 函数；math 模块导出了 add / sub / mul 三个函数。</p>
+      <div class="md-wrap">
+        <div class="md-col">
+          <div class="md-col-title">CommonJS（require / exports）</div>
+          <div class="md-file">
+            <div class="md-file-head">page.cjs</div>
+            <div class="md-line" id="md-cjs-l1">// const 解构在运行时才发生</div>
+            <div class="md-line" id="md-cjs-l2">const { add } = require('./math');</div>
+            <div class="md-line" id="md-cjs-l3">console.log(add(1, 2));</div>
+          </div>
+          <div class="md-chips" id="md-cjs-chips">
+            <span class="md-chip-note">math.cjs 导出：</span>
+            <span class="md-chip" data-fn="add">add</span>
+            <span class="md-chip" data-fn="sub">sub</span>
+            <span class="md-chip" data-fn="mul">mul</span>
+          </div>
+        </div>
+        <div class="md-col">
+          <div class="md-col-title">ESM（import / export）</div>
+          <div class="md-file">
+            <div class="md-file-head">page.mjs</div>
+            <div class="md-line" id="md-esm-l1">import { add } from './math';</div>
+            <div class="md-line" id="md-esm-l2">console.log(add(1, 2));</div>
+          </div>
+          <div class="md-chips" id="md-esm-chips">
+            <span class="md-chip-note">math.mjs 导出：</span>
+            <span class="md-chip" data-fn="add">add</span>
+            <span class="md-chip" data-fn="sub">sub</span>
+            <span class="md-chip" data-fn="mul">mul</span>
+          </div>
+        </div>
+      </div>
+      <div class="anim-console" id="md-console">
+        <div class="anim-line is-muted">点击「单步执行」，左右对照两套制度的每一步…</div>
+      </div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="md-step">单步执行</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="md-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（真实课程路径） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="../m1/m1-js-es6.html">ES6+ 核心特性</a>——import/export、解构、模块顶层作用域等语法地基都在那一页；
+      另外推荐 <a href="../m1/m1-js-scope.html">JS 类型、作用域与闭包</a>，理解「模块顶层变量为什么不会污染全局」。</p>
+    <p><strong>向后延伸</strong>：看清两套模块制度后，<a href="./m3-build.html">构建工具思想与 Vite</a> 正是踩着 ESM 的静态结构起舞——
+      依赖图、按需编译、Tree Shaking 全都建立在「import 可以被静态分析」之上。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="../m6/m6-node.html">Node.js 运行时与事件循环</a> —— CommonJS 的原生故乡，require 的同步加载与 Node 的模块缓存机制在那边继续展开。</li>
+      <li><a href="../m4/m4-load.html">首屏与资源加载优化</a> —— Tree Shaking 与代码分割是体积优化的主力：删掉没人用的导出、按路由拆包。</li>
+      <li><a href="../m7/m7-handwrite-basic.html">手写题·JS 基础篇</a> —— 本页代码题是「正则静态扫描」，更系统的手写套路在这一页集中训练。</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（含解析），mode:'main' -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后把最佳成绩写入进度仓库（见页面底部内联脚本）：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：模块化就是让每份代码住在自己的房间里、要什么借什么；
+      CommonJS 像食堂打菜——走到窗口才点菜、端走的是一份拷贝；ESM 像共享菜谱——开工前通读一遍就看清全部依赖、大家看同一份原文，没人点的菜干脆不做（Tree Shaking）。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前复述 1 次「CJS 运行时加载 + 值拷贝；ESM 编译期静态分析 + 活引用；所以 ESM 能 Tree Shaking、顶层 this 是 undefined」，1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：2 个问法，答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：ESM 和 CommonJS 的核心区别有哪些？为什么 ESM 能做 Tree Shaking？</summary>
+      <ul>
+        <li>加载时机：CJS 的 require 是运行时同步加载，执行到才去找；ESM 的 import 是声明，编译期就完成静态分析、画出依赖图。</li>
+        <li>导出语义：CJS 导出值的拷贝（require 之后的改动与已拿到的无关）；ESM 导出「活引用」，只读视图，原值变了到处同步。</li>
+        <li>语法约束：ESM 的模块名必须是字符串字面量、import 必须在顶层且会被提升；CJS 的 require 可以写进 if、可以动态拼接路径。</li>
+        <li>顶层 this：CJS 是 module.exports；ESM 是 undefined。</li>
+        <li>Tree Shaking：因为依赖与导出的引用关系在编译期完全确定、无法被运行时动态改变，打包器能安全删除未被引用的导出；CJS 的 exports 可能被动态访问，打包器不敢删。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：循环依赖在 CJS 和 ESM 下分别是什么表现？</summary>
+      <ul>
+        <li>CJS：模块加载有缓存，循环时第二次 require 命中「还没执行完的缓存」，拿到的是不完整的导出拷贝——访问尚未赋值的导出会得到 undefined，且事后原模块补上了也与你无关（拷贝语义）。</li>
+        <li>ESM：靠引用绑定 + import 提升，import 方拿到的是「指向导出的引用」，只要不在模块求值阶段立刻使用对方，等真正调用时值通常已就位，多数循环能自然工作。</li>
+        <li>共同结论：循环依赖是设计坏味道，靠抽公共模块、依赖倒置重构掉，而不是指望运行时兜底。</li>
+        <li>加分项：说出 ESM 的三步——构造（找依赖建图）、实例化（分配导出绑定）、求值（执行代码），循环主要体现在求值顺序上。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 + 双制度单步对比动画 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm3-module'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'） */
+  var WARMUP = [{
+    id: 'm3-module-warmup-1',
+    type: 'single',
+    stem: '预热：JS 引入模块化制度，最直接解决的是哪类问题？',
+    options: [
+      '让代码运行速度提升十倍',
+      '全局命名冲突与依赖关系不清晰的问题',
+      '让网页摆脱对 HTML 的依赖',
+      '替代数据库存储数据'
+    ],
+    answer: [1],
+    explain: '没有模块时，所有脚本共享全局作用域，变量互相覆盖、加载顺序靠人肉维护。模块化让每个文件拥有独立作用域，依赖通过显式的导入/导出声明，问题从根上解决。'
+  }];
+
+  /* 正式例题（mode:'main'）：1 道单选 + 1 道多选 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm3-module-q1',
+      type: 'single',
+      stem: 'CommonJS 环境下：counter.js 导出 count 初始为 0，并在 100ms 后把它改成 1。main.js 里 const { count } = require("./counter")，然后 200ms 后打印 count，输出是？换成 ESM 的 import { count } 呢？',
+      options: [
+        'CJS 输出 0；ESM 输出 1',
+        'CJS 输出 1；ESM 输出 0',
+        '两者都输出 0',
+        '两者都输出 1'
+      ],
+      answer: [0],
+      explain: 'CJS 是值拷贝：const { count } 解构的那一刻，就把「当时的 0」复制进了局部变量，之后原模块把 exports.count 改成 1 与这份拷贝无关，打印 0。ESM 是活引用：import 的 count 是指向原模块导出的只读视图，原模块改了，读到的一直是最新值，打印 1。这正是「拷贝 vs 引用」最经典的可观察差异。'
+    },
+    {
+      id: 'm3-module-q2',
+      type: 'multi',
+      stem: '下列关于 ESM 与 CommonJS 的说法，正确的有哪些？（多选，全部选对才得分）',
+      options: [
+        'CJS 的 require 是运行时同步加载，执行到这一行才去读取并执行目标模块',
+        'ESM 的 import 声明会被提升，依赖关系在编译期（不执行代码）就能完全确定',
+        'CJS 导出的是值的拷贝，导出后再改动，之前 require 到手的值不受影响',
+        'ESM 模块顶层的 this 指向 module.exports'
+      ],
+      answer: [0, 1, 2],
+      explain: '前三项都是两套制度的教科书差异：运行时同步加载、编译期静态分析、值拷贝。第四项反了——ESM 顶层 this 是 undefined，顶层 this 等于 module.exports 的是 CJS（模块包装函数把 this 绑定为 exports）。记住对照记忆：CJS 处处「运行时、拷贝、有 exports 上下文」，ESM 处处「编译期、引用、干净作用域」。'
+    },
+    {
+      id: 'm3-module-q3',
+      type: 'code',
+      stem: '动手实现「静态依赖扫描器」：实现 scanDeps(source)，从模块源码字符串中提取依赖的模块名，支持三种形式——import ... from \'xxx\'（含默认导入）、import \'xxx\'（纯副作用导入）、require(\'xxx\')。返回去重后的数组，按首次出现顺序排列。（这正是打包器构建依赖图的第一步。）',
+      stub: 'function scanDeps(source) {\n  // 1. 用正则分别匹配三种形式，捕获引号里的模块名\n  //    - import ... from \'xxx\'\n  //    - import \'xxx\'\n  //    - require(\'xxx\')\n  // 2. 去重且保持首次出现的顺序\n  // 3. 返回模块名数组\n}\n',
+      reference: 'function scanDeps(source) {\n  var out = [];\n  var seen = {};\n  function push(name) {\n    if (name && !seen[name]) { seen[name] = true; out.push(name); }\n  }\n  var patterns = [\n    /import\\s+[\\s\\S]*?from\\s*[\'"]([^\'"]+)[\'"]/g,\n    /import\\s*[\'"]([^\'"]+)[\'"]/g,\n    /require\\s*\\(\\s*[\'"]([^\'"]+)[\'"]\\s*\\)/g\n  ];\n  patterns.forEach(function (re) {\n    var m;\n    while ((m = re.exec(source))) push(m[1]);\n  });\n  return out;\n}',
+      asserts: [
+        'JSON.stringify(scanDeps("import { add } from \'./math\';")) === \'["./math"]\'',
+        'JSON.stringify(scanDeps("const fs = require(\'fs\');")) === \'["fs"]\'',
+        'JSON.stringify(scanDeps("import \'a\';\\nconst b = require(\\"b\\");\\nimport { x } from \'a\';")) === \'["a","b"]\'',
+        'scanDeps("import App from \\"vue\\";").indexOf("vue") === 0'
+      ],
+      explain: '这道题模拟的是打包器「构造依赖图」的第一步。关键点：① import ... from 的中间部分（{ add }、App 等）要用惰性的 [\\s\\S]*? 跨越任意字符匹配，引号里才是模块名；② require 的括号两侧允许空白；③ 去重要用 seen 标记表而不是 indexOf 遍历，同时保持首次出现顺序。想一想为什么 CJS 里 require(\'a\' + name) 这种动态拼接扫描不出来——这正是 CJS 难以 Tree Shaking 的直观原因：依赖图在静态阶段根本画不全。真实打包器不用正则而是解析成 AST（抽象语法树）再做同样的事，原理一脉相承。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（会推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：CJS 与 ESM 单步对照（发现依赖 → 拿到什么 → Tree Shaking） */
+(function () {
+  'use strict';
+
+  var consoleEl = document.getElementById('md-console');
+  var stepBtn = document.getElementById('md-step');
+  var resetBtn = document.getElementById('md-reset');
+  var idx = 0;      // 已执行的步数
+  var done = false; // 是否已走完全部步骤
+
+  /* 输出一行日志 */
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* 点亮 / 熄灭某一侧代码的某一行（id 如 md-cjs-l2） */
+  function lit(id, on) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.classList.toggle('is-lit', !!on);
+    if (!on) el.classList.remove('is-dim');
+    else el.classList.add('is-dim');
+  }
+
+  /* 给某一侧的导出芯片设置状态：used=被使用 / shaken=被摇掉 / kept=不敢删 */
+  function chip(side, fn, cls) {
+    var host = document.getElementById(side === 'cjs' ? 'md-cjs-chips' : 'md-esm-chips');
+    var chips = host.querySelectorAll('.md-chip');
+    for (var i = 0; i < chips.length; i++) {
+      if (chips[i].getAttribute('data-fn') === fn) {
+        chips[i].classList.remove('is-used', 'is-shaken', 'is-kept');
+        if (cls) chips[i].classList.add(cls);
+      }
+    }
+  }
+
+  /* 单步脚本：每步同时推进左右两栏，便于对照 */
+  var STEPS = [
+    function () {
+      lit('md-cjs-l1', true);
+      lit('md-esm-l1', true);
+      chip('cjs', 'add', 'is-used');
+      chip('esm', 'add', 'is-used');
+      log('第 1 步：同一份业务代码——页面只用到 math 模块的 add。两边的「导出物」都是 add / sub / mul 三个函数，绿色表示被页面引用。', 'is-ok');
+    },
+    function () {
+      lit('md-cjs-l2', true);
+      log('CJS：执行到第 2 行才遇到 require(\'./math\') → 此刻才停下、同步读取并执行 math 模块。依赖关系「运行时」才揭晓，之前打包器无从得知。', 'is-ok');
+    },
+    function () {
+      lit('md-esm-l2', true);
+      log('ESM：import 是声明、会被提升。编译期通读全文（不执行任何代码），依赖图 page.mjs → math.mjs 开工前就画好了——注意左栏此刻才「执行到」require，右栏早已完成分析。', 'is-ok');
+    },
+    function () {
+      log('拿到的东西不同：CJS 的解构拷走的是「require 那一刻」的值（值拷贝），math 之后怎么改与它无关；ESM 拿到的是指向 math 导出的「活引用」，math 里值一变，这里读到的就是新值。', 'is-ok');
+    },
+    function () {
+      chip('esm', 'sub', 'is-shaken');
+      chip('esm', 'mul', 'is-shaken');
+      log('Tree Shaking（ESM 特权）：sub / mul 无人引用且结构静态可知 → 打包器放心摇掉（划线灰化），产物更小。', 'is-ok');
+    },
+    function () {
+      chip('cjs', 'sub', 'is-kept');
+      chip('cjs', 'mul', 'is-kept');
+      log('CJS 这边：exports 可能被 exports[变量名] 动态访问、依赖可能运行时拼接，打包器「不敢保证删了没人找」→ sub / mul 只能整包保留（黄色警示）。这正是「为什么 ESM 能 Tree Shaking 而 CJS 很难」的完整答案。', 'is-end');
+    }
+  ];
+
+  function step() {
+    if (done) return;
+    STEPS[idx]();
+    idx = idx + 1;
+    if (idx >= STEPS.length) {
+      done = true;
+      stepBtn.disabled = true;
+      log('演示完毕。试着不看日志说出：加载时机、值拷贝 vs 活引用、Tree Shaking 三组差异分别对应上面哪几步。', 'is-muted');
+    }
+  }
+
+  function reset() {
+    idx = 0;
+    done = false;
+    stepBtn.disabled = false;
+    ['md-cjs-l1', 'md-cjs-l2', 'md-cjs-l3', 'md-esm-l1', 'md-esm-l2'].forEach(function (id) { lit(id, false); });
+    ['cjs', 'esm'].forEach(function (side) {
+      ['add', 'sub', 'mul'].forEach(function (fn) { chip(side, fn, null); });
+    });
+    consoleEl.innerHTML = '';
+    log('已重置：打包器拿到了两份等价但制度不同的代码，点击「单步执行」开始对照…', 'is-muted');
+  }
+
+  stepBtn.addEventListener('click', step);
+  resetBtn.addEventListener('click', reset);
+  reset();
+})();
+</script>
+</body>
+</html>

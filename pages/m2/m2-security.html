@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>Web 安全：XSS、CSRF 与 CSP · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ===== 本页动画专用样式：公告栏与邮差——「输出转义」开关的防御效果演示 ===== */
+.sec-switch { display: flex; align-items: center; gap: 10px; margin: 10px 0; flex-wrap: wrap; }
+.sec-switch-btn.is-on { border-color: #35a06b; background: #eafaf1; color: #1d6f47; font-weight: 700; }
+.sec-switch-btn.is-off { border-color: #d05a70; background: #fdeef1; color: #a92e44; font-weight: 700; }
+.sec-board {
+  margin: 12px 0; padding: 12px 14px; border-radius: 10px;
+  border: 2px solid #d5dbe7; background: #f7f9fc;
+}
+.sec-board-name { font-weight: 700; font-size: 13px; color: #41506b; margin-bottom: 8px; }
+.sec-note {
+  font-size: 13px; color: #41506b; padding: 8px 10px; border-radius: 8px;
+  border: 1px dashed #b9c3d6; background: #fff; line-height: 1.7;
+}
+.sec-chip {
+  display: inline-block; font-size: 12px; padding: 2px 8px; margin: 0 3px;
+  border-radius: 999px; border: 1px solid #b9c3d6; background: #f1f3f8; color: #6a7690;
+  transition: background .25s, border-color .25s, color .25s;
+}
+.sec-chip.is-escaped { border-color: #35a06b; background: #eafaf1; color: #1d6f47; }
+.sec-chip.is-danger { border-color: #d05a70; background: #fdeef1; color: #a92e44; font-weight: 700; }
+.sec-postman {
+  display: flex; align-items: center; gap: 10px; margin: 10px 0;
+  padding: 8px 12px; border-radius: 10px; border: 2px solid #d5dbe7; background: #f7f9fc;
+  transition: border-color .25s;
+}
+.sec-postman.is-danger { border-color: #d05a70; }
+.sec-postman.is-safe { border-color: #35a06b; }
+.sec-postman-label { font-weight: 700; font-size: 13px; color: #41506b; }
+.sec-postman-state { font-size: 12px; color: #6a7690; }
+</style>
+</head>
+<body data-page="m2-security">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">知识点：Web 安全：XSS、CSRF 与 CSP（建议学习时长约 30 分钟）——本页只讲攻击原理与防御体系，不涉及任何可利用手段。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>本页前置依赖：<a href="./m2-cors.html">跨域与 CORS</a>——先弄懂「同源策略把不同源的内容隔开」，才能理解攻击者为什么总想把自己的内容混进你的源。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：分小标题推进 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、XSS：数据被当成了代码</h3>
+    <p>XSS（跨站脚本攻击）的本质一句话就能说清：<strong>不可信的数据被浏览器当成了代码来执行</strong>。页面里的留言、评论本该是纯文字，但如果用户提交的内容未经处理就被拼进了页面结构，浏览器分不清「这是内容」还是「这是指令」，就会照着执行。
+      按恶意内容进入页面的路径，常见三种形态：<strong>存储型</strong>——恶意内容被存进数据库（如留言板），每个打开页面的用户都会中招，危害最大；
+      <strong>反射型</strong>——恶意内容藏在链接参数里，服务器把它原样「反射」回页面，需要诱导用户点击特制链接；
+      <strong>DOM 型</strong>——纯前端问题，页面自己的脚本把不可信数据直接写进了会当 HTML 解析的容器（如直接拼接插入），服务器毫无察觉。</p>
+
+    <h3>二、XSS 防御体系：让数据永远是数据</h3>
+    <p>防御 XSS 是一套组合拳，核心三板斧：</p>
+    <p><strong>输出转义</strong>：把数据渲染进页面之前，把会改变结构的字符替换成「纯展示」的写法（如 <code>&amp;</code> 变 <code>&amp;amp;</code>、<code>&lt;</code> 变 <code>&amp;lt;</code>），数据就永远只被当作文字。注意要按<strong>输出上下文</strong>选转义规则：进 HTML 正文是一套、进属性值是一套、进 JS 字符串又是一套，一把钥匙开一把锁。
+      <strong>HttpOnly Cookie</strong>：给存放登录态的 Cookie 加上 HttpOnly 属性后，页面脚本完全读不到它——即使 XSS 防线失守，最值钱的凭证也偷不走。
+      <strong>输入校验与最小化注入</strong>：对用户输入做长度与格式约束；富文本场景不做「一刀切转义」，改用白名单过滤器只保留安全的标签与属性；使用现代框架时享受默认转义，慎用一切「按原始 HTML 插入」的口子。</p>
+
+    <h3>三、CSRF：不偷代码，只借身份</h3>
+    <p>CSRF（跨站请求伪造）的巧妙之处在于：<strong>请求里没有任何攻击代码</strong>。用户在 A 网站登录后，浏览器会在此后对 A 的每个请求里<strong>自动附上 Cookie</strong>（这是 Cookie 的正常行为）；
+      此时如果用户被诱导访问了恶意网页 B，B 里的页面偷偷向 A 发出一个请求——浏览器一看目标是你登录过的 A，就把 Cookie 带上了，A 的服务器分不清这是用户本人操作还是别人替他点的头，于是「替用户」完成了操作。
+      一句话：<strong>XSS 是「我的站点执行了别人的代码」，CSRF 是「别人的站点借用了我的身份」。</strong></p>
+
+    <h3>四、CSRF 防御：让伪造请求带不上合法凭证</h3>
+    <p><strong>CSRF Token</strong>：服务端给每个会话发放随机一次性令牌，埋在表单隐藏字段或自定义请求头里，提交时校验。恶意站点处于另一源，受同源策略限制<strong>读不到</strong>你站点页面里的令牌，伪造的请求自然缺票。
+      <strong>SameSite Cookie</strong>：把 Cookie 标记为 SameSite=Lax / Strict，浏览器就不在跨站请求里附上它——从「自动带身份」这一环直接掐断。
+      <strong>Origin / Referer 校验</strong>：服务端检查请求来源头，非本站来源的关键操作直接拒绝。三者常叠加使用，关键操作（改密码、转账）再加二次确认。</p>
+
+    <h3>五、CSP：从源头限定「谁能在这页面上跑」</h3>
+    <p>CSP（内容安全策略）是浏览器执行的一张<strong>资源白名单</strong>：服务器通过 <code>Content-Security-Policy</code> 响应头声明「本页面的脚本只允许来自这些来源」，例如 <code>default-src 'self'</code> 只许加载同源资源；还可以禁止内联脚本、要求脚本带 nonce 一次性凭据。
+      即使某处转义被漏掉、恶意内容混进了页面，浏览器发现它不在白名单内也<strong>拒绝执行</strong>——CSP 是 XSS 的最后一道闸门，但它不能替代输出转义（白名单配得再严，也防不了同源内的注入点），而且<strong>防不了 CSRF</strong>（CSRF 根本不需要在你的页面里执行代码）。可先用 Report-Only 模式只上报不拦截，观察误伤后再正式启用。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 小区公告栏、防伪条码与盖章制度</div>
+      <p>小区门口有块公告栏（评论区），本该只贴纯文字告示。有一天有人贴了张「告示」，远看是通知，细看里面夹着一行「执行指令」——路过居民的智能眼镜（浏览器）一扫描，居然真的照着做了：这就是 XSS，<strong>内容里混进了指令</strong>。
+        物业随后立了三条规矩：第一，所有张贴内容必须先经过「誊抄员」，把一切疑似指令的字迹<strong>原样描成普通文字</strong>再上墙（输出转义），眼镜从此只把它当文字念；
+        第二，居民放钥匙的柜子（Cookie）换成<strong>只有物业能开的保险箱</strong>，居民自己都摸不到（HttpOnly），小偷翻遍公告栏也偷不走钥匙；
+        第三，公告栏挂出牌子「本栏只张贴物业盖章的告示」（CSP），没盖章的内容直接不上墙——就算誊抄员打了个盹，还有盖章这道闸。
+        再说另一件事：老王没偷你家钥匙，只是趁你把钥匙牌忘在门卫时，<strong>拿着你的钥匙牌去物业替你交了份申请</strong>（CSRF）——他借的是「钥匙牌自动代表你」的规则。物业的对策：申请单必须附上<strong>当场发放、一次一码的防伪条码</strong>（CSRF Token），外来小区的人根本拿不到；同时规定<strong>非本小区递来的单子一律不认</strong>（SameSite / Origin 校验）。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：公告栏与邮差——「输出转义」开关的防御效果（防御视角，不展示任何可利用内容） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>开关「输出转义」，单步观察同一条便条在公告栏上的两种命运（恶意内容用占位标记表示，不展示真实形式）：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">访客投递的便条 = 一段正常留言 + 一段被标记为「可疑指令」的内容。邮差（浏览器）念公告栏时，
+        开着转义就把可疑内容当<strong>纯文字</strong>念出来；关掉转义就会把它当<strong>指令</strong>执行。先拨开关，再点「单步执行」：</p>
+      <div class="sec-switch">
+        <span class="fg-muted">输出转义：</span>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm sec-switch-btn is-on" id="sec-switch-btn">开（安全）</button>
+      </div>
+      <div class="sec-board">
+        <div class="sec-board-name">小区公告栏（页面渲染区）</div>
+        <div class="sec-note" id="sec-note">（公告栏空着，等待便条投递…）</div>
+      </div>
+      <div class="sec-postman" id="sec-postman">
+        <span class="sec-postman-label">邮差（浏览器）</span>
+        <span class="sec-postman-state" id="sec-postman-state">待命中</span>
+      </div>
+      <div class="anim-console" id="sec-console"></div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="sec-step">单步执行</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="sec-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（全部为课程数据中的真实 path） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="./m2-cors.html">跨域与 CORS</a>——同源策略是这一切的前提：攻击者读不到你源内的 CSRF Token，防御才成立。</p>
+    <p><strong>向后延伸</strong>：登录态的发放与保管（Session / Token）是 XSS 与 CSRF 攻防的焦点，见<a href="../m6/m6-session.html">Cookie、Session 与鉴权基础</a>与<a href="../m6/m6-jwt.html">JWT 与 OAuth 2.0</a>。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="./m2-storage.html">浏览器存储：Cookie、Web Storage 与 IndexedDB</a> —— HttpOnly / SameSite / Secure 都是 Cookie 的属性，存储选型直接影响安全面</li>
+      <li><a href="../m4/m4-monitor.html">前端监控与错误上报</a> —— 上线后的安全事件常先以「异常报错」露头，监控是把防御延伸到运行时的眼睛</li>
+      <li><a href="./m2-https.html">HTTPS 与 TLS 握手</a> —— 传输加密防的是链路上的窃听与篡改，与 XSS/CSRF 的「页面内防线」互补而非互替</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（mode:'main'，判分写入进度仓库） -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后会把最佳成绩写入进度仓库，并推进复习计划：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：XSS 是有人往你家公告栏贴「看着像通知、实际是命令」的纸条，骗智能眼镜照做——所以上墙前要先把内容「誊成纯文字」（转义）、钥匙换保险箱（HttpOnly）、只贴盖章告示（CSP）；CSRF 则是别人捡到你忘在门卫的钥匙牌去替你办事——所以办事要当场发的一次性条码（Token），外小区的单子不认（SameSite）。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前用「公告栏 / 钥匙牌」两个类比各复述一遍攻防链路；1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：经典问法，答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：XSS 与 CSRF 的本质区别是什么？各自的防御思路为何完全不同？</summary>
+      <ul>
+        <li>XSS：恶意代码在受害者站点的页面上下文中被浏览器执行，攻击者可窃取凭证、操纵页面——本质是「注入了代码」，攻击发生在你的站内。</li>
+        <li>CSRF：请求里没有任何代码，攻击者借用浏览器「自动附带 Cookie」的规则，以用户身份向你的站点发伪造请求——本质是「借用了身份」，攻击发生在站外诱导。</li>
+        <li>XSS 防御：输出转义（按上下文选规则）、HttpOnly Cookie（凭证偷不走）、输入校验/富文本白名单、CSP 收紧可执行来源。</li>
+        <li>CSRF 防御：CSRF Token（站外拿不到）、SameSite Cookie（跨站不附带）、Origin/Referer 校验、关键操作二次确认。</li>
+        <li>一句话总结：XSS 防的是「别让数据变代码」，CSRF 防的是「别让浏览器自动代为证明身份」；两者叠加时最危险——XSS 得手后 CSRF Token 也会被读走。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：CSP 是什么？它能防住什么、防不住什么？</summary>
+      <ul>
+        <li>CSP 由服务端通过 Content-Security-Policy 响应头下发（也可用 meta 标签），声明本页面允许加载/执行的资源来源，由浏览器强制执行。</li>
+        <li>常用指令：default-src 'self' 只许同源；script-src 限定脚本来源；配合 nonce 或 hash 允许特定内联脚本，避免一刀切放开 unsafe-inline。</li>
+        <li>能防：即使转义被漏掉、恶意内容混入页面，来源不在白名单内浏览器也拒绝执行——大幅压缩 XSS 的发挥空间，是最后一道闸门。</li>
+        <li>防不住：配了 unsafe-inline 或来源过宽时形同虚设；防不了 CSRF（CSRF 不需要在页面内执行代码）；也不能替代输出转义与输入校验。</li>
+        <li>加分项：提到先用 Content-Security-Policy-Report-Only 只上报不拦截，观察误伤后再正式启用；以及 report-uri 收集违规上报。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm2-security'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'）：题目 id 以知识点 id 开头 */
+  var WARMUP = [{
+    id: 'm2-security-warmup-1',
+    type: 'single',
+    stem: '预热：XSS 攻击得以成立的本质原因是？',
+    options: [
+      '服务器配置太低，容易被攻破',
+      '不可信的数据被浏览器当成了代码来执行',
+      '网络传输没有加密，内容被窃听',
+      '用户密码设置得太简单'
+    ],
+    answer: [1],
+    explain: 'XSS 的本质是「数据与代码的边界被打破」：本该当作纯文字渲染的内容混入了会被浏览器执行的位置。传输加密（https）防的是链路窃听，密码强度与账号爆破有关，它们都不是 XSS 的成因——防线核心是输出转义、HttpOnly、CSP 这一套「让数据永远是数据」。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm2-security-q1',
+      type: 'single',
+      stem: '下列哪一组手段都属于「防御 XSS」的措施？',
+      options: [
+        '输出转义、HttpOnly Cookie、CSP 内容安全策略',
+        'CSRF Token、SameSite Cookie、Referer 校验',
+        '图形验证码、接口限流、IP 黑名单',
+        '全站 HTTPS、HSTS、升级 TLS 1.3'
+      ],
+      answer: [0],
+      explain: 'A 组分别堵住了 XSS 的三个环节：输出转义让数据无法变成代码；HttpOnly 让页面脚本读不到登录 Cookie，即使注入成功也偷不走凭证；CSP 从源头限定可执行脚本的白名单。B 组全是 CSRF 防御；C 组是接口层的滥用防护（防刷防爆破），与注入无关；D 组是传输加密——它防链路窃听和篡改，但拦不住「内容进了页面才被当成代码执行」。'
+    },
+    {
+      id: 'm2-security-q2',
+      type: 'multi',
+      stem: '关于 CSRF 及其防御，下列说法正确的有哪些？（多选，全部选对才得分）',
+      options: [
+        'CSRF 请求里不含任何攻击代码，它借用的是浏览器「自动附带 Cookie」的规则',
+        'CSRF Token 有效的重要前提是：恶意站点受同源策略限制，读不到目标站点页面里的令牌',
+        '把用户密码长度要求提高到 20 位，可以直接防御 CSRF',
+        '将登录 Cookie 设置为 SameSite=Lax/Strict，可以让跨站请求不再自动附带它'
+      ],
+      answer: [0, 1, 3],
+      explain: 'A 对：CSRF 的请求本身完全「合法」——正常的地址、正常的参数，唯一的问题是它不是用户本人发起的，而 Cookie 被浏览器自动带上了。B 对：Token 防御成立的前提正是同源策略——你的页面里的令牌，另一源的恶意页面读不到，所以伪造请求必然缺票。C 错：密码强度防的是「猜密码」，CSRF 里攻击者根本不需要密码，借用的是已有登录态。D 对：SameSite 从「浏览器自动附带 Cookie」这一环直接掐断，是当前最省心的浏览器侧防线。'
+    },
+    {
+      id: 'm2-security-q3',
+      type: 'code',
+      stem: '实现 HTML 转义函数 escapeHtml(str)：把 &、<、>、" 分别替换为 &amp;、&lt;、&gt;、&quot;，其余字符原样保留，让任意字符串都能安全地作为纯文本渲染。注意替换顺序有讲究。',
+      stub: 'function escapeHtml(str) {\n  // 提示：\n  // 1. 先 String(str) 兜底，兼容 null / undefined 之外的意外入参\n  // 2. 依次链式 replace 四个字符\n  // 3. 想一想：为什么必须最先替换 &，最后替换 < > "？\n}\n',
+      reference: 'function escapeHtml(str) {\n  return String(str)\n    .replace(/&/g, \'&amp;\')     // 必须最先替换 &，避免后面产生的实体名被二次转义\n    .replace(/</g, \'&lt;\')\n    .replace(/>/g, \'&gt;\')\n    .replace(/"/g, \'&quot;\');\n}',
+      asserts: [
+        "escapeHtml('<b>hi</b>') === '&lt;b&gt;hi&lt;/b&gt;'",
+        "escapeHtml('a & b') === 'a &amp; b'",
+        "escapeHtml('x \"y\"') === 'x &quot;y&quot;'",
+        "escapeHtml('clean text') === 'clean text'"
+      ],
+      explain: '这道题是 XSS 输出转义的最小可用实现。为什么 & 必须最先替换：如果先替换 < 得到 &lt;，再轮到 & 时，刚生成的 &lt; 里的 & 会被再次替换成 &amp;lt;，页面上就会显示错误的文字「&lt;」而不是「<」——顺序错了，转义的结果本身就被污染。为什么逐字符链式替换而不是一次性大正则：逻辑清晰、顺序可控。第四条断言提醒「不含特殊字符时必须原样返回」，转义函数不能误伤正常内容。真实项目中还应按输出上下文扩展：属性值上下文要转义单引号、JS 字符串上下文有专门规则，这正是讲解里「一把钥匙开一把锁」的含义。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：公告栏与邮差——「输出转义」开关的防御效果（纯 DOM 手写，无动画库；仅防御视角） */
+(function () {
+  'use strict';
+  var consoleEl = document.getElementById('sec-console');
+  var noteEl = document.getElementById('sec-note');
+  var postmanEl = document.getElementById('sec-postman');
+  var postmanStateEl = document.getElementById('sec-postman-state');
+  var switchBtn = document.getElementById('sec-switch-btn');
+  var stepBtn = document.getElementById('sec-step');
+  var resetBtn = document.getElementById('sec-reset');
+
+  var escaping = true; // 输出转义开关：true=开（安全） / false=关
+  var phase = 0;       // 当前推进到第几步
+  var ended = false;
+
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* 渲染转义开关按钮的外观 */
+  function renderSwitch() {
+    switchBtn.textContent = escaping ? '开（安全）' : '关（危险！）';
+    switchBtn.className = 'fg-btn fg-btn--ghost fg-btn--sm sec-switch-btn ' + (escaping ? 'is-on' : 'is-off');
+  }
+
+  function reset() {
+    escaping = true;
+    phase = 0;
+    ended = false;
+    stepBtn.disabled = false;
+    postmanEl.className = 'sec-postman';
+    postmanStateEl.textContent = '待命中';
+    noteEl.textContent = '（公告栏空着，等待便条投递…）';
+    consoleEl.innerHTML = '';
+    renderSwitch();
+    log('初始：输出转义为「开」。先试试拨动开关，再点「单步执行」投递便条…', 'is-muted');
+  }
+
+  /* 单步执行：投递 → 渲染 → 邮差念告示，共 3 步；转义开关决定第 3 步的走向 */
+  function step() {
+    if (ended) return;
+    if (phase === 0) {
+      log('第 1 步：一位访客投递便条——正文是「本周六小区义卖」，其中夹着一段被标记为【可疑指令】的内容（占位示意，不展示真实形式）', 'is-muted');
+      noteEl.textContent = '便条已收进审核区，等待上墙…';
+      phase = 1;
+    } else if (phase === 1) {
+      if (escaping) {
+        /* 转义开启：可疑片段被「誊抄」成纯文字，只展示、不执行 */
+        noteEl.innerHTML = '本周六小区义卖 <span class="sec-chip is-escaped">【可疑指令】→ 已转义成普通文字</span>';
+        log('第 2 步：誊抄员（输出转义）把可疑片段原样描成普通文字——它在页面上只是「看得见的字」，不再具备指令能力', 'is-ok');
+      } else {
+        /* 转义关闭：可疑片段原样进入页面结构（这里仍以占位标记示意，不渲染真实形式） */
+        noteEl.innerHTML = '本周六小区义卖 <span class="sec-chip is-danger">【可疑指令】→ 原样混入了页面！</span>';
+        log('第 2 步：没有转义，可疑片段被原样拼进了页面结构——浏览器分不清「内容」与「指令」了', 'is-end');
+      }
+      phase = 2;
+    } else if (phase === 2) {
+      if (escaping) {
+        postmanEl.className = 'sec-postman is-safe';
+        postmanStateEl.textContent = '照着念：「本周六小区义卖…」——只是一段文字，安然无恙';
+        log('第 3 步：邮差（浏览器）只把公告栏内容当文字念出来，页面安全 ✓——这就是转义、HttpOnly、CSP 要共同守住的状态', 'is-ok');
+      } else {
+        postmanEl.className = 'sec-postman is-danger';
+        postmanStateEl.textContent = '把便条当指令执行了！（攻击发生——必须靠转义防住它）';
+        log('第 3 步：邮差把便条当成了指令照做，页面被攻击 ✗——这就是 XSS 的后果；防御见上文三板斧：输出转义、HttpOnly、CSP', 'is-end');
+      }
+      ended = true;
+      stepBtn.disabled = true;
+    }
+  }
+
+  /* 切换输出转义开关：切换后重置演示，便于对比两种走向 */
+  switchBtn.addEventListener('click', function () {
+    escaping = !escaping;
+    reset();
+  });
+  stepBtn.addEventListener('click', step);
+  resetBtn.addEventListener('click', reset);
+  reset();
+})();
+</script>
+</body>
+</html>

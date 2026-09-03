@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>变量与赋值 · 模板示范</title>
+<link rel="stylesheet" href="../assets/css/site.css">
+</head>
+<!--
+  ============================================================
+  【此为内部模板，不进课程地图】
+  P3 批量生成知识点页时，请逐字模仿本文件的结构与命名：
+  1. body 携带 data-page="<pointId>"（必须与课程数据 points[].id 一字不差）
+  2. 区块根元素按顺序携带 data-section="import|explain|anim|link|quiz|review|interview"
+     （导航区块由 site.js 自动渲染进 #fg-header，无需手写）
+  3. 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本
+  4. 相对路径：pages/<模块>/ 下的页面统一用 ../../assets/...
+     （本模板恰好位于 pages/ 根，故用 ../assets/...；生成时按所在层级调整）
+  5. 内联脚本中的 WARMUP / QUESTIONS 数组替换为该知识点的真实题目，
+     并把 PAGE_ID 改为对应的 pointId
+  ============================================================
+-->
+<body data-page="demo-template">
+
+<!-- 壳层自动渲染区：site.js 检测到 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关；
+     demo-template 不在课程数据中，会降级为通用头部 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">本页是知识点页结构示范（示例知识点：变量与赋值），内容仅供 P3 参照格式。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>建议先过一遍前置知识：<a href="m1/m1-html-semantic.html">程序是什么</a>（示例链接，生成时替换为真实前置点 path）。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：讲解 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+    <p>「变量」就是给内存里的一小块空间起个名字。<code>var a = 1</code> 做了两件事：
+      先找一块空地盖个盒子，再贴上标签 <code>a</code>、把值 <code>1</code> 放进去。
+      之后代码里写 <code>a</code>，程序就顺着标签找到盒子，取出里面的值。
+      重新赋值 <code>a = a + 2</code>，是把盒子里的旧值取出来加 2，再把结果放回去——标签没变，值变了。</p>
+    <p>赋值语句的读法永远<strong>从右往左</strong>：先算等号右边的表达式，再把结果存进左边的变量。</p>
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比</div>
+      <p>变量就像超市储物柜：柜子是内存空间，柜子编号是变量名，你放进去的包就是值。
+        取包、换包都不影响编号——别人只要报编号（变量名）就能找到对应的柜子。
+        一个编号对应一个柜子，后放的东西会替换先放的（重新赋值覆盖旧值）。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：.anim-stage 内的纯手写可交互动画（可单步执行） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>用一段「往盒子里放糖」的循环，单步观察变量 i 如何一步步变化：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">下面这段循环会把 3 颗糖放进盒子，点击「单步执行」逐行观察：</p>
+      <pre><code>for (var i = 0; i &lt; 3; i = i + 1) {
+  盒子.放糖();  // 循环体：每次放一颗糖
+}</code></pre>
+      <div class="anim-console" id="anim-console">
+        <div class="anim-line is-muted">点击「单步执行」开始，逐步观察 i 与条件判断…</div>
+      </div>
+      <div class="anim-boxes" id="anim-boxes"></div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="anim-step">单步执行</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="anim-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（写死示例相对路径，生成时替换为真实 path） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：建议先学「程序是什么」，理解「指令按顺序执行」再来看变量。</p>
+    <p><strong>向后延伸</strong>：掌握赋值之后，接下来自然衔接数据类型（值有不同种类）与作用域（标签在哪些代码范围内可见）。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="m1/m1-js-scope.html">数据类型：值的样子</a> —— 变量盒子里能放哪些种类的值（示例路径）</li>
+      <li><a href="m1/m1-js-scope.html">作用域：标签的可见范围</a> —— 同名标签在不同房间里各指各的盒子（示例路径）</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：1 道选择 + 1 道代码题（含解析），mode:'main' -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后把最佳成绩写入进度仓库（见页面底部内联脚本）：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：变量就是给一个盒子贴上名字标签，程序靠名字存取里面的东西，重新赋值就是换掉盒子里的内容。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前复述 1 次，1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：1~2 个问法，答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：说说 var、let、const 三者声明变量的区别？</summary>
+      <ul>
+        <li>变量提升：var 声明会提升且可重复声明；let/const 存在暂时性死区，不可重复声明。</li>
+        <li>作用域：var 是函数作用域；let/const 是块级作用域。</li>
+        <li>重新赋值：const 声明的绑定不可重新赋值（但对象内容仍可修改）。</li>
+        <li>实践结论：默认 const，需要重新赋值用 let，不再使用 var。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：执行 a = a + 2 时，内存层面发生了什么？</summary>
+      <ul>
+        <li>先按变量名 a 查到对应的存储位置，读出旧值。</li>
+        <li>计算旧值 + 2 得到一个新值。</li>
+        <li>把新值写回 a 对应的存储位置（覆盖旧值），变量名与绑定关系不变。</li>
+        <li>加分项：提到基本类型按值存取、引用类型变量里存的是引用地址。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本
+     （pages/<模块>/ 下的生成页请把下面所有 ../ 前缀改为 ../../） -->
+<script src="../assets/data/curriculum.js"></script>
+<script src="../assets/js/progress-store.js"></script>
+<script src="../assets/js/quiz-engine.js"></script>
+<script src="../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'demo-template'; // 生成时替换为真实 pointId（与 body data-page 保持一致）
+
+  /* 预热题（mode:'warmup'）：结构同正式题 */
+  var WARMUP = [{
+    id: 'demo-warmup-1',
+    type: 'single',
+    stem: '预热：下面哪个说法是对的？',
+    options: [
+      '变量是一个有名字的存储位置',
+      '变量名必须叫 x',
+      '变量只能存数字'
+    ],
+    answer: [0],
+    explain: '变量就是给一块内存空间起个名字，名字可以自取，值也可以是多种类型。'
+  }];
+
+  /* 正式例题（mode:'main'）：1 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'demo-q1',
+      type: 'single',
+      stem: '执行 var a = 1; a = a + 2; 之后，a 的值是？',
+      options: ['1', '2', '3'],
+      answer: [2],
+      explain: '从右往左读：先取 a 的旧值 1，加 2 得 3，再存回 a。'
+    },
+    {
+      id: 'demo-q2',
+      type: 'code',
+      stem: '实现函数 double(n)，返回 n 的两倍。',
+      stub: 'function double(n) {\n  // 在此实现：返回 n 的两倍\n}\n',
+      reference: 'function double(n) {\n  return n * 2;\n}',
+      asserts: ['double(2) === 4', 'double(0) === 0', 'double(-3) === -6']
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（会推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：for 循环单步执行器（纯 DOM 手写，无动画库） */
+(function () {
+  'use strict';
+  var i = 0;             // 循环变量（演示用）
+  var phase = 'cond';    // 执行阶段：cond=判断条件 / body=执行循环体 / end=已结束
+  var consoleEl = document.getElementById('anim-console');
+  var boxesEl = document.getElementById('anim-boxes');
+  var stepBtn = document.getElementById('anim-step');
+  var resetBtn = document.getElementById('anim-reset');
+
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight; // 控制台自动滚到底部
+  }
+
+  /* 渲染盒子中的糖：已放的显示「糖」，未放的显示「空」 */
+  function renderBoxes() {
+    boxesEl.innerHTML = '';
+    for (var k = 0; k < 3; k++) {
+      var cell = document.createElement('span');
+      cell.className = 'anim-cell' + (k < i ? ' is-filled' : '');
+      cell.textContent = k < i ? '糖' : '空';
+      boxesEl.appendChild(cell);
+    }
+  }
+
+  /* 单步执行：一次只推进一个阶段（判断条件 或 执行循环体），便于观察变量变化 */
+  function step() {
+    if (phase === 'end') return;
+    if (phase === 'cond') {
+      if (i < 3) {
+        log('第 ' + (i + 1) + ' 轮：判断 i < 3 → ' + i + ' < 3 成立 → 进入循环体', 'is-ok');
+        phase = 'body';
+      } else {
+        log('判断 i < 3 → ' + i + ' < 3 不成立 → 循环结束，循环体共执行了 3 次', 'is-end');
+        phase = 'end';
+        stepBtn.disabled = true;
+      }
+    } else {
+      i = i + 1; // 等价于 i++：重新赋值覆盖旧值
+      log('执行循环体：放一颗糖，然后 i = i + 1 → i 变成 ' + i);
+      renderBoxes();
+      phase = 'cond';
+    }
+  }
+
+  function reset() {
+    i = 0;
+    phase = 'cond';
+    stepBtn.disabled = false;
+    consoleEl.innerHTML = '';
+    log('已重置：i = 0，点击「单步执行」重新开始…', 'is-muted');
+    renderBoxes();
+  }
+
+  stepBtn.addEventListener('click', step);
+  resetBtn.addEventListener('click', reset);
+  renderBoxes();
+})();
+</script>
+</body>
+</html>

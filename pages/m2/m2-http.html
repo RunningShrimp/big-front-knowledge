@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>HTTP/1.1、HTTP/2 与 HTTP/3 · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ===== 本页动画专用样式：过桥动画（单车道排队 vs 多车道并行 vs 换地基） ===== */
+.ht-modes { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 10px; }
+.ht-mode-btn.is-on { box-shadow: 0 0 0 3px #eef2ff; border-color: #4C6FFF; color: #2c47c7; }
+.ht-bridge {
+  position: relative; border: 2px solid #d5dbe7; border-radius: 10px;
+  background: linear-gradient(#f7f9fc, #eef2f7);
+  padding: 10px 12px; margin: 10px 0; min-height: 96px; overflow: hidden;
+}
+.ht-bridge-title { font-size: 12px; color: #6a7690; margin-bottom: 8px; }
+.ht-lane {
+  position: relative; height: 26px; margin: 8px 0; border-radius: 6px;
+  background: repeating-linear-gradient(90deg, #dfe5ef 0 16px, transparent 16px 28px);
+}
+.ht-car {
+  position: absolute; top: 3px; left: 0; width: 46px; height: 20px; border-radius: 5px;
+  background: #4C6FFF; color: #fff; font-size: 10px; line-height: 20px; text-align: center;
+  white-space: nowrap; transition: none; /* 发车时由 JS 设置 transition 与位移 */
+}
+.ht-car.is-slow { background: #d9534f; }
+.ht-car.is-done { opacity: .4; }
+.ht-queue { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; min-height: 24px; }
+.ht-queue-chip {
+  font-size: 11px; padding: 3px 8px; border-radius: 999px; border: 1px dashed #b9c3d6;
+  color: #6a7690; background: #fff;
+}
+.ht-queue-chip.is-running { border: 1px solid #4C6FFF; color: #2c47c7; background: #eef2ff; }
+.ht-queue-chip.is-passed { opacity: .4; }
+.ht-total { font-size: 13px; color: #41506b; font-weight: 700; margin: 6px 0; }
+</style>
+</head>
+<body data-page="m2-http">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">知识点：HTTP/1.1、HTTP/2 与 HTTP/3（建议学习时长约 30 分钟）——报文、方法、状态码，以及三代版本如何一步步消灭「排队」。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>本页<strong>没有前置依赖，无，可直接开始</strong>——HTTP 是浏览器与服务器之间「怎么说话」的约定，不要求任何编码基础，认识「一问一答」就能入门。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：分小标题推进 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、HTTP 是什么：浏览器与服务器之间的一问一答</h3>
+    <p>你在地址栏输入网址回车，浏览器就要去找存放网页的电脑（服务器）要东西。双方隔着网络互不见面，必须约定一套<strong>说话的固定格式</strong>——这就是 <strong>HTTP（超文本传输协议）</strong>：浏览器发「请求」，服务器回「响应」，一来一回像寄信，信纸格式双方都要认得。后面学的 HTTPS（加密版）、缓存（响应头的保质期）、跨域（放行规则），全是建立在这套信件格式之上的「附则」。</p>
+
+    <h3>二、拆一封「信」：请求行 / 状态行、头部与正文</h3>
+    <p>请求报文分三段：<strong>请求行</strong>（第一行，写明「干什么、要什么」，如 <code>GET /list?page=2 HTTP/1.1</code>）＋ <strong>头部</strong>（一行一条的元信息，如 <code>Host: e.com</code>、<code>Accept: text/html</code>、<code>Cookie: ...</code>）＋ <strong>正文</strong>（可选，POST 提交的表单或 JSON 就放在这）。
+      响应报文对称地分三段：<strong>状态行</strong>（如 <code>HTTP/1.1 200 OK</code>）＋ <strong>响应头部</strong>（<code>Content-Type</code> 告诉浏览器正文是什么类型、<code>Cache-Control</code> 交代缓存策略、<code>Set-Cookie</code> 下发名片）＋ <strong>响应正文</strong>（HTML、图片字节、JSON 数据等「货」）。
+      一句话记忆：<strong>头部是「关于货的说明」，正文才是「货」</strong>——后面缓存页会看到，304 的省流量原理就是「只回说明、不回货」。</p>
+
+    <h3>三、常用方法：动词要用对，还要讲「幂等」</h3>
+    <p>请求行的第一个词是「动词」（方法），常用的四个：
+      <strong>GET</strong>——读数据（看商品详情）；<strong>POST</strong>——提交/新建（下订单）；<strong>PUT</strong>——整体替换（把档案整份覆盖更新）；<strong>DELETE</strong>——删除（注销账号）。
+      面试爱考的词是<strong>幂等性</strong>：同一个请求<strong>执行一次和执行一百次，对服务器资源状态的影响是否相同</strong>。GET 幂等（读多少遍都一样）、PUT 幂等（覆盖多少遍结果一致）、DELETE 幂等（删一次和删十次，剩的都是「没有」）、<strong>POST 不幂等</strong>（提交十次可能生成十笔订单——这就是「下单按钮防重复点击」的根源）。幂等还带来工程收益：幂等的请求丢了可以放心自动重试。</p>
+
+    <h3>四、状态码家族：看首位数字就知道结果</h3>
+    <p>状态行里那个三位数是「办理结果」：<strong>1xx</strong> 收到了，继续说；<strong>2xx</strong> 成功（<code>200</code> 成功且带正文、<code>204</code> 成功但没内容）；<strong>3xx</strong> 重定向（<code>301</code> 永久搬家、<code>302</code> 临时借道、<code>304</code> 缓存协商通过「没变，用你本地那份」）；
+      <strong>4xx</strong> 客户端的问题（<code>400</code> 参数不对、<code>401</code> 没登录、<code>403</code> 登录了但没权限、<code>404</code> 找不到资源、<code>429</code> 请求太频繁）；<strong>5xx</strong> 服务器的问题（<code>500</code> 内部错误、<code>502</code> 网关收到坏响应、<code>504</code> 网关等上游超时）。调试口诀：<strong>4xx 先查自己发的请求，5xx 先查服务端日志</strong>。</p>
+
+    <h3>五、HTTP/1.1 的痛：一条车道上的队头阻塞</h3>
+    <p>网页要加载几十个资源，但 HTTP/1.1 有一条硬规矩：<strong>同一条连接上，请求-响应必须一来一回排队</strong>——前一个响应没送完，后面的请求只能干等。想象一辆超大的 CSS 文件慢慢吞吞往前挪，它后面排着的 3 张小图片全被堵死，这就是<strong>队头阻塞（队首堵，队尾全堵）</strong>。
+      1.1 也有补救：<strong>keep-alive</strong> 让一条 TCP 连接可以反复用（省掉每次重新握手的成本），浏览器还会对同一域名并发开约 6 条连接——但每条连接<strong>内部</strong>依然串行排队，而且连接数有上限，队头阻塞并没有消失，只是排了更多的队。</p>
+
+    <h3>六、HTTP/2：把报文切成帧，多车道并行</h3>
+    <p>HTTP/2 的核心一招是<strong>多路复用</strong>：把报文拆成一个个小<strong>二进制帧</strong>，每个请求-响应占一条「流」，<strong>同一条 TCP 连接上多条流可以交错传输</strong>——慢响应的帧先传一部分，不耽误其他流的帧穿插着跑，到达后按流号重新拼装。效果：一个慢请求<strong>只堵自己</strong>，不再殃及别人；连接数也省了（一条连接就够）。
+      另外两件配套小事：<strong>头部压缩</strong>（头部字段重复率高，做字典压缩省流量）与<strong>服务器推送</strong>（服务器猜你要什么，提前推）。但注意：<strong>HTTP/2 治的是 HTTP 层的队头阻塞</strong>——底下的 TCP 还有自己的一层：TCP 要求字节流<strong>严格按序交付</strong>，丢一个包，后面所有流的数据都得等重传补齐，所有流一起停。</p>
+
+    <h3>七、HTTP/3：连底座一起换——QUIC</h3>
+    <p>HTTP/2 的剩余瓶颈在 TCP 本身，改不动它，那就换掉：HTTP/3 把传输底座从 TCP 换成 <strong>QUIC</strong>（建在 UDP 之上的新协议）。三件大事：
+      ① <strong>流级独立确认</strong>：每条流单独编号确认，某条流丢包只重传那条，其他流照跑——把传输层队头阻塞也解决了；
+      ② <strong>握手更快</strong>：QUIC 把传输与加密握手合并，建连往返更少（配合 TLS 1.3 通常一次往返就能发数据）；
+      ③ <strong>连接迁移</strong>：连接用一串身份号标识而不是「IP+端口」，手机从 Wi-Fi 切到流量，连接不必断开重连。
+      三代版本一句话总结：<strong>1.1 一条车道排队；2 多车道并行但桥墩还是 TCP；3 连地基换成 QUIC，个别车道塌方不再殃及全桥</strong>。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 早高峰过江的通勤车队</div>
+      <p>一队车要过江送四件货：一件大 CSS 家具（又大又慢）和三件小图片包裹。HTTP/1.1 时代，江上只有一条<strong>单车道大桥</strong>：同一时刻只放一辆车，前车不到后车不发——大家具慢慢挪，三件小包裹在桥口干瞪眼，这就是<strong>队头阻塞</strong>。
+        后来桥务处搞了「<strong>年卡闸机</strong>」（keep-alive）：车过桥不用每次重新排队买票（TCP 不用反复握手），省了办手续的时间，但桥面还是一次一辆，队头阻塞照旧；顶多旁边再修五条一模一样的单车道（浏览器并发约 6 条连接），可每条车道内部照样排队。
+        <strong>HTTP/2</strong> 把大桥拓宽成多车道（多路复用），还规定货车可以把货拆成小箱子（帧）交错运：慢车道上的大家具分批运，不挡快车道的包裹，各送各的。可惜<strong>桥墩还是老地基（TCP）</strong>：某处塌方（丢包），全桥所有车道一起停运等抢修。
+        <strong>HTTP/3</strong> 干脆连地基一起换，新地基叫 QUIC：每条车道独立编号、独立抢修（流级独立确认），个别塌方只停那条道；而且新地基记人不靠车牌（IP+端口）而靠通行证（连接 ID），你从 WiFi 切到流量不用下车重新安检（连接迁移）。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：.anim-stage 内的纯手写可交互动画（切版本 + 发车演示队头阻塞） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>把三代 HTTP 搬上「过江大桥」：选一个版本、点「发车」，看四辆车（1 辆大文件慢车 + 3 辆小文件）怎么过桥、总耗时差多少：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">第一步：选择协议版本；第二步：点「发车」。红色车是大文件，走得慢——看它堵不堵别人：</p>
+      <div class="ht-modes">
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm ht-mode-btn is-on" data-ver="1.1">HTTP/1.1 · 单车道</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm ht-mode-btn" data-ver="2">HTTP/2 · 多车道</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm ht-mode-btn" data-ver="3">HTTP/3 · 换地基 QUIC</button>
+      </div>
+      <div class="ht-bridge" id="ht-bridge">
+        <div class="ht-bridge-title" id="ht-bridge-title">当前桥型：HTTP/1.1 · 一条车道，一次过一辆</div>
+        <div id="ht-lanes"></div>
+        <div class="ht-queue" id="ht-queue"></div>
+      </div>
+      <p class="ht-total">总耗时：<span id="ht-total">尚未发车</span></p>
+      <div class="anim-console" id="ht-console">
+        <div class="anim-line is-muted">点击「发车」观察四辆车的过桥顺序与总耗时……</div>
+      </div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="ht-go">发车</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="ht-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接 -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：无，可直接开始——本页是网络模块的起点，认识「请求-响应」一来一回即可上路。</p>
+    <p><strong>向后延伸</strong>：本模块后面的三个知识点全部以本页为地基——<a href="./m2-https.html">HTTPS 与 TLS 握手</a>给裸奔的信件上锁；<a href="./m2-cache.html">浏览器缓存策略</a>玩的正是响应头里的保质期声明与 304；<a href="./m2-cors.html">跨域与 CORS</a> 管的是「外来访客」的请求放行规则。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="./m2-cache.html">浏览器缓存策略</a> —— 强缓存/协商缓存的判定全靠 HTTP 头部字段，304 的省流量原理在本页状态码部分已埋伏笔。</li>
+      <li><a href="./m2-cors.html">跨域与 CORS</a> —— 预检请求OPTIONS 是本页「方法语义」的实战应用。</li>
+      <li><a href="../m3/m3-router.html">前端路由原理</a> —— history 模式刷新 404，本质是服务器对「深路径」返回了 404 状态码，需要 Nginx 兜底回 200。</li>
+      <li><a href="./m2-https.html">HTTPS 与 TLS 握手</a> —— HTTP 明文裸奔的问题与加密解法；HTTP/3 的 QUIC 把传输与加密握手合并也在这里呼应。</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（mode:'main'，判分写入进度仓库） -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后会把最佳成绩写入进度仓库，并推进复习计划：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：HTTP 就是浏览器和服务器之间寄信的固定格式——信封写「要什么」（请求行 + 头部），信纸放「货」（正文），回信盖结果戳（状态码）；三代版本的进步全是治「排队」：1.1 一条车道排队，2 拓宽成多车道并行，3 连桥墩地基一起换掉，个别车道堵车不再殃及全桥。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前默写「方法 × 幂等性」对应关系和 301 / 302 / 304 / 404 / 500 五个状态码含义；1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：经典问法，答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：HTTP/2 的多路复用和 HTTP/1.1 的 keep-alive 有什么区别？</summary>
+      <ul>
+        <li>keep-alive：只是<strong>复用同一条 TCP 连接</strong>，省去反复握手建连的成本；但连接内<strong>请求-响应仍是一来一回串行</strong>，前一个响应没完，后面的请求必须等——应用层队头阻塞还在。</li>
+        <li>多路复用：把报文拆成二进制帧，一条连接上多个「流」<strong>并行交错传输</strong>，到达后按流号重组——慢响应只堵自己的流，不再堵别人。</li>
+        <li>结论一句话：keep-alive 省的是「建连接的次数」，多路复用省的是「排队的时间」，二者解决的不是同一个问题。</li>
+        <li>加分项：指出 HTTP/2 仍有 TCP 层队头阻塞（丢包时所有流一起等重传），这才是 HTTP/3 换 QUIC 的动机；顺带提头部压缩（HPACK）与二进制分帧。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：HTTP/3 相比 HTTP/2 改了什么？为什么能更快？</summary>
+      <ul>
+        <li>底座更换：传输层从 TCP 换成基于 UDP 的 QUIC 协议——因为 TCP 是操作系统内核层的老协议，改动空间几乎为零。</li>
+        <li>彻底解决队头阻塞：QUIC 在传输层给每条流<strong>独立编号、独立确认</strong>，某条流丢包只重传那条流，其他流不受牵连；而 TCP 一丢包所有流都得等按序补齐。</li>
+        <li>建连更快：QUIC 把传输握手与 TLS 握手合并（通常 1-RTT，重连可 0-RTT 恢复），首包更早发出。</li>
+        <li>连接迁移：连接由连接 ID 标识而非「IP+端口」，网络切换（Wi-Fi ↔ 蜂窝）不断线、不重握手。</li>
+        <li>加分项：说明 UDP 只是「载体」，可靠传输、拥塞控制、加密都由 QUIC 在用户态重新实现；HTTP/3 语义层（方法、状态码、头部语义）与 HTTP/2 一脉相承。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 + 过桥动画 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm2-http'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'）：题目 id 以知识点 id 开头 */
+  var WARMUP = [{
+    id: 'm2-http-warmup-1',
+    type: 'single',
+    stem: '预热：调试页面时控制台显示某个请求返回了 404，这个状态码属于哪一类、问题出在谁身上？',
+    options: [
+      '2xx 成功类，一切正常',
+      '3xx 重定向类，需要换地址',
+      '4xx 客户端错误类——请求本身有问题（最常见：路径写错了）',
+      '5xx 服务端错误类——服务器程序崩了'
+    ],
+    answer: [2],
+    explain: '状态码首位数字就是「结果分类」：2xx 成功、3xx 重定向、4xx 客户端的锅、5xx 服务端的锅。404 = 服务器上找不到你要的资源，最常见原因是请求路径写错或资源没部署；调试口诀是「4xx 先查自己发的请求，5xx 先查服务端日志」。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm2-http-q1',
+      type: 'single',
+      stem: '关于 HTTP 方法的幂等性，下列说法正确的是？',
+      options: [
+        'GET 是幂等的：同样的请求发一次和发一百次，服务器资源状态都一样',
+        'POST 是幂等的：所以订单接口重复提交也不会创建多笔订单',
+        'DELETE 不是幂等的：删一次和删十次结果不同',
+        '幂等性只跟请求速度有关，与方法语义无关'
+      ],
+      answer: [0],
+      explain: '幂等 = 同一个请求执行一次与执行多次，对资源状态的影响相同。GET/PUT/DELETE 幂等（读、覆盖写、删到底都一样），POST 不幂等——每次提交都可能新建一份资源，这正是「下单按钮防重复点击」要解决的本质问题。幂等的工程收益：请求超时或丢失时，客户端可以放心自动重试而不用担心产生副作用。'
+    },
+    {
+      id: 'm2-http-q2',
+      type: 'multi',
+      stem: '关于三代 HTTP 版本的演进，下列说法正确的有哪些？（多选，全部选对才得分）',
+      options: [
+        'HTTP/1.1 的 keep-alive 复用同一条 TCP 连接省去重复握手，但连接内请求-响应仍串行排队',
+        'HTTP/2 把报文拆成二进制帧，一条连接上多条流并行交错传输，慢响应只堵自己的流',
+        'HTTP/2 下 TCP 丢包仍会阻塞所有流——传输层的队头阻塞还在',
+        'HTTP/2 的多路复用彻底消灭了所有层面的队头阻塞'
+      ],
+      answer: [0, 1, 2],
+      explain: 'D 是本题的「陷阱」：HTTP/2 治好的只是 HTTP（应用层）的队头阻塞；TCP 要求字节流严格按序交付，丢一个包，后面所有流的数据都得等重传补齐，传输层的队头阻塞原封不动。A 对：keep-alive 省的是建连次数不是排队时间；B 对：帧 + 流 + 交错传输是多路复用的三件套；C 对：这正是 HTTP/3 把底座换成 QUIC（流级独立确认）的动机。'
+    },
+    {
+      id: 'm2-http-q3',
+      type: 'code',
+      stem: '实现 parseQuery(url)：解析 URL 的查询字符串，返回参数对象（这是前端最常用的工具函数之一）。',
+      stub: '/* 解析 URL 查询字符串，返回参数对象：\n' +
+            ' * parseQuery(\'/list?page=2&kw=fe\') → { page: \'2\', kw: \'fe\' }\n' +
+            ' * parseQuery(\'/list\')              → {}\n' +
+            ' * 要求：值统一为字符串；无查询串返回空对象；要做 URL 解码（%20 → 空格）\n' +
+            ' * 提示：值里可能含等号（如 base64），只能切第一个等号\n' +
+            ' */\n' +
+            'function parseQuery(url) {\n  // 在此实现\n}\n',
+      reference: 'function parseQuery(url) {\n  var qi = url.indexOf(\'?\');\n  if (qi === -1) return {};           // 没有 ? → 空参数\n  var qs = url.slice(qi + 1);\n  var hi = qs.indexOf(\'#\');\n  if (hi > -1) qs = qs.slice(0, hi);  // 去掉 hash 部分\n  var out = {};\n  if (!qs) return out;\n  var pairs = qs.split(\'&\');\n  for (var i = 0; i < pairs.length; i++) {\n    if (!pairs[i]) continue;          // 忽略空段（如 a=1&&b=2）\n    var eq = pairs[i].indexOf(\'=\');\n    var k = eq === -1 ? pairs[i] : pairs[i].slice(0, eq);\n    var v = eq === -1 ? \'\' : pairs[i].slice(eq + 1);\n    out[decodeURIComponent(k)] = decodeURIComponent(v);\n  }\n  return out;\n}',
+      asserts: [
+        "parseQuery('/list?page=2&kw=fe').page === '2'",
+        "parseQuery('/list?page=2&kw=fe').kw === 'fe'",
+        "JSON.stringify(parseQuery('/list')) === '{}'",
+        "parseQuery('/search?q=a%20b').q === 'a b'"
+      ],
+      explain: '三个易错点都藏在这题里：① 只切第一个等号——如果用 split(\'=\') 取两段，值里带等号（如签名、base64）会被切碎，所以先找 indexOf(\'=\') 再 slice；② 无查询串、空查询串（/list?）、连续分隔符（a=1&&b=2）都要容错，返回空对象或跳过空段；③ %20 这类百分号编码必须 decodeURIComponent 解码，否则「hello world」会被读成「hello%20world」。再进一步的安全意识：参数键名若被恶意构造成 __proto__，直接写普通对象会污染原型，健壮实现可用 Object.create(null) 作为结果对象。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（会推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：三代 HTTP 过桥动画（纯 DOM 手写，无动画库） */
+(function () {
+  'use strict';
+  /* 四辆车（请求）数据：name=资源名，dur=过桥耗时（时间单位，演示用相对值），slow=大文件慢车 */
+  var CARS = [
+    { name: 'CSS', dur: 800, slow: true },
+    { name: '图1', dur: 300, slow: false },
+    { name: '图2', dur: 300, slow: false },
+    { name: 'JS', dur: 300, slow: false }
+  ];
+  /* 三种桥型：title=桥面说明，lanes=车道数，serial=是否一条车道串行过 */
+  var MODES = {
+    '1.1': {
+      title: '当前桥型：HTTP/1.1 · 一条车道，一次过一辆（队头阻塞现场）',
+      lanes: 1, serial: true,
+      summary: function (total) {
+        return '总耗时 ' + total + '：大 CSS 慢车独占车道，后面 3 辆小文件全程干等——这就是 HTTP/1.1 的队头阻塞。';
+      }
+    },
+    '2': {
+      title: '当前桥型：HTTP/2 · 多车道并行（多路复用：各条流互不等待）',
+      lanes: 4, serial: false,
+      summary: function (total) {
+        return '总耗时 ' + total + '：四辆车同时上桥，慢车只堵自己那条道——应用层的队头阻塞消失了。';
+      }
+    },
+    '3': {
+      title: '当前桥型：HTTP/3 · 换地基 QUIC（流级独立确认 + 连接迁移）',
+      lanes: 4, serial: false,
+      summary: function (total) {
+        return '总耗时 ' + total + '：与 2 一样并行；不同在底座——QUIC 给每条流独立编号确认，某条流丢包只重传那条，其他流照跑；换网络（Wi-Fi 切流量）连接也不断（连接迁移）。';
+      }
+    }
+  };
+  var ver = '1.1';           // 当前选中的协议版本
+  var running = false;       // 是否正在发车（防连点）
+  var timers = [];           // 本轮所有定时器（重置时统一清除）
+  var lanesEl = document.getElementById('ht-lanes');
+  var queueEl = document.getElementById('ht-queue');
+  var titleEl = document.getElementById('ht-bridge-title');
+  var totalEl = document.getElementById('ht-total');
+  var consoleEl = document.getElementById('ht-console');
+  var goBtn = document.getElementById('ht-go');
+  var resetBtn = document.getElementById('ht-reset');
+  var modeBtns = document.querySelectorAll('.ht-mode-btn');
+
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+  function clearTimers() {
+    timers.forEach(function (t) { clearTimeout(t); });
+    timers = [];
+  }
+  function later(fn, ms) {
+    timers.push(setTimeout(fn, ms));
+  }
+
+  /* 按当前版本重建桥面：1.1 一条车道 + 排队区；2/3 四条车道各放一辆车 */
+  function buildBridge() {
+    clearTimers();
+    running = false;
+    goBtn.disabled = false;
+    goBtn.textContent = '发车';
+    var mode = MODES[ver];
+    titleEl.textContent = mode.title;
+    totalEl.textContent = '尚未发车';
+    lanesEl.innerHTML = '';
+    queueEl.innerHTML = '';
+
+    if (mode.serial) {
+      /* 1.1：一条车道放当前车，其余车停在桥口排队区 */
+      var lane = document.createElement('div');
+      lane.className = 'ht-lane';
+      lanesEl.appendChild(lane);
+      CARS.forEach(function (c, i) {
+        var chip = document.createElement('span');
+        chip.className = 'ht-queue-chip';
+        chip.textContent = c.name + (c.slow ? '（大文件）' : '');
+        chip.setAttribute('data-i', i);
+        queueEl.appendChild(chip);
+      });
+    } else {
+      /* 2/3：四条车道，每条放一辆车 */
+      CARS.forEach(function (c) {
+        var lane = document.createElement('div');
+        lane.className = 'ht-lane';
+        var car = document.createElement('span');
+        car.className = 'ht-car' + (c.slow ? ' is-slow' : '');
+        car.textContent = c.name;
+        lane.appendChild(car);
+        lanesEl.appendChild(lane);
+      });
+    }
+  }
+
+  /* 发车：车辆用 CSS transition 沿车道移动；1.1 串行、2/3 并行 */
+  function go() {
+    if (running) return;
+    running = true;
+    goBtn.disabled = true;
+    goBtn.textContent = '过桥中…';
+    var mode = MODES[ver];
+    var cars = lanesEl.querySelectorAll('.ht-car');
+    var chips = queueEl.querySelectorAll('.ht-queue-chip');
+    var laneWidth = (lanesEl.querySelector('.ht-lane') || { clientWidth: 300 }).clientWidth;
+    var dist = Math.max(laneWidth - 52, 60); // 位移终点：桥对面（留出车宽）
+    var maxDur = 0;
+
+    function drive(car, dur, onDone) {
+      car.style.transition = 'transform ' + dur + 'ms linear'; // 匀速过桥
+      car.style.transform = 'translateX(' + dist + 'px)';
+      later(function () {
+        car.classList.add('is-done');
+        if (onDone) onDone();
+      }, dur);
+    }
+
+    if (mode.serial) {
+      /* 1.1：串行——上一辆到达，下一辆才获准上桥 */
+      var elapsed = 0;
+      CARS.forEach(function (c, i) {
+        var start = elapsed;           // 本车的出发时刻
+        elapsed += c.dur;              // 队列累计：必须等前一辆过完
+        later(function () {
+          var lane = lanesEl.querySelector('.ht-lane');
+          var car = document.createElement('span');
+          car.className = 'ht-car' + (c.slow ? ' is-slow' : '');
+          car.textContent = c.name;
+          lane.appendChild(car);
+          if (chips[i]) chips[i].classList.add('is-running');
+          log(c.name + ' 获准上桥（前一辆 ' + (i === 0 ? '—' : CARS[i - 1].name) + ' 已过完）' + (c.slow ? ' —— 大文件，走得慢' : ''), c.slow ? 'is-end' : 'is-ok');
+          later(function () { drive(car, c.dur); }, 60); // 等一拍再触发过渡
+        }, start);
+        later(function () {
+          log(c.name + ' 到达对岸 ✓ 累计耗时 ' + elapsed, 'is-ok');
+          if (chips[i]) chips[i].classList.add('is-passed');
+        }, elapsed);
+      });
+      maxDur = elapsed;
+    } else {
+      /* 2/3：并行——所有车同时上桥，各自走各自的车道 */
+      log('四辆车同时获准上桥，各走各的车道（多路复用）…', 'is-ok');
+      CARS.forEach(function (c) {
+        maxDur = Math.max(maxDur, c.dur);
+      });
+      later(function () {
+        cars.forEach(function (car, i) { drive(car, CARS[i].dur); });
+      }, 60);
+      later(function () {
+        cars.forEach(function (car) { car.classList.add('is-done'); });
+        log('最慢的 CSS（大文件）到达对岸 ✓ 其余三辆早已到位——慢车没有堵任何人', 'is-ok');
+      }, maxDur);
+    }
+
+    /* 收尾：显示总耗时与版本点评 */
+    later(function () {
+      totalEl.textContent = maxDur + ' 个时间单位';
+      log(mode.summary(maxDur), 'is-end');
+      running = false;
+      goBtn.disabled = false;
+      goBtn.textContent = '再发一轮';
+    }, maxDur + 120);
+  }
+
+  /* 切换协议版本：高亮按钮并重建桥面 */
+  modeBtns.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      modeBtns.forEach(function (b) { b.classList.remove('is-on'); });
+      btn.classList.add('is-on');
+      ver = btn.getAttribute('data-ver');
+      buildBridge();
+      consoleEl.innerHTML = '';
+      log('已切换到 HTTP/' + ver + '。点击「发车」观察过桥方式的变化……', 'is-muted');
+    });
+  });
+
+  goBtn.addEventListener('click', go);
+  resetBtn.addEventListener('click', function () {
+    buildBridge();
+    consoleEl.innerHTML = '';
+    log('已重置。点击「发车」重新过桥……', 'is-muted');
+  });
+  buildBridge();
+})();
+</script>
+</body>
+</html>

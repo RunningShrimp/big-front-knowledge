@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>小程序与 Web 的差异 · 跨端开发</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ============================================================
+   本页动画专用样式：小程序页面生命周期状态机
+   纯手写 CSS，无任何外部依赖，仅本页使用
+   ============================================================ */
+.life-anim { margin: 12px 0; }
+.life-now {
+  display: inline-block; padding: 6px 16px; border-radius: 999px;
+  background: #2f5bea; color: #fff; font-size: 14px; font-weight: 700;
+  margin-bottom: 10px;
+}
+.life-now.is-bg { background: #8a93a6; }   /* 后台状态用灰色弱化 */
+.life-now.is-off { background: #c2415c; }  /* 未启动状态用红调 */
+.life-map { list-style: none; margin: 10px 0; padding: 0; }
+.life-map li {
+  display: flex; justify-content: space-between; gap: 12px;
+  padding: 6px 10px; margin: 4px 0; border-radius: 8px;
+  border: 1px solid #e3e8f0; background: #fafbfe; font-size: 13px;
+  transition: background 0.25s, border-color 0.25s;
+}
+.life-map li b { flex: 0 0 150px; }
+.life-map li span { color: #6b7280; }
+/* 触发对应回调时高亮该行，帮助建立「小程序回调 ↔ Web 事件」的映射感 */
+.life-map li.is-on { background: #fff3d6; border-color: #f0b37e; }
+</style>
+</head>
+<body data-page="m5-mp-web">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">会写 H5 不等于会写小程序：本页把两套世界的差异一条条摆上桌，并教你一份代码跑两端。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>本页建立在一个前置知识之上，建议先学：
+      <a href="./m5-mp-arch.html">小程序双线程架构</a> —— 先搞懂「渲染层 + 逻辑层 + 传菜口」，
+      才能理解本页的差异大多源自这套骨架。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：讲解 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、技术栈差异：你手里的工具被换了</h3>
+    <p>上一页说过，小程序是双线程：逻辑层里<strong>没有 <code>window</code>、没有 <code>document</code></strong>，
+      所以 <code>document.getElementById</code>、<code>window.addEventListener</code> 这些 Web 里的肌肉记忆，在小程序里全部失效。
+      取而代之的是框架统一封装的组件（<code>view</code>、<code>text</code>、<code>image</code>）与平台 API（如 <code>wx.request</code> 发请求、
+      <code>wx.setStorageSync</code> 存本地数据）。写法上 WXML/WXSS 换掉了 HTML/CSS 的部分语法，模板指令 <code>wx:if</code>、<code>wx:for</code>
+      更接近 Vue 的风格。一句话：<strong>骨架还是「结构 + 样式 + 逻辑」，但零件几乎全都换成了平台提供的</strong>。</p>
+
+    <h3>二、生命周期对比：页面「活着」的方式不同</h3>
+    <p>Web 页面的生命周期由浏览器事件表达：文档解析完触发 <code>DOMContentLoaded</code>，资源加载完触发 <code>load</code>，
+      用户切走标签页触发 <code>visibilitychange</code>，关闭前有 <code>beforeunload</code>。
+      小程序则把「页面的一生」明确拆成了固定钩子：<code>onLoad</code>（页面加载，只来一次，通常在这里拿路由参数）、
+      <code>onShow</code>（每次进入前台都会触发）、<code>onReady</code>（首次渲染完成，只来一次）、
+      <code>onHide</code>（切到后台）、<code>onUnload</code>（页面卸载）。
+      最大的思维转变是：<strong>小程序里「切后台再回来」是常态</strong>（用户按 Home 键、切到别的小程序），
+      onShow/onHide 会被反复触发，而 Web 里对应的 visibilitychange 很少被当成主流程来设计。</p>
+
+    <h3>三、能力边界：不是想发就发、想多大就多大</h3>
+    <p>Web 部署只要把文件放上服务器，用户刷新就是最新版，页面想写多大都行。
+      小程序则要<strong>整包提交、平台审核</strong>，通过后才能发布；包体积也有严格上限
+      （主包长期在几 MB 量级、整包十几 MB 级别，具体以各平台最新规则为准），大资源通常要放网络或分包。
+      换来的回报是丰富的<strong>开放能力</strong>：支付、登录、扫码、蓝牙、位置等原生 API 开箱即用，
+      这些在纯 Web 里要么做不到、要么权限受限。存储、网络请求等基础能力两端都有，但 API 形状与配额规则不同，
+      迁移时要逐一对表。</p>
+
+    <h3>四、迁移思路：一份逻辑层代码如何适配两端</h3>
+    <p>业务逻辑（计算、校验、状态管理）本质上是纯 JS，两端通用；真正「不通用」的是平台接触面：
+      请求、存储、路由、UI 组件。工程上有三条路：一是<strong>自建抽象层</strong>——把差异封进自己的模块，
+      业务代码只面向抽象接口；二是<strong>运行时判断</strong>——在代码里检测当前环境，走不同的分支；
+      三是<strong>跨端框架</strong>——用一份类 React/Vue 的代码，由 Taro、uni-app 这类框架在编译或运行时
+      把它分别翻译成小程序与 H5。三条路的共同内核都是上一页那句话：<strong>差异集中在「平台接触面」，把它隔离出去，逻辑就能复用</strong>。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比：自驾游 vs 景区观光车</div>
+      <p>写 H5 像<strong>自驾游</strong>：车是你的、油随时加、路随便挑，想去哪儿踩油门就走；
+        但路况全靠自己应对——不同城市限号规则不同（浏览器兼容差异）、爆胎了得自己换（兼容性 bug 自己修），
+        出发前也不用向任何人报备（部署零审核）。自由度拉满，操心的事也拉满。</p>
+      <p>写小程序像<strong>坐景区观光车</strong>：上车前要过安检（提交审核），行李有重量限制（包体积上限），
+        路线固定、不能随意下车改道（只能用平台组件与 API）；但观光车直达景点（原生能力开箱即用），
+        司机熟路不怕堵（平台屏蔽了大量兼容问题），同行乘客的体验高度一致（管控带来的一致性）。
+        选哪样，取决于你要「随处可达的自由」还是「直达景点的省心」——这正是后面选型课要回答的问题。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：页面生命周期状态机（纯手写 CSS/JS，按钮驱动） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>小程序页面的一生是一条固定航线。点击按钮推动状态机，观察每次触发了哪些回调、
+      对应 Web 里是哪个事件：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">当前页面状态：<span class="life-now is-off" id="life-now">未启动</span></p>
+      <ul class="life-map">
+        <li id="map-onload"><b>onLoad（一次）</b><span>页面加载，拿路由参数 ｜ 对照 Web：DOMContentLoaded</span></li>
+        <li id="map-onshow"><b>onShow（每次）</b><span>进入前台 ｜ 对照 Web：visibilitychange（变可见）</span></li>
+        <li id="map-onready"><b>onReady（一次）</b><span>首次渲染完成 ｜ 对照 Web：load 之后可交互</span></li>
+        <li id="map-onhide"><b>onHide（每次）</b><span>切到后台 ｜ 对照 Web：visibilitychange（变隐藏）</span></li>
+        <li id="map-onunload"><b>onUnload（一次）</b><span>页面卸载 ｜ 对照 Web：pagehide / beforeunload</span></li>
+      </ul>
+      <div class="anim-console" id="life-console">
+        <div class="anim-line is-muted">页面尚未启动，点击「启动页面」开始…</div>
+      </div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="life-start">启动页面</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="life-hide">切到后台</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="life-show">回到前台</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="life-close">关闭页面</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="life-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（真实课程路径） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="./m5-mp-arch.html">小程序双线程架构</a> ——
+      本页几乎所有差异（没有 DOM、生命周期独立、包审核）都是双线程与平台管控这两个决定的直接后果。</p>
+    <p><strong>向后延伸</strong>：理解差异之后，自然衔接两件事：一是「原生壳 + WebView」的另一条混合路线
+      （<a href="./m5-hybrid.html">Hybrid 开发与 JSBridge</a>），二是把所有方案摆在一起做决策的
+      （<a href="./m5-choose.html">跨端方案选型</a>）。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="../../pages/m3/m3-router.html">前端路由</a> —— Web 的 History/Hash 路由 vs 小程序框架自带页面栈，两套路由心智。</li>
+      <li><a href="../../pages/m2/m2-storage.html">浏览器存储</a> —— localStorage 与小程序 Storage 的能力对位与配额差异。</li>
+      <li><a href="../../pages/m2/m2-security.html">Web 安全</a> —— 没有 DOM 与 eval 环境后，XSS 攻击面如何变化。</li>
+      <li><a href="./m5-hybrid.html">Hybrid 开发与 JSBridge</a> —— 同样「壳里跑网页」，混合方案如何补齐原生能力。</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（mode:'main'） -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后把最佳成绩写入进度仓库（见页面底部内联脚本）：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：H5 像自己开车随处跑、一切自理；小程序像坐景区观光车——
+      过安检、限行李、走固定路线，但直达景点、省心可靠。开发者要适应的是换了一整套工具和规矩。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前复述 1 次，1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：小程序与 H5 开发的核心区别有哪些？</summary>
+      <ul>
+        <li>运行环境：双线程，逻辑层无 window/document，不能操作 DOM；H5 拿到完整 DOM/BOM。</li>
+        <li>技术栈：WXML/WXSS/框架封装组件 + 平台 API；H5 是标准 HTML/CSS/JS + 浏览器能力。</li>
+        <li>生命周期：onLoad/onShow/onHide/onUnload 显式钩子，切后台回前台是主流程；Web 靠 DOMContentLoaded、visibilitychange 等事件。</li>
+        <li>发布与体积：整包提交、平台审核、包体积上限；H5 随时部署、秒级生效。</li>
+        <li>能力面：小程序开放支付、登录、扫码等原生能力；Web 受浏览器权限约束，但部署与链接触达更自由。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：如何让一份业务代码同时跑在小程序与 H5 两端？</summary>
+      <ul>
+        <li>先分层：把纯逻辑（计算、校验、状态）与平台接触面（请求、存储、路由、UI）切开，前者天然跨端。</li>
+        <li>抽象层：为请求/存储/路由等定义统一接口，两端各给一份实现，业务只面向接口。</li>
+        <li>运行时判断：检测当前环境后走不同分支；适合差异点少、不想引框架的场景。</li>
+        <li>跨端框架：Taro、uni-app 等用一份类 React/Vue 代码，编译或运行时分别产出小程序与 H5，适合差异点多、长期维护的项目。</li>
+        <li>加分项：能指出样式单位差异（rpx 与 rem/vw）与组件差异也要纳入抽象层考虑。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* ============================================================
+ * 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评
+ * ============================================================ */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm5-mp-web'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'） */
+  var WARMUP = [{
+    id: 'm5-mp-web-warmup-1',
+    type: 'single',
+    stem: '预热：在小程序页面的逻辑层里，下面哪行代码能正常执行？',
+    options: [
+      'document.getElementById("app")',
+      'window.scrollTo(0, 100)',
+      'JSON.parse(\'{"a":1}\')'
+    ],
+    answer: [2],
+    explain: '逻辑层没有完整 BOM/DOM，document、window 都不存在；JSON 是纯 JS 内置对象，与浏览器无关，可以正常使用。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm5-mp-web-q1',
+      type: 'single',
+      stem: '用户正在浏览一个小程序页面，此时按了 Home 键把小程序切到后台，稍后又切了回来。整个过程页面生命周期回调的触发顺序是？',
+      options: [
+        'onLoad → onShow → onHide → onShow',
+        'onLoad → onReady → onHide → onShow',
+        'onHide → onLoad → onShow',
+        'onShow → onHide → onLoad'
+      ],
+      answer: [0],
+      explain: '页面首次打开时先 onLoad（加载、拿参数）再 onShow（进入前台）；切后台触发 onHide，回前台再次触发 onShow。onReady 只在首次渲染完成时来一次，且发生在初次 onShow 之后，本轮「切走再切回」不会重复触发它。onLoad 一次会话只来一次，切后台回前台不会重新加载页面。'
+    },
+    {
+      id: 'm5-mp-web-q2',
+      type: 'multi',
+      stem: '关于小程序与 Web 的能力边界，下列说法正确的有？',
+      options: [
+        '小程序发版需要整包提交平台审核，通过后用户才能更新',
+        '小程序包体积有上限，大资源通常要放网络或拆分包',
+        '小程序无法调用手机的原生能力，只能做纯网页的事',
+        '小程序的本地存储、网络请求等基础能力与 Web 的对应 API 形状完全相同'
+      ],
+      answer: [0, 1],
+      explain: '小程序走「提交—审核—发布」流程且包体积受限，A、B 正确。C 恰好说反：支付、扫码、蓝牙等正是小程序相对于纯 Web 的优势能力。D 错在「完全相同」——能力对位但 API 形状、参数与配额规则都不同，这正是迁移时要建抽象层的原因。'
+    },
+    {
+      id: 'm5-mp-web-q3',
+      type: 'code',
+      stem: '手写桥消息净化函数：双线程之间只能传可序列化数据，但业务同学总爱往数据里塞函数或 undefined。实现 sanitizeForBridge(data)，深拷贝并剔除不可序列化的内容：对象中值为 undefined 或函数的属性直接剔除；数组中不可序列化的项替换为 null（保持下标稳定）；基本类型（含 null）原样返回。',
+      stub: 'function sanitizeForBridge(data) {\n  // 规则：\n  // 1. undefined 或函数 → 在对象属性中被剔除，在数组中替换为 null\n  // 2. null 或基本类型 → 原样返回\n  // 3. 数组 → 逐项处理后返回新数组\n  // 4. 普通对象 → 只保留可序列化属性，返回新对象（不改原对象）\n}\n',
+      reference: 'function sanitizeForBridge(data) {\n  if (data === undefined || typeof data === "function") {\n    return undefined;           // 交给上层决定剔除还是替换\n  }\n  if (data === null || typeof data !== "object") {\n    return data;                // 基本类型原样返回\n  }\n  if (Array.isArray(data)) {\n    return data.map(function (item) {\n      var v = sanitizeForBridge(item);\n      return v === undefined ? null : v; // 数组里的洞用 null 占位\n    });\n  }\n  var out = {};\n  Object.keys(data).forEach(function (k) {\n    var v = sanitizeForBridge(data[k]);\n    if (v !== undefined) out[k] = v;     // 对象属性：不可序列化直接剔除\n  });\n  return out;\n}',
+      asserts: [
+        'var r1 = sanitizeForBridge({ a: 1, fn: function () {} }); r1.a === 1 && !("fn" in r1)',
+        'sanitizeForBridge({ a: undefined, b: 2 }).hasOwnProperty("a") === false',
+        'JSON.stringify(sanitizeForBridge({ list: [1, function () {}, 3] })) === \'{"list":[1,null,3]}\'',
+        'JSON.stringify(sanitizeForBridge({ user: { name: "x", say: function () {} } })) === \'{"user":{"name":"x"}}\''
+      ],
+      explain: '为什么要有这道「净化」工序？双线程之间无法共享对象引用，桥上的消息最终都要走 JSON 序列化，而 JSON.stringify 会静默丢弃对象里的 undefined 与函数属性——开发者把回调塞进数据，另一端拿到的就是被悄悄掏空的对象，bug 还特别难查。这道题的本质是「在序列化之前先显式声明规则」：对象属性里不可序列化的直接剔除，数组则用 null 占位保住下标（否则列表渲染会错位）。理解序列化边界，才算真正理解「data 里不能放函数」这条铁律的来由。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ============================================================
+ * ③ 动画演示：小程序页面生命周期状态机
+ * 按钮驱动状态流转，触发回调时高亮对应的 Web 对照行；纯 DOM 手写
+ * ============================================================ */
+(function () {
+  'use strict';
+  var state = 'closed'; // closed 未启动 / running 前台运行 / background 后台
+  var STATE_TEXT = { closed: '未启动', running: '前台运行中', background: '切到后台' };
+  var STATE_CLS = { closed: 'is-off', running: '', background: 'is-bg' };
+
+  var nowEl = document.getElementById('life-now');
+  var consoleEl = document.getElementById('life-console');
+  var startBtn = document.getElementById('life-start');
+  var hideBtn = document.getElementById('life-hide');
+  var showBtn = document.getElementById('life-show');
+  var closeBtn = document.getElementById('life-close');
+  var resetBtn = document.getElementById('life-reset');
+
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* 触发一个回调：写入日志，并高亮下方 Web 对照表中对应的那一行 */
+  function fire(name, desc, mapId) {
+    log(name + ' —— ' + desc, 'is-ok');
+    if (!mapId) return;
+    var row = document.getElementById(mapId);
+    if (!row) return;
+    row.classList.add('is-on');
+    setTimeout(function () { row.classList.remove('is-on'); }, 900); // 高亮片刻后恢复
+  }
+
+  /* 按当前状态刷新大徽章与各按钮可用性，防止不合法的状态跳转 */
+  function render() {
+    nowEl.textContent = STATE_TEXT[state];
+    nowEl.className = 'life-now ' + STATE_CLS[state];
+    startBtn.disabled = state !== 'closed';
+    hideBtn.disabled = state !== 'running';
+    showBtn.disabled = state !== 'background';
+    closeBtn.disabled = state === 'closed';
+  }
+
+  function hint(text) {
+    log(text, 'is-muted');
+  }
+
+  startBtn.addEventListener('click', function () {
+    if (state !== 'closed') { hint('页面已经在运行，无需重复启动。'); return; }
+    log('用户打开页面，生命周期依次触发：', 'is-end');
+    fire('onLoad', '页面加载，拿路由参数（整个页面周期只来一次）', 'map-onload');
+    fire('onShow', '页面进入前台', 'map-onshow');
+    fire('onReady', '首次渲染完成，可以安全操作节点（只来一次）', 'map-onready');
+    state = 'running';
+    render();
+  });
+
+  hideBtn.addEventListener('click', function () {
+    if (state !== 'running') { hint('只有前台运行中的页面才能切到后台。'); return; }
+    fire('onHide', '切到后台：停止本页 UI 更新，但数据仍在（Web 里对应 visibilitychange 变隐藏）', 'map-onhide');
+    state = 'background';
+    render();
+  });
+
+  showBtn.addEventListener('click', function () {
+    if (state !== 'background') { hint('页面不在后台，无法「回到前台」。'); return; }
+    fire('onShow', '回到前台：注意 onShow 每次回前台都会触发，适合做数据刷新', 'map-onshow');
+    state = 'running';
+    render();
+  });
+
+  closeBtn.addEventListener('click', function () {
+    if (state === 'closed') { hint('页面还没启动，无页面可关。'); return; }
+    fire('onUnload', '页面卸载：清理定时器与事件监听的最后机会（只来一次）', 'map-onunload');
+    state = 'closed';
+    render();
+  });
+
+  resetBtn.addEventListener('click', function () {
+    state = 'closed';
+    consoleEl.innerHTML = '';
+    log('已重置：页面回到「未启动」，点击「启动页面」重新走一遍生命周期…', 'is-muted');
+    render();
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>

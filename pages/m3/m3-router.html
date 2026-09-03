@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>前端路由原理 · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ===== 本页动画专用样式（纯手写，无外部资源） ===== */
+.rt-browser {
+  border: 1px solid var(--fg-c-line); border-radius: 8px;
+  background: var(--fg-c-card); overflow: hidden; margin: 10px 0;
+}
+.rt-addrbar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; background: var(--fg-c-bg);
+  border-bottom: 1px solid var(--fg-c-line);
+  font-size: 13px; font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+.rt-addr {
+  flex: 1; background: #fff; border: 1px solid var(--fg-c-line);
+  border-radius: 6px; padding: 4px 8px; white-space: nowrap; overflow-x: auto;
+}
+.rt-hash-part { color: var(--fg-c-primary); font-weight: 700; }
+.rt-view {
+  min-height: 74px; padding: 12px 14px; font-size: 13px;
+  transition: background .3s;
+}
+.rt-view.is-err { background: var(--fg-c-bad-weak); }
+.rt-view-title { font-weight: 700; font-size: 15px; margin-bottom: 4px; }
+.rt-stack { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; align-items: center; }
+.rt-stack-cell {
+  font-size: 12px; font-family: ui-monospace, Menlo, Consolas, monospace;
+  border: 1px dashed var(--fg-c-line); border-radius: 6px; padding: 2px 8px;
+  background: var(--fg-c-bg); color: var(--fg-c-ink-2);
+}
+.rt-stack-cell.is-top { border-style: solid; border-color: var(--fg-c-primary); color: var(--fg-c-primary); background: var(--fg-c-primary-weak); }
+.rt-mode-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+.rt-mode-btn.is-active { background: var(--fg-c-primary); color: #fff; }
+label.rt-check { font-size: 13px; color: var(--fg-c-ink-2); display: inline-flex; gap: 4px; align-items: center; }
+</style>
+</head>
+<body data-page="m3-router">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">为什么单页应用「换个页面」不用刷新浏览器？拆开 hash 与 history 两种路由模式，看清地址栏后面各自的小算盘。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>前置知识：无，可直接开始。本页是「框架与工程化」模块的入口之一，只需要用过几次浏览器、见过地址栏里的 <code>#</code> 号就够了。
+      学完之后再去 <a href="./m3-react.html">React 核心与 Hooks</a> 里看路由库怎么用，会顺理成章得多。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：讲解 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、从「翻页」说起：多页应用 vs 单页应用</h3>
+    <p>早期的网站是<strong>多页应用（MPA）</strong>：点一个链接，浏览器把整个 URL 发给服务器，服务器现做一张新 HTML 寄回来，
+      整页白屏重画一遍——就像每翻一页都要重新复印一整本书。而现在的
+      <strong>单页应用（SPA）</strong>只从服务器拿一次 HTML 外壳，之后「换页面」这件事全部在浏览器里完成：
+      地址栏变了、内容变了，但页面从不整体刷新。让「同一个外壳里的视图」随 URL 变化而切换的那套机制，就是<strong>前端路由</strong>。</p>
+
+    <h3>二、前端路由要解决的核心问题</h3>
+    <p>一句话：URL 变了，谁来负责换内容？前端路由器干三件事——
+      <strong>① 监听 URL 变化（事件）→ ② 从 URL 里解析出该显示哪个视图（解析）→ ③ 换上对应的视图（渲染）</strong>。
+      而「URL 怎么变才不会惊动服务器」，衍生出两大流派：hash 模式和 history 模式。</p>
+
+    <h3>三、hash 模式：借地址栏的「备注栏」记路由</h3>
+    <p>URL 中 <code>#</code> 后面的部分叫「锚点（hash）」。浏览器有个历史遗留的规矩：
+      <strong>hash 变化被视为页面内部的跳转，既不刷新页面，也永远不会把 <code>#</code> 后面的内容发给服务器</strong>。
+      于是前端路由器把路由信息全部写在 <code>#</code> 后面（如 <code>index.html#/detail/42</code>）：
+      改 <code>location.hash</code> 或点锚点链接 → 浏览器触发 <code>hashchange</code> 事件 → 路由器解析 hash、渲染视图。
+      服务器从头到尾只知道一件事：给我 <code>index.html</code>。</p>
+
+    <h3>四、history 模式：正经地址 + pushState</h3>
+    <p>hash 模式的地址总带着个 <code>#</code>，不够体面。HTML5 给了 <code>history.pushState</code>：
+      它可以在<strong>不刷新页面、不发送任何请求</strong>的前提下，把地址栏改成一个正经路径（如 <code>/detail/42</code>），
+      并往浏览器的会话历史里塞一条记录。路由器监听 <code>popstate</code> 事件来响应「用户按了前进/后退」。
+      注意一个常考细节：<strong>pushState / replaceState 自己不会触发 popstate</strong>，popstate 只在用户点击前进/后退（或调用 go/back/forward）时触发，
+      所以路由库要在封装的跳转函数里手动通知视图更新。</p>
+
+    <h3>五、history 模式的坑：刷新 404 与 Nginx 兜底</h3>
+    <p>hash 模式刷新时，浏览器只请求 <code>index.html</code>（<code>#</code> 后不发出去），永远安全。
+      history 模式刷新时，地址栏的<strong>完整路径会被原样发给服务器</strong>——浏览器请求 <code>GET /detail/42</code>，
+      可服务器上根本没有这个文件，直接 404。解决办法是在服务器做「兜底重写」：所有找不到的路径统统回源到 <code>index.html</code>，
+      让页面先回来，再由前端路由器接管渲染。Nginx 的经典写法是
+      <code>try_files $uri $uri/ /index.html;</code>。部署细节可以去看 <a href="../m6/m6-deploy.html">部署基础：Nginx 与 Docker</a>。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 商场导览屏与只认门牌号的保安</div>
+      <p>SPA 就像一栋固定的商场：楼还是那栋楼（页面不刷新），大堂里那块导览屏（视图）随时切换内容——你从「餐饮层」看到「电影院」，
+        不需要拆掉重建商场，屏幕换画面而已。前端路由器就是导览屏的换片程序：看到你输入哪个展厅名，就播哪套画面。</p>
+      <p>hash 模式像把目的地写在<strong>门票背面的备注栏</strong>：保安（服务器）检票时只看门票本身（index.html），
+        背面写了什么他根本不看、也不管——所以你随手改备注（改 hash）永远不会被保安拦下，也无须重新买票。</p>
+      <p>history 模式则把目的地直接印在<strong>门票正面</strong>，体面好看。但一旦你走出商场再回来（刷新页面），
+        保安只认正门编号（真实存在的 index.html），看到票面写着「三楼中庭影院」（/detail/42）就懵了：
+        查无此门，直接把你拦下（404）。解决办法是给保安一本备忘录（Nginx try_files 兜底规则）：
+        「凡是不认识的门牌，一律先领客人回大堂（回源 index.html），再让导览屏带他去想去的地方。」</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：hash 与 history 双模式可切换的路由体验机（纯手写，可点击） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>下面是一台「迷你浏览器」：先选路由模式，再点页面链接导航，最后试试<strong>刷新按钮</strong>——
+      同样的刷新，两种模式的命运完全不同；history 模式下还可以勾选「Nginx 兜底」看它如何被救回来。</p>
+    <div class="anim-stage">
+      <p class="anim-caption">场景：一家电商 SPA，共 3 个页面。所有操作都会记录到下方「请求日志」里，注意看哪些动作真的发了网络请求。</p>
+
+      <div class="rt-mode-row">
+        <span style="font-size:13px;color:var(--fg-c-ink-2);">路由模式：</span>
+        <button type="button" class="fg-btn fg-btn--sm rt-mode-btn is-active" id="rt-mode-hash">hash 模式</button>
+        <button type="button" class="fg-btn fg-btn--sm rt-mode-btn" id="rt-mode-history">history 模式</button>
+        <label class="rt-check"><input type="checkbox" id="rt-fallback" disabled> 服务器已配置 try_files 兜底（仅 history 有意义）</label>
+      </div>
+
+      <div class="rt-browser">
+        <div class="rt-addrbar">
+          <span>🌐</span>
+          <div class="rt-addr" id="rt-addr"></div>
+          <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="rt-refresh">刷新</button>
+          <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="rt-back">← 后退</button>
+        </div>
+        <div class="rt-view" id="rt-view"></div>
+      </div>
+
+      <div class="anim-console" id="rt-console">
+        <div class="anim-line is-muted">点击上方页面链接或模式按钮开始，日志会区分「前端切换」与「真的发了请求」…</div>
+      </div>
+
+      <p class="anim-caption" style="margin-top:8px;">页面链接（点击导航）：</p>
+      <div class="rt-mode-row">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="rt-nav-home">首页 /home</button>
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="rt-nav-list">列表 /list</button>
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="rt-nav-detail">详情 /detail/42</button>
+      </div>
+      <p class="anim-caption" style="margin-top:8px;">浏览器会话历史（pushState / hash 变化各记一条）：</p>
+      <div class="rt-stack" id="rt-stack"></div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="rt-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（真实课程路径） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：无硬性前置，可直接开始。若想理解「history 模式刷新时服务器到底收到了什么」，先过一遍
+      <a href="../m2/m2-pipeline.html">浏览器渲染流水线</a> 会对整个过程更有体感。</p>
+    <p><strong>向后延伸</strong>：理解路由原理后，两个方向自然展开——
+      <a href="../m4/m4-load.html">首屏与资源加载优化</a> 里的「路由懒加载」把每个路由的 JS 拆开、走到哪加载到哪；
+      <a href="./m3-state.html">状态管理思想</a> 则处理「路由参数变化时，页面状态该如何归属」的问题。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="../m6/m6-deploy.html">部署基础：Nginx 与 Docker</a> —— history 模式 404 的最终解药：<code>try_files</code> 兜底配置就写在这里。</li>
+      <li><a href="../m4/m4-load.html">首屏与资源加载优化</a> —— 路由级代码分割：SPA 首屏白屏优化的主力手段之一。</li>
+      <li><a href="./m3-build.html">构建工具思想与 Vite</a> —— 开发服务器如何拦截路径、把兜底到 index.html 的策略搬进本地 dev server。</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（含解析），mode:'main' -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后把最佳成绩写入进度仓库（见页面底部内联脚本）：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：前端路由就是让网页「换内容不换页」的换片程序——hash 模式把目的地写在门票背面（# 后），保安看不见所以永远安全；
+      history 模式把目的地印在门票正面（体面），但刷新时保安看不懂就要靠服务器备忘录（try_files 兜底）先把你领回大堂。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前复述 1 次「hash 事件是 hashchange、history 事件是 popstate、pushState 不触发 popstate、刷新 404 靠 try_files」，1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：2 个问法，答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：hash 模式和 history 模式有哪些区别？各自怎么选？</summary>
+      <ul>
+        <li>原理：hash 依赖 <code>hashchange</code> 事件，路由写在 <code>#</code> 后、永不上传服务器；history 依赖 <code>pushState/replaceState</code> 改地址 + <code>popstate</code> 响应前进后退。</li>
+        <li>刷新行为：hash 刷新只请求 index.html，天然无 404；history 刷新会把完整路径发给服务器，必须配 try_files 之类的兜底。</li>
+        <li>外观与 SEO：history 地址干净无 <code>#</code>；对需要服务端配合 SEO 的站点更友好（hash 路由对爬虫不透明）。</li>
+        <li>兼容与部署成本：hash 兼容性极好、部署零配置；history 要求服务器支持兜底重写，但现代项目默认都选 history。</li>
+        <li>加分项：说出「锚点本是浏览器滚动定位机制，hash 路由是借用了这个历史遗留行为」。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：手写一个简易前端路由，你的思路是什么？pushState 为什么不触发 popstate，视图怎么更新？</summary>
+      <ul>
+        <li>三件套：监听变化（hashchange / popstate）、解析路径（如把 /user/:id 与当前路径按 <code>/</code> 分段配对，冒号段收进 params）、按匹配结果渲染对应视图。</li>
+        <li>跳转封装：hash 模式改 location.hash 即可；history 模式封装 navigate()，内部调 pushState 后<strong>手动调用渲染函数</strong>，再派发一个自定义事件（如 routechange）供外部订阅。</li>
+        <li>为什么 pushState 不触发 popstate：popstate 的语义是「用户在历史记录间移动」，pushState 只是写入一条新记录，规范如此设计以区分「程序改地址」与「用户后退」。</li>
+        <li>加分项：提到路由守卫（跳转前拦截）、动态路由匹配、嵌套路由，都是在这三件套上加规则。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 + 双模式路由体验机 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm3-router'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'） */
+  var WARMUP = [{
+    id: 'm3-router-warmup-1',
+    type: 'single',
+    stem: '预热：在单页应用（SPA）里点击站内链接「切换页面」时，通常会发生什么？',
+    options: [
+      '浏览器向服务器要来一张全新的 HTML，整页重新加载',
+      '页面不整体刷新，由前端路由根据 URL 变化切换视图',
+      '服务器把整个应用重新发一遍',
+      '浏览器自动关闭再重开当前标签页'
+    ],
+    answer: [1],
+    explain: 'SPA 只加载一次 HTML 外壳，「换页面」由前端路由在浏览器内完成：URL 变化 → 解析 → 换视图，全程不整页刷新。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm3-router-q1',
+      type: 'single',
+      stem: '同样是刷新页面，为什么 hash 路由不会 404，history 路由却可能 404？',
+      options: [
+        'hash 路由有浏览器自动备份，history 没有',
+        '刷新时 hash 的 # 后内容不会发给服务器，浏览器只请求 index.html；history 会把完整路径（如 /detail/42）原样发给服务器，服务器上没有这个文件就 404',
+        'history 路由的文件体积更大导致超时',
+        'hash 路由不经过网络请求'
+      ],
+      answer: [1],
+      explain: '关键在「刷新时到底发了什么请求」。hash 是锚点：浏览器视其为页内跳转，# 后的内容根本不会出现在请求里，刷新永远只要 index.html。history 模式地址是正经路径，刷新时 GET /detail/42 原样发给服务器——静态服务器上没有这个文件，自然 404。解法是服务端兜底（Nginx try_files 把未知路径回源 index.html），再由前端路由接管。'
+    },
+    {
+      id: 'm3-router-q2',
+      type: 'single',
+      stem: '关于 popstate 事件，下面哪个说法是正确的？',
+      options: [
+        '调用 history.pushState 后会立即触发 popstate',
+        'popstate 只在用户点击浏览器前进/后退（或调用 go/back/forward）时触发，pushState/replaceState 不会触发它',
+        'popstate 是 hash 路由专用事件',
+        'popstate 触发时会自动刷新页面'
+      ],
+      answer: [1],
+      explain: 'popstate 的语义是「用户在会话历史之间移动」，所以只由前进/后退/go/back/forward 触发；pushState 只写入新历史记录，规范规定它不触发 popstate。因此 history 路由器要在自己封装的跳转函数里手动通知视图更新，而不是指望事件。hash 路由对应的事件是 hashchange，两者别混淆。'
+    },
+    {
+      id: 'm3-router-q3',
+      type: 'code',
+      stem: '动手实现迷你路由的「路径匹配器」：实现 matchRoute(pattern, path)。pattern 中以 : 开头的段（如 /user/:id）可匹配任意一段非空内容并收进 params；普通段必须逐字相等；段数不同视为不匹配。匹配成功返回 { match: true, params: {...} }，失败返回 { match: false, params: {} }。',
+      stub: 'function matchRoute(pattern, path) {\n  // 1. 两边都按 "/" 切分成段数组\n  // 2. 段数不同 → 不匹配\n  // 3. 逐段比较：":xxx" 段收集 params[xxx]（空段不匹配）；普通段必须完全相等\n  // 4. 返回 { match, params }\n}\n',
+      reference: 'function matchRoute(pattern, path) {\n  var ps = pattern.split("/");\n  var ts = path.split("/");\n  if (ps.length !== ts.length) return { match: false, params: {} };\n  var params = {};\n  for (var i = 0; i < ps.length; i++) {\n    if (ps[i].charAt(0) === ":") {\n      if (!ts[i]) return { match: false, params: {} }; // 空段不能喂给动态参数\n      params[ps[i].slice(1)] = decodeURIComponent(ts[i]);\n    } else if (ps[i] !== ts[i]) {\n      return { match: false, params: {} };\n    }\n  }\n  return { match: true, params: params };\n}',
+      asserts: [
+        'matchRoute("/user/:id", "/user/42").match === true && matchRoute("/user/:id", "/user/42").params.id === "42"',
+        'matchRoute("/user/:id", "/user/a/b").match === false',
+        'matchRoute("/a/b", "/a/b").match === true && Object.keys(matchRoute("/a/b", "/a/b").params).length === 0',
+        'matchRoute("/user/:id", "/user/").match === false'
+      ],
+      explain: '路径匹配是所有路由库的心脏。思路就是「分段配对」：按 / 切开后逐段比对——普通段（user）是字面量必须相等，冒号段（:id）是占位符负责收参数。两个易错点：① 段数不同直接判负（/user/a/b 有 3 段，模板只有 2 段）；② 动态段匹配到空字符串（如 /user/）要判不匹配，否则会收集出一个 undefined 参数造成下游 bug。真实路由库在此基础上再加通配符、优先级（静态段优先于动态段）等规则。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（会推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：hash 与 history 双模式路由体验机（纯 DOM 手写，可点击操作） */
+(function () {
+  'use strict';
+
+  var BASE = 'https://shop.example/index.html';
+  var ROUTES = {
+    '/home': { title: '首页', desc: '今日推荐：限量款蓝牙耳机' },
+    '/list': { title: '商品列表', desc: '全部 128 件商品' },
+    '/detail/42': { title: '商品详情 #42', desc: '限量款蓝牙耳机 · ¥999' }
+  };
+
+  var mode = 'hash';          // 当前路由模式：'hash' | 'history'
+  var current = '/home';      // 当前路由路径
+  var stack = ['/home'];      // 模拟会话历史（pushState / hash 变化各记一条）
+
+  var addrEl = document.getElementById('rt-addr');
+  var viewEl = document.getElementById('rt-view');
+  var consoleEl = document.getElementById('rt-console');
+  var stackEl = document.getElementById('rt-stack');
+  var fbEl = document.getElementById('rt-fallback');
+  var btnHash = document.getElementById('rt-mode-hash');
+  var btnHistory = document.getElementById('rt-mode-history');
+
+  /* 输出一行日志（is-ok 绿 / is-end 橙 / is-muted 灰） */
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* 按当前模式拼出地址栏显示内容：hash 模式 # 后高亮 */
+  function renderAddr() {
+    if (mode === 'hash') {
+      addrEl.innerHTML = BASE + '<span class="rt-hash-part">#' + current + '</span>';
+    } else {
+      addrEl.textContent = 'https://shop.example' + current;
+    }
+  }
+
+  /* 渲染当前路由对应的视图内容 */
+  function renderView() {
+    var r = ROUTES[current];
+    viewEl.classList.remove('is-err');
+    viewEl.innerHTML = '<div class="rt-view-title">' + r.title + '</div>' +
+      '<div style="color:var(--fg-c-ink-2);">' + r.desc + '</div>';
+  }
+
+  /* 渲染会话历史格子（最后一格高亮为「当前位置」） */
+  function renderStack() {
+    stackEl.innerHTML = '';
+    stack.forEach(function (p, i) {
+      var cell = document.createElement('span');
+      cell.className = 'rt-stack-cell' + (i === stack.length - 1 ? ' is-top' : '');
+      cell.textContent = (i + 1) + '. ' + p;
+      stackEl.appendChild(cell);
+    });
+  }
+
+  /* 前端导航：不发请求，只改地址 + 记历史 + 通知视图 */
+  function navigate(path) {
+    current = path;
+    stack.push(path);
+    if (mode === 'hash') {
+      log('点击链接 → location.hash 变为 #' + path + ' → 触发 hashchange 事件 → 路由器换视图。# 后内容不会发给服务器：本次 0 个网络请求。', 'is-ok');
+    } else {
+      log('点击链接 → history.pushState 改地址并压入一条历史 → pushState 本身不触发 popstate，路由器在封装的 navigate() 里手动通知视图。本次 0 个网络请求，服务器全程不知情。', 'is-ok');
+    }
+    renderAll();
+  }
+
+  /* 后退：两种模式各自触发自己的事件 */
+  function goBack() {
+    if (stack.length <= 1) {
+      log('已经退到最早的历史了，再按就出站了。', 'is-muted');
+      return;
+    }
+    stack.pop();
+    current = stack[stack.length - 1];
+    if (mode === 'hash') {
+      log('后退 → hash 变回 #' + current + ' → 触发 hashchange 事件 → 换视图。', 'is-ok');
+    } else {
+      log('后退 → 触发 popstate 事件（这个事件只在前进/后退时触发）→ 路由器根据事件里的路径换视图。', 'is-ok');
+    }
+    renderAll();
+  }
+
+  /* 刷新：两种模式的命运分岔点，也是 history 404 的舞台 */
+  function refresh() {
+    if (mode === 'hash') {
+      log('刷新 → 浏览器请求 GET /index.html（# 后的内容根本不会发出去）→ 200 拿回页面 → 前端路由读 #' + current + ' → 渲染「' + ROUTES[current].title + '」。永远安全。', 'is-ok');
+      return;
+    }
+    if (fbEl.checked) {
+      log('刷新 → 浏览器请求 GET ' + current + ' → Nginx try_files 兜底：查无此文件就回源 /index.html → 200 → 页面回来后前端路由接管，渲染「' + ROUTES[current].title + '」。这就是 history 模式的救命备忘录。', 'is-ok');
+      viewEl.classList.remove('is-err');
+    } else {
+      log('刷新 → 浏览器请求 GET ' + current + ' → 服务器翻遍目录查无此文件 → 404！保安只认正门编号（index.html），不认识内部展厅的名字。勾选上方「try_files 兜底」再看一次被救回来的过程。', 'is-end');
+      viewEl.classList.add('is-err');
+      viewEl.innerHTML = '<div class="rt-view-title">404 Not Found</div>' +
+        '<div style="color:var(--fg-c-bad);">GET ' + current + ' —— 静态服务器上并不存在这个文件</div>';
+    }
+  }
+
+  /* 切换路由模式：只影响「之后的地址形态与刷新行为」 */
+  function setMode(next) {
+    mode = next;
+    btnHash.classList.toggle('is-active', next === 'hash');
+    btnHistory.classList.toggle('is-active', next === 'history');
+    fbEl.disabled = (next === 'hash');
+    log(next === 'hash'
+      ? '已切到 hash 模式：地址栏出现 #，路由写在 # 后，服务器永远只见 index.html。'
+      : '已切到 history 模式：地址栏是干净的正经路径；但刷新时完整路径会发给服务器，小心 404。', 'is-muted');
+    renderAll();
+  }
+
+  function renderAll() {
+    renderAddr();
+    renderView();
+    renderStack();
+  }
+
+  function reset() {
+    mode = 'hash';
+    current = '/home';
+    stack = ['/home'];
+    fbEl.checked = false;
+    fbEl.disabled = false;
+    btnHash.classList.add('is-active');
+    btnHistory.classList.remove('is-active');
+    consoleEl.innerHTML = '';
+    log('已重置：从 /home 开始。先点页面链接导航，再试试「刷新」按钮，观察两种模式的差别。', 'is-muted');
+    renderAll();
+  }
+
+  btnHash.addEventListener('click', function () { setMode('hash'); });
+  btnHistory.addEventListener('click', function () { setMode('history'); });
+  document.getElementById('rt-nav-home').addEventListener('click', function () { navigate('/home'); });
+  document.getElementById('rt-nav-list').addEventListener('click', function () { navigate('/list'); });
+  document.getElementById('rt-nav-detail').addEventListener('click', function () { navigate('/detail/42'); });
+  document.getElementById('rt-refresh').addEventListener('click', refresh);
+  document.getElementById('rt-back').addEventListener('click', goBack);
+  document.getElementById('rt-reset').addEventListener('click', reset);
+  reset();
+})();
+</script>
+</body>
+</html>

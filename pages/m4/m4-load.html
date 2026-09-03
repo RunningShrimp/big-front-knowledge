@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>首屏与资源加载优化 · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ========== 本页动画专用样式：餐厅上菜策略模拟器 ========== */
+.load-kitchen-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0;
+}
+.load-kitchen {
+  flex-shrink: 0;
+  width: 74px;
+  text-align: center;
+  font-size: 12px;
+  padding: 10px 4px;
+  border-radius: 6px;
+  background: #f4e9d8;
+  border: 1px solid #dcc9a6;
+  color: #7a5c22;
+}
+.load-road {
+  position: relative;
+  flex: 1;
+  height: 36px;
+  border-radius: 6px;
+  background: repeating-linear-gradient(90deg, #eef1f7, #eef1f7 14px, #e4e9f2 14px, #e4e9f2 28px);
+  overflow: hidden;
+}
+.load-truck {
+  position: absolute;
+  top: 4px;
+  left: 0;
+  width: 34px;
+  height: 26px;
+  border-radius: 5px;
+  background: #4c6fff;
+  color: #fff;
+  font-size: 10px;
+  line-height: 26px;
+  text-align: center;
+  transition: transform 0.6s linear;
+}
+.load-table {
+  min-height: 74px;
+  border: 2px dashed #c6cede;
+  border-radius: 8px;
+  padding: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 8px 0;
+}
+.load-table.is-firstpaint {
+  border-color: #3fae7c;
+  background: #f2fbf6;
+}
+.load-plate {
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  background: #eef1f7;
+  border: 1px solid #d5dbe8;
+  color: #4b5568;
+  animation: load-arrive 0.35s ease;
+}
+.load-plate.is-key { background: #fdf0dc; border-color: #f0c88a; color: #8a5a12; font-weight: 600; }
+.load-plate.is-cached { border-style: dashed; }
+@keyframes load-arrive {
+  0% { transform: translateY(-8px); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+.load-clock { font-size: 13px; margin: 4px 0; }
+.load-clock b { font-family: var(--fg-mono); }
+.load-badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: #eef1f7; color: #6b7488; }
+.load-badge--ok { background: #e4f5ec; color: #1e7a52; }
+.load-badge--bad { background: #fdeaea; color: #b3364f; }
+.load-check { font-size: 13px; margin: 6px 0; }
+</style>
+</head>
+<body data-page="m4-load">
+
+<!-- 壳层自动渲染区：site.js 检测到 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">首屏优化不是「把所有东西都尽快加载」，而是「把第一眼要用的东西先送到位」。本页拆解关键渲染路径、代码分割、预加载与 SSR 思想。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>建议先过两门前置知识：<a href="./m4-cwv.html">Core Web Vitals 性能指标</a>（先会「量」才知道优化哪里）与<a href="../m2/m2-cache.html">浏览器缓存策略</a>（最快的请求是「不发请求」）。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：讲解 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>先分清「首屏」和「白屏」</h3>
+    <p>首屏是用户打开页面后<strong>第一眼能看到的区域</strong>；白屏是屏幕上什么内容都没有的阶段。白屏的常见流程是：请求 HTML → 下载并解析 CSS/JS → 构建渲染树 → 绘制。中间任何一环被卡住，用户就盯着白屏发呆。优化的总思路：<strong>让首屏必需的资源最先到位，让其余资源不挡路。</strong></p>
+
+    <h3>关键渲染路径：CSS 和 JS 为什么会「堵门」</h3>
+    <p>浏览器渲染前需要 DOM（HTML 解析产物）和 CSSOM（CSS 解析产物）。<strong>CSS 默认阻塞渲染</strong>——样式没就绪就画页面会出现「裸奔一瞬」，所以关键 CSS 要尽早送达，甚至内联进 HTML。<strong>JS 默认既阻塞解析又阻塞执行</strong>——遇到普通 script 标签，HTML 解析要停下来等它下载并执行完，因为脚本可能修改 DOM。</p>
+
+    <h3>defer 与 async 怎么选</h3>
+    <ul>
+      <li><strong>普通 script</strong>：下载时中断解析，下载完立即执行——适合确实要先执行的小脚本。</li>
+      <li><strong>async</strong>：下载不阻塞解析，<strong>下载完立刻执行</strong>，多个脚本之间执行顺序不保证——适合独立统计、埋点类脚本。</li>
+      <li><strong>defer</strong>：下载不阻塞解析，<strong>等 HTML 解析完再按文档顺序执行</strong>——适合大多数业务脚本，既不堵解析又保住依赖顺序。</li>
+    </ul>
+
+    <h3>代码分割与路由懒加载：别为没去的页面买单</h3>
+    <p>打包工具默认把所有 JS 揉成一个大文件，用户打开首页却要连带下载「个人中心」「设置页」的代码。把包<strong>按路由拆开</strong>（动态 import / 路由懒加载），访问哪个页面才加载哪个分包，首屏 JS 体积立减。构建工具层面的对比见<a href="../m3/m3-build.html">构建工具思想与 Vite</a>。</p>
+
+    <h3>preload 与 prefetch：给下载排优先级</h3>
+    <p><strong>preload</strong> 告诉浏览器「这个资源当前页马上要用，提前高优先级去拿」，适合关键字体、首屏大图；<strong>prefetch</strong> 表示「下一页可能要用，空闲时顺手拿」，适合预测性的下一步。注意别滥用：把所有资源都 preload，等于没有优先级，还会挤占带宽。</p>
+
+    <h3>SSR / SSG：把「组装页面」提前</h3>
+    <p>纯客户端渲染要「先下载 JS → 再执行 → 再长出页面」，白屏自然长。<strong>SSR</strong>（服务端渲染）在服务器把首屏 HTML 拼好直接送达，用户先看到内容，JS 再「接管」页面；<strong>SSG</strong>（静态生成）在构建期就把页面生成好，发出去的就是成品 HTML。两者本质相同：<strong>把组装工作从用户浏览器挪到服务器或构建期。</strong></p>
+
+    <h3>白屏排查清单（面试高频）</h3>
+    <ul>
+      <li>网络层：请求发出去了吗？接口/静态资源是否 404、超时？</li>
+      <li>阻塞层：是否有关键 CSS/JS 阻塞？脚本是否该加 defer/async？</li>
+      <li>报错层：控制台有没有 JS 报错导致渲染中断？</li>
+      <li>容器层：SPA 的挂载节点是否存在、JS 是否在 DOM 就绪前执行？</li>
+    </ul>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 餐厅的上菜策略</div>
+      <p>你饿着肚子走进餐厅（打开网页）。策略 A 的厨房很「实诚」：坚持把满汉全席二十道菜<strong>全部做完、装上同一辆大车</strong>一起端上来——你在座位上干等了半个多小时，才见到第一口吃的。这就是「全量打包」：首屏用不到的代码和图片，把真正要紧的东西堵在了路上。</p>
+      <p>策略 B 是聪明厨房：<strong>先上招牌菜和米饭</strong>（首屏关键 HTML/CSS/JS），让你一分钟内开吃（LCP 达标）；配菜让后厨<strong>慢慢做、做好了再上</strong>（非首屏资源懒加载、代码分包）；茶水在你落座前就备好在桌边（preload 提前拿马上要用的资源）。</p>
+      <p>而你上次来过这件事也有用：家里囤着常用调味料（浏览器强缓存），第二次来连「招牌菜」都不用厨房现做——这正是<a href="../m2/m2-cache.html">缓存策略</a>在首屏优化里的价值。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：两种上菜策略对比，可点击切换 + 缓存开关 -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>点击两种「营业策略」，观察招牌菜（首屏关键资源）几点上桌。可勾选「客人上次来过」体验缓存加成。</p>
+    <div class="anim-stage">
+      <p class="anim-caption">黄色盘子是首屏关键资源（招牌菜=关键 HTML/CSS，米饭=关键 JS），灰色盘子是非首屏资源：</p>
+      <div class="load-kitchen-row">
+        <div class="load-kitchen">后厨<br>（服务器）</div>
+        <div class="load-road" id="load-road"></div>
+      </div>
+      <p class="load-clock">开餐计时：<b id="load-clock-val">0.0s</b> <span id="load-verdict" class="load-badge">等待营业</span></p>
+      <div class="load-table" id="load-table"><span style="font-size:12px;color:#9aa3b8">餐桌（首屏视口）——空空如也</span></div>
+      <label class="load-check"><input type="checkbox" id="load-cache"> 客人上次来过（浏览器缓存生效，关键资源秒到）</label>
+      <div class="anim-console" id="load-console">
+        <div class="anim-line is-muted">点击下方按钮开始营业…</div>
+      </div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="load-mode-a">模式 A：全量打包一起送</button>
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="load-mode-b">模式 B：先上招牌菜</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="load-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接 -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="./m4-cwv.html">Core Web Vitals 性能指标</a>——本页所有手段的目标都是把 LCP 压进 2.5 秒；<a href="../m2/m2-cache.html">浏览器缓存策略</a>——「不发请求」永远快于「发更快的请求」。</p>
+    <p><strong>向后延伸</strong>：资源里的大头是图片，接着学<a href="./m4-image.html">图片优化与懒加载</a>；优化效果要长期在线验证，去看<a href="./m4-monitor.html">前端监控与错误上报</a>。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="../m2/m2-pipeline.html">浏览器渲染流水线</a> —— defer/async 的行为差异，根源在解析与执行如何交错</li>
+      <li><a href="../m2/m2-cache.html">浏览器缓存策略</a> —— HTML 不缓存 + 静态资源长缓存加指纹，是首屏提速的标准组合</li>
+      <li><a href="../m3/m3-build.html">构建工具思想与 Vite</a> —— 代码分割、Tree Shaking 都是构建期完成的</li>
+      <li><a href="../m2/m2-http.html">HTTP/1.1、HTTP/2 与 HTTP/3</a> —— 资源能不能「并行到达」，取决于协议这座桥</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（mode:'main'） -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后把最佳成绩写入进度仓库（见页面底部内联脚本）：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：首屏优化就是先让客人吃上招牌菜——用户第一眼要用的东西最先送到位，其余的菜让后厨慢慢做，别让人干等一桌全席。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前复述 1 次，1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：线上页面首屏白屏，说说你的排查思路和优化清单。</summary>
+      <ul>
+        <li>先定位：抓包看 HTML/关键资源请求是否发出、状态码与耗时；看控制台是否 JS 报错中断渲染。</li>
+        <li>阻塞项：关键 CSS 是否过大、能否内联首屏样式；非首屏 JS 是否加 defer/async、是否可代码分割。</li>
+        <li>体积项：路由懒加载拆包、图片压缩与懒加载、大依赖按需引入。</li>
+        <li>优先级：对马上要用的关键资源 preload；HTML 不缓存、静态资源长缓存加指纹。</li>
+        <li>架构项：瓶颈在「组装太晚」时考虑 SSR/SSG，把首屏 HTML 提前拼好。</li>
+        <li>收尾：用性能指标（LCP）量化优化前后，避免「感觉变快了」。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：defer 和 async 有什么区别？业务脚本为什么更常用 defer？</summary>
+      <ul>
+        <li>共同点：两者下载阶段都不阻塞 HTML 解析。</li>
+        <li>执行时机：async 下载完立即执行（顺序不保证）；defer 等 HTML 解析完、触发页面前按文档顺序执行。</li>
+        <li>选型：业务脚本常依赖 DOM 就绪与脚本间依赖顺序，defer 两条都满足；独立的埋点、广告脚本可用 async。</li>
+        <li>加分项：提到 ES Module 默认类似 defer 行为；内联 script 加 defer 无效。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm4-load'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'） */
+  var WARMUP = [{
+    id: 'm4-load-warmup-1',
+    type: 'single',
+    stem: '预热：关于「首屏优化」，下面哪个说法是对的？',
+    options: [
+      '首屏就是整个页面全部加载完成',
+      '首屏优化 = 把页面所有资源都尽快加载下来',
+      '首屏优化的核心是让用户第一眼看到的资源最先到位',
+      '首屏速度只取决于服务器快慢，前端无能为力'
+    ],
+    answer: [2],
+    explain: '首屏是用户第一眼看到的区域。优化重点是「第一眼要用的资源优先到位」，而不是无差别地全量加载——后者反而会挤占带宽拖慢首屏。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm4-load-q1',
+      type: 'single',
+      stem: '页面有三个业务脚本，后写的依赖先写的。既要不阻塞 HTML 解析，又要保证执行顺序，应该怎么写？',
+      options: [
+        '三个都写成普通 script 标签',
+        '三个都加 async 属性',
+        '三个都加 defer 属性',
+        '把脚本挪到 body 末尾并加 async'
+      ],
+      answer: [2],
+      explain: 'defer 在下载阶段不阻塞解析，且等 HTML 解析完按文档顺序执行，天然满足「不阻塞 + 保顺序」。async 执行时机随下载完成先后浮动，顺序无保证；普通 script 会阻塞解析；挪到 body 末尾只能缓解阻塞，加 async 还破坏顺序。'
+    },
+    {
+      id: 'm4-load-q2',
+      type: 'multi',
+      stem: '下面哪些属于有效的首屏优化手段？',
+      options: [
+        '提取并内联首屏关键 CSS',
+        '非首屏 JS 用 defer / 路由懒加载拆包',
+        '把页面全部图片都加 preload 提前下载',
+        '静态资源长缓存 + 文件名指纹，HTML 不缓存'
+      ],
+      answer: [0, 1, 3],
+      explain: 'A、B、D 都是标准手段。C 是典型误区：preload 全部图片会挤占关键资源的带宽，preload 只该给「马上要用」的高优先级资源用，图片应按是否首屏区别对待（首屏预加载、非首屏懒加载）。'
+    },
+    {
+      id: 'm4-load-q3',
+      type: 'code',
+      stem: '实现一个模拟「路由懒加载 + 缓存」的加载器 loadPage(pages, name, cache)：pages 是「路由名 → 组件内容」的字典。规则：第一次请求某路由返回 "加载:路由名" 并写入 cache；请求已在 cache 里的路由返回 "缓存:路由名"，不再重复加载。cache 为注入的缓存对象（便于测试断言）。',
+      stub: 'function loadPage(pages, name, cache) {\n  // 在此实现：\n  // 1) name 已存在于 cache → 返回 "缓存:" + name\n  // 2) 否则模拟按需下载：把 pages[name] 存入 cache，返回 "加载:" + name\n}\n',
+      reference: 'function loadPage(pages, name, cache) {\n  if (name in cache) {\n    return "缓存:" + name;      // 命中缓存：不再重新加载\n  }\n  cache[name] = pages[name];    // 模拟按需下载后写入缓存\n  return "加载:" + name;\n}',
+      asserts: [
+        'loadPage({ home: "首页组件" }, "home", {}) === "加载:home"',
+        '(function () { var c = {}; loadPage({ home: "首页组件" }, "home", c); return loadPage({ home: "首页组件" }, "home", c) === "缓存:home"; })()',
+        '(function () { var c = {}; loadPage({ home: "a" }, "home", c); return loadPage({ home: "a", about: "b" }, "about", c) === "加载:about"; })()'
+      ],
+      explain: '路由懒加载的本质就是「按需 + 记住已拿到的」：第一次访问某路由才下载对应分包（对应断言 1、3），之后再进入直接复用已加载的模块（断言 2）。真实框架里这块缓存由路由表和模块注册表自动维护，思想与本函数一致——这也是「最快的请求是不发请求」在代码层面的体现。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库 */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：餐厅上菜策略模拟器（纯手写 DOM + CSS 过渡，无动画库） */
+(function () {
+  'use strict';
+  var roadEl = document.getElementById('load-road');
+  var tableEl = document.getElementById('load-table');
+  var clockVal = document.getElementById('load-clock-val');
+  var verdictEl = document.getElementById('load-verdict');
+  var consoleEl = document.getElementById('load-console');
+  var cacheBox = document.getElementById('load-cache');
+  var btnA = document.getElementById('load-mode-a');
+  var btnB = document.getElementById('load-mode-b');
+  var resetBtn = document.getElementById('load-reset');
+
+  var SCALE = 600;          // 时间缩放：1 个模拟秒 = 600 毫秒真实时间
+  var timer = null;         // 模拟时钟的 interval 句柄
+  var simTime = 0;          // 当前模拟秒
+  var running = false;      // 是否正在营业（防止重复开始）
+  var pendingTimers = [];   // 本轮所有 setTimeout 的句柄，重置时统一清除
+
+  /* 菜单定义：label=盘子文案 key=是否首屏关键资源 arrive=上桌模拟秒 cached=可否吃缓存 */
+  var MENU = [
+    { label: '招牌菜（关键HTML/CSS）', key: true, arrive: 0.6, cached: true },
+    { label: '米饭（关键JS）', key: true, arrive: 0.9, cached: true },
+    { label: '配菜A（非首屏JS分包）', key: false, arrive: 1.6, cached: false },
+    { label: '配菜B（下方图片）', key: false, arrive: 2.2, cached: false },
+    { label: '餐巾（埋点脚本）', key: false, arrive: 2.8, cached: false }
+  ];
+
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* 启动模拟时钟：每 100ms 真实时间推进 1/6 模拟秒 */
+  function startClock() {
+    timer = setInterval(function () {
+      simTime += 0.1;
+      clockVal.textContent = simTime.toFixed(1) + 's';
+    }, 100);
+  }
+
+  /* 延迟 N 模拟秒执行任务（用真实 setTimeout 换算），登记句柄便于重置 */
+  function simTimeout(simSeconds, fn) {
+    var h = setTimeout(fn, simSeconds * SCALE);
+    pendingTimers.push(h);
+  }
+
+  /* 一辆小车把某道菜送到餐桌：先开过路面，到达后盘子出现并写日志 */
+  function deliver(item, cached) {
+    var truck = document.createElement('div');
+    truck.className = 'load-truck';
+    truck.textContent = cached ? '存' : '送';
+    roadEl.appendChild(truck);
+    /* 强制浏览器先应用初始位置，再触发过渡动画（否则 transition 不生效） */
+    void truck.offsetWidth;
+    truck.style.transitionDuration = (0.6 * SCALE) + 'ms';
+    truck.style.transform = 'translateX(calc(' + roadEl.clientWidth + 'px - 34px))';
+
+    simTimeout(0.6, function () {
+      roadEl.removeChild(truck);
+      var plate = document.createElement('span');
+      plate.className = 'load-plate' + (item.key ? ' is-key' : '') + (cached ? ' is-cached' : '');
+      plate.textContent = item.label + (cached ? ' · 缓存' : '');
+      var placeholder = tableEl.querySelector('span');
+      if (placeholder) tableEl.removeChild(placeholder); // 撤掉「空空如也」占位
+      tableEl.appendChild(plate);
+      if (cached) {
+        log(simTime.toFixed(1) + 's 「' + item.label + '」直接从缓存上桌，零网络耗时', 'is-ok');
+      } else {
+        log(simTime.toFixed(1) + 's 「' + item.label + '」送达餐桌');
+      }
+      if (item.key && !tableEl.classList.contains('is-firstpaint')) {
+        tableEl.classList.add('is-firstpaint'); // 关键资源到位 → 首屏点亮
+        if (cached || simTime <= 2.5) {
+          verdictEl.textContent = '首屏可用：LCP ≈ ' + simTime.toFixed(1) + 's ✓';
+          verdictEl.className = 'load-badge load-badge--ok';
+          log('关键资源到齐，用户开始「吃」（首屏渲染完成）', 'is-ok');
+        } else {
+          verdictEl.textContent = '首屏太晚：LCP ≈ ' + simTime.toFixed(1) + 's ✗';
+          verdictEl.className = 'load-badge load-badge--bad';
+        }
+      }
+    });
+  }
+
+  /* 模式 A：全部资源装上同一辆大车，3.5s 才一起到 */
+  function runModeA() {
+    if (running) return;
+    begin('模式 A：二十道菜装一辆大车，全部做完一起送…', 'is-muted');
+    simTimeout(3.5, function () {
+      MENU.forEach(function (item) { deliver(item, false); }); // 一次性全部上桌
+      log('3.5s 全部资源才到齐——招牌菜被配菜堵在了路上，LCP 严重超标', 'is-end');
+    });
+  }
+
+  /* 模式 B：先送关键资源，非关键资源错峰陆续到 */
+  function runModeB() {
+    if (running) return;
+    begin('模式 B：先上招牌菜和米饭，配菜后厨慢慢做…', 'is-muted');
+    MENU.forEach(function (item) {
+      var cached = cacheBox.checked && item.cached; // 勾选缓存后，关键资源秒到
+      if (cached) {
+        simTimeout(0.05, function () { deliver(item, true); });
+      } else {
+        simTimeout(item.arrive, function () { deliver(item, false); });
+      }
+    });
+  }
+
+  /* 开始一轮：锁定按钮、清空现场、启动时钟 */
+  function begin(firstLog, cls) {
+    running = true;
+    btnA.disabled = true;
+    btnB.disabled = true;
+    consoleEl.innerHTML = '';
+    tableEl.innerHTML = '<span style="font-size:12px;color:#9aa3b8">餐桌（首屏视口）——空空如也</span>';
+    tableEl.classList.remove('is-firstpaint');
+    verdictEl.textContent = '营业中…';
+    verdictEl.className = 'load-badge';
+    log(firstLog, cls);
+    startClock();
+  }
+
+  /* 重置：清掉所有待执行的定时器与视觉状态 */
+  function reset() {
+    pendingTimers.forEach(function (h) { clearTimeout(h); });
+    pendingTimers = [];
+    clearInterval(timer);
+    running = false;
+    simTime = 0;
+    btnA.disabled = false;
+    btnB.disabled = false;
+    roadEl.innerHTML = '';
+    clockVal.textContent = '0.0s';
+    verdictEl.textContent = '等待营业';
+    verdictEl.className = 'load-badge';
+    tableEl.innerHTML = '<span style="font-size:12px;color:#9aa3b8">餐桌（首屏视口）——空空如也</span>';
+    tableEl.classList.remove('is-firstpaint');
+    consoleEl.innerHTML = '';
+    log('已重置。选择一种营业策略…', 'is-muted');
+  }
+
+  btnA.addEventListener('click', runModeA);
+  btnB.addEventListener('click', runModeB);
+  resetBtn.addEventListener('click', reset);
+})();
+</script>
+</body>
+</html>

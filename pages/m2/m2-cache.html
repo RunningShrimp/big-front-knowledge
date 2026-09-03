@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>浏览器缓存策略 · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ===== 本页动画专用样式：冰箱（本地缓存）与超市（服务器）的缓存判定演示 ===== */
+.ca-scene { display: flex; gap: 12px; flex-wrap: wrap; margin: 12px 0; }
+.ca-place {
+  flex: 1 1 220px; padding: 10px 12px; border-radius: 10px;
+  border: 2px solid #d5dbe7; background: #f7f9fc; min-width: 200px;
+  transition: border-color .25s, box-shadow .25s;
+}
+.ca-place.is-active { border-color: #4C6FFF; box-shadow: 0 0 0 3px #eef2ff; }
+.ca-place-name { font-weight: 700; font-size: 13px; color: #41506b; margin-bottom: 6px; }
+.ca-item {
+  display: inline-block; font-size: 13px; padding: 6px 10px; border-radius: 8px;
+  border: 1px dashed #b9c3d6; background: #fff; color: #41506b;
+  transition: background .25s, border-color .25s, color .25s;
+}
+.ca-item.is-fresh { border: 1px solid #35a06b; background: #eafaf1; color: #1d6f47; }
+.ca-item.is-stale { border: 1px solid #d9a13c; background: #fdf6e3; color: #8a6414; }
+.ca-item.is-new { border: 1px solid #4C6FFF; background: #eef2ff; color: #2c47c7; }
+.ca-tags { margin-top: 6px; font-size: 12px; color: #6a7690; line-height: 1.7; }
+.ca-phone { font-size: 12px; color: #6a7690; margin-top: 6px; min-height: 18px; }
+</style>
+</head>
+<body data-page="m2-cache">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">知识点：浏览器缓存策略（建议学习时长约 25 分钟）——强缓存、协商缓存与 304 的完整判定流程。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>本页前置依赖：<a href="./m2-http.html">HTTP/1.1、HTTP/2 与 HTTP/3</a>——先弄清「请求行 / 响应头 / 状态码」长什么样，再看浏览器如何拿响应头决定「这次要不要重新下载」。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：分小标题推进 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、为什么需要缓存</h3>
+    <p>打开一个网页，浏览器要下载几十个文件：HTML、CSS、JS、图片……如果每次访问都把所有文件从远端服务器重新拉一遍，用户要等、服务器要扛、运营商流量也白烧。
+      于是浏览器与服务器约定了一套「缓存策略」：把某些文件<strong>存一份在本地</strong>，下次需要时先看本地这份还能不能用，能用就一分流量都不花。
+      缓存判定的主角全在<strong>响应头</strong>里，核心就两层：<strong>强缓存</strong>与<strong>协商缓存</strong>。</p>
+
+    <h3>二、强缓存：保质期内，自己说了算</h3>
+    <p>服务器首次返回资源时，可以附带「保质期」声明。浏览器把资源连同保质期一起存下来，保质期内再次需要它时<strong>直接用本地副本，连请求都不发</strong>——这就是强缓存（控制台里显示为 memory cache / disk cache）。
+      声明保质期有两种头：</p>
+    <p><code>Expires</code>：写一个<strong>绝对时间</strong>（如某个具体日期），「到这天为止都有效」。缺点是它依赖用户电脑的时钟——本机时间被改错，判断就全乱了。
+      <code>Cache-Control</code>：写<strong>相对时间</strong>与策略指令，如 <code>max-age=600</code>（自响应时刻起 600 秒内有效），不依赖本地时钟是否准确，因此<strong>优先级高于 Expires</strong>（两者同时出现时，Cache-Control 说了算）。
+      常用指令还有：<code>no-cache</code>（可以存，但每次使用前必须先问服务器验证）、<code>no-store</code>（彻底不存）、<code>private</code>（只允许浏览器存，代理等中间节点不能存）、<code>public</code>（沿途节点都可以存）。</p>
+
+    <h3>三、协商缓存：保质期过了，问一问再决定</h3>
+    <p>保质期一过，本地副本不能直接用了，但直接扔掉重新下载也可能浪费——万一服务器上根本没变呢？于是浏览器发起一次「协商」请求，<strong>带上本地副本的「身份证」</strong>让服务器比对。身份证有两套：</p>
+    <p><code>Last-Modified</code> / <code>If-Modified-Since</code>：服务器上次告诉浏览器「这文件最后修改于某时刻」，浏览器下次带着这个时间问「从那之后改过吗？」。
+      <code>ETag</code> / <code>If-None-Match</code>：服务器给内容算一个<strong>唯一指纹</strong>（如内容哈希），浏览器下次带着指纹问「指纹还是这个吗？」。
+      两套同时存在时，<strong>ETag 优先</strong>——因为修改时间只能精确到秒（1 秒内改多次它看不出）、文件内容没变但时间变了它也会误判，而指纹直接对内容负责，更准。</p>
+
+    <h3>四、304：没变就别重传</h3>
+    <p>服务器比对后发现内容没变，就返回 <code>304 Not Modified</code>——这是一个<strong>只有头部、没有正文</strong>的应答，意思是「我确认没变，你继续用本地那份吧」。
+      一张几 MB 的图片，304 只花几百字节的头部开销，省下的是整个正文；如果变了，服务器正常返回 <code>200 OK</code> 加上完整新内容（以及新的指纹和保质期），浏览器用新内容替换旧缓存。</p>
+
+    <h3>五、完整判定流程与实战策略</h3>
+    <p>把两层串起来就是面试必背的判定链：<strong>发起请求 → 查本地有无缓存副本 → 无：直接向服务器要（200）→ 有：先看强缓存是否命中（Cache-Control/Expires 仍在有效期）→ 命中：直接用本地，不发请求 → 未命中：发起协商缓存请求（带 If-None-Match / If-Modified-Since）→ 服务器比对 → 没变回 304（继续用本地），变了回 200 + 新内容（更新缓存）</strong>。</p>
+    <p>实战中的经典搭配是「<strong>HTML 不缓存 + 静态资源长缓存加指纹</strong>」：HTML 是入口，必须每次协商验证（如 <code>Cache-Control: no-cache</code>），保证用户总能拿到最新的引用关系；
+      而打包产物 JS/CSS 的文件名里带上内容指纹（如 <code>app.a3f9c2.js</code>），内容一变指纹就变、URL 就变，于是可以放心设置超长强缓存（如 <code>max-age=31536000</code>）——既快又不担心更新丢失。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 小美家的冰箱与楼下生鲜超市</div>
+      <p>小美家有台冰箱（浏览器缓存），楼下有家生鲜超市（服务器）。周日她去超市囤了一盒鲜奶，小票上印着「保存期 3 天」（<code>Cache-Control: max-age</code>）。
+        周一想喝：她先开冰箱——奶还在保质期内，直接喝，超市的门都没进（命中强缓存，浏览器根本不发请求）。
+        周四想喝：保质期过了。她没有直接扔，而是打电话问超市：「我冰箱里这盒是 A 批次的，换货了吗？」（携带 <code>If-None-Match: A</code> 发起协商缓存）。
+        店员看一眼货架：「没换。」小美说声「行」就挂了电话——牛奶不用重新送一趟（<code>304 Not Modified</code>，响应没有正文），她继续喝冰箱里那盒。
+        如果店员说「换到 B 批次了」，超市才把新牛奶送上门（<code>200 OK</code> 带完整新内容和新批次号），小美把旧奶下架、新奶放进冰箱（更新缓存）。
+        早期超市流行在小票直接印「最佳日期：某月某日」（<code>Expires</code> 绝对时间），可小美家挂钟不准（用户电脑时间可能被改错），经常闹出「明明没过期却当作过期」的乌龙——所以后来都改用「从囤货起算 N 天」的相对记法（<code>Cache-Control: max-age</code>），并且以它为准。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：冰箱（本地缓存）与超市（服务器）的判定流程，可单步执行 -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>亲手走一遍「先查冰箱、再问超市」的完整判定链：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">小美家冰箱里有一盒鲜奶（本地缓存副本），楼下超市是服务器。每次「想喝牛奶」= 发起一次资源请求。
+        点「单步执行」逐阶段观察；用「快进一天」让保质期过期，用「超市换货」制造服务端内容变化：</p>
+      <div class="ca-scene">
+        <div class="ca-place" id="ca-fridge">
+          <div class="ca-place-name">小美家的冰箱（浏览器本地缓存）</div>
+          <span class="ca-item" id="ca-milk">鲜奶</span>
+          <div class="ca-tags" id="ca-fridge-tags"></div>
+        </div>
+        <div class="ca-place" id="ca-store">
+          <div class="ca-place-name">楼下生鲜超市（服务器）</div>
+          <div class="ca-tags" id="ca-store-tags"></div>
+          <div class="ca-phone" id="ca-phone"></div>
+        </div>
+      </div>
+      <div class="anim-console" id="ca-console"></div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="ca-step">单步执行</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="ca-day">快进一天</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="ca-swap">超市换货</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="ca-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（全部为课程数据中的真实 path） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="./m2-http.html">HTTP/1.1、HTTP/2 与 HTTP/3</a>——缓存判定读的全是响应头，先懂报文结构再看策略。</p>
+    <p><strong>向后延伸</strong>：缓存是首屏性能的第一杠杆，配合关键渲染路径一起优化，见<a href="../m4/m4-load.html">首屏与资源加载优化</a>；
+      Cookie 作为「另一种本地存储」的容量、发送行为与缓存头思想一脉相承，见<a href="./m2-storage.html">浏览器存储：Cookie、Web Storage 与 IndexedDB</a>。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="../m4/m4-cwv.html">Core Web Vitals 性能指标</a> —— 强缓存命中率直接影响 LCP：主内容能不能秒出，很大程度看资源是否免下载</li>
+      <li><a href="../m6/m6-deploy.html">部署基础：Nginx 与 Docker</a> —— 缓存头最终由服务端（如 Nginx）配置下发，部署时才能真正落地「HTML 不缓存 + 指纹资源长缓存」</li>
+      <li><a href="./m2-https.html">HTTPS 与 TLS 握手</a> —— 强缓存命中时连请求都不发，TLS 建连开销也随之省掉；缓存与安全传输是配合关系</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（mode:'main'，判分写入进度仓库） -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后会把最佳成绩写入进度仓库，并推进复习计划：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：浏览器缓存就像家里的冰箱——保质期内（强缓存）直接吃冰箱里的，不用去超市；过期了先打电话问超市「换货没」（协商缓存），没换（304）就继续吃冰箱里的，换了（200）才让超市送新的上门。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前默写一遍「查缓存 → 强缓存 → 协商缓存 → 304/200」判定链；1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：经典问法，答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：说说强缓存与协商缓存的完整判定流程？Expires 和 Cache-Control 谁优先？</summary>
+      <ul>
+        <li>先查本地有无缓存副本：没有 → 直接请求服务器，返回 200 与新内容。</li>
+        <li>有副本 → 先判强缓存：Cache-Control 的 max-age 未过期（或 Expires 未到期）→ 命中，直接用本地副本，请求不发出（对应 memory/disk cache）。</li>
+        <li>强缓存失效 → 发起协商请求，携带 If-None-Match（ETag）与 If-Modified-Since（Last-Modified）→ 服务器比对。</li>
+        <li>未变：返回 304 Not Modified（无正文），浏览器继续用本地副本并刷新保质期；已变：返回 200 + 新内容 + 新的 ETag/保质期，更新缓存。</li>
+        <li>优先级：Cache-Control &gt; Expires（相对时间不依赖本地时钟）；ETag &gt; Last-Modified（指纹对内容负责，修改时间只有秒级精度且有「内容没变时间变了」的误判）。</li>
+        <li>加分项：提到 no-cache（可存但需协商验证）与 no-store（彻底不存）的区别，说明对指令语义有准确理解。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：实际项目里你会怎么设计缓存策略？为什么 HTML 和 JS/CSS 要区别对待？</summary>
+      <ul>
+        <li>HTML 作为入口不设长强缓存：用 no-cache（每次协商验证），保证用户拿到的是最新的资源引用关系，避免「更新后用户还是旧页面」。</li>
+        <li>JS/CSS/图片等静态资源：构建时把内容指纹写进文件名（如 app.a3f9c2.js），内容一变文件名即变、URL 即变。</li>
+        <li>因为 URL 变了就必然绕开旧缓存，这类资源可以放心设超长强缓存（如 max-age 一年），命中率极高、加载飞快。</li>
+        <li>收益：入口保证「新」，静态资源保证「快」；两者配合才能既不丢更新又不浪费流量。</li>
+        <li>加分项：提到服务端（Nginx）下发缓存头、HTML 与静态资源分开路由配置；或提到 CDN 缓存与浏览器缓存的分层。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm2-cache'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'）：题目 id 以知识点 id 开头 */
+  var WARMUP = [{
+    id: 'm2-cache-warmup-1',
+    type: 'single',
+    stem: '预热：某资源响应头带 Cache-Control: max-age=600，10 分钟内浏览器再次需要它，会怎么做？',
+    options: [
+      '重新向服务器请求完整内容',
+      '直接使用本地缓存副本，请求根本不会发出',
+      '先向服务器发一次询问再决定',
+      '删除本地副本后重新下载'
+    ],
+    answer: [1],
+    explain: 'max-age 定义的就是强缓存有效期：有效期内浏览器直接使用本地副本（控制台显示 memory/disk cache），与服务器零通信。「先问一次再决定」那是协商缓存，只在强缓存失效后才发生。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm2-cache-q1',
+      type: 'single',
+      stem: '一个带 ETag 的资源强缓存刚过期，浏览器接下来最可能做什么？',
+      options: [
+        '直接删除本地副本，重新下载完整资源',
+        '携带 If-None-Match 头发起请求，若服务器回 304 就继续用本地副本',
+        '永远不再请求该资源',
+        '等用户手动刷新页面才处理'
+      ],
+      answer: [1],
+      explain: '强缓存过期 ≠ 本地副本作废：浏览器会转入协商缓存，带上 If-None-Match 让服务器比对指纹。内容没变时服务器只回 304（无正文），省下整份正文的流量；只有真的变了才回 200 与新内容。直接删掉重下会白白浪费一次可能的「免传输」。'
+    },
+    {
+      id: 'm2-cache-q2',
+      type: 'multi',
+      stem: '关于缓存头与状态码，下列说法正确的有哪些？（多选，全部选对才得分）',
+      options: [
+        'Expires 与 Cache-Control 同时出现时，Cache-Control 优先',
+        'ETag 与 Last-Modified 同时存在时，协商缓存优先用 ETag/If-None-Match 验证',
+        'no-cache 的意思是「禁止浏览器保存该资源的任何副本」',
+        '304 Not Modified 的响应没有资源正文，浏览器继续使用本地缓存副本'
+      ],
+      answer: [0, 1, 3],
+      explain: 'C 项混淆了一对指令：no-cache 是「可以保存，但每次使用前必须先与服务器协商验证」；「彻底不保存」的是 no-store。A 对：相对时间（max-age）不依赖用户本机时钟，优先级高于绝对时间的 Expires。B 对：ETag 指纹直接对内容负责，能避免 Last-Modified 秒级精度不足与「内容没变时间变了」的误判，故优先。D 对：304 只回头部确认「没变」，正文由本地副本提供，这正是它省流量的原因。'
+    },
+    {
+      id: 'm2-cache-q3',
+      type: 'code',
+      stem: '实现一个带过期时间的迷你缓存 createMiniCache(maxAge, nowFn)：set(key, value) 写入并在 maxAge 毫秒后过期；get(key) 取到未过期的值，已过期或不存在时返回 null。nowFn 是可选的「当前时间函数」（默认 Date.now），便于测试时拨动时间。',
+      stub: 'function createMiniCache(maxAge, nowFn) {\n  // 提示：\n  // 1. nowFn 兜底：nowFn || function () { return Date.now(); }\n  // 2. 用一个对象 store 存 { key -> { value, expireAt } }\n  // 3. set 时记录过期时刻 expireAt = now() + maxAge\n  // 4. get 时先判存在，再判 now() 是否已到过期时刻\n}\n',
+      reference: 'function createMiniCache(maxAge, nowFn) {\n  var now = nowFn || function () { return Date.now(); };\n  var store = {}; // key -> { value: 值, expireAt: 过期时刻 }\n\n  return {\n    set: function (key, value) {\n      store[key] = { value: value, expireAt: now() + maxAge };\n    },\n    get: function (key) {\n      var item = store[key];\n      if (!item) return null;               // 不存在\n      if (now() >= item.expireAt) {         // 已到过期时刻：清除并返回 null\n        delete store[key];\n        return null;\n      }\n      return item.value;\n    }\n  };\n}',
+      asserts: [
+        "var __c = createMiniCache(100); __c.set('a', 1); __c.get('a') === 1",
+        "createMiniCache(100).get('missing') === null",
+        "var __t = 0; var __c3 = createMiniCache(100, function () { return __t; }); __c3.set('x', 9); __t = 99; var __ok = __c3.get('x') === 9; __t = 100; __ok && __c3.get('x') === null",
+        "var __c4 = createMiniCache(50, function () { return 1000; }); __c4.set('k', 'v1'); __c4.set('k', 'v2'); __c4.get('k') === 'v2'"
+      ],
+      explain: '这道题就是「强缓存判定」的微缩模型：set 相当于服务器下发 max-age 时浏览器记下过期时刻；get 的两步判断对应判定链——先查「有没有副本」（不存在返回 null），再看「过没过期」（到点即失效，等价于 max-age 期满后必须重新协商）。第三条断言把时间作为参数注入：第 99 毫秒仍可读、第 100 毫秒（now() === expireAt）即失效，说明过期是「大于等于过期时刻」的边界判断；第四条断言验证同一 key 重复 set 时新值与新的过期时刻会覆盖旧值。真实浏览器还会把过期副本留给协商缓存使用（而不是立刻删除），这是本实现与生产实现的差异点，可在面试中主动提出。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：冰箱与超市的缓存判定流程（纯 DOM 手写，无动画库） */
+(function () {
+  'use strict';
+  var consoleEl = document.getElementById('ca-console');
+  var fridgeEl = document.getElementById('ca-fridge');
+  var milkEl = document.getElementById('ca-milk');
+  var fridgeTagsEl = document.getElementById('ca-fridge-tags');
+  var storeEl = document.getElementById('ca-store');
+  var storeTagsEl = document.getElementById('ca-store-tags');
+  var phoneEl = document.getElementById('ca-phone');
+  var stepBtn = document.getElementById('ca-step');
+  var dayBtn = document.getElementById('ca-day');
+  var swapBtn = document.getElementById('ca-swap');
+  var resetBtn = document.getElementById('ca-reset');
+
+  var state = null; // 演示状态：day 天数 / milk 冰箱里的牛奶 / serverEtag 超市货架批次 / phase 当前阶段
+
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* 渲染冰箱与超市的当前状态（新鮮 / 过期 / 刚换新 用颜色区分） */
+  function render() {
+    milkEl.textContent = '鲜奶（批次 ' + state.milk.etag + '）';
+    milkEl.className = 'ca-item';
+    if (state.milk.justSwapped) {
+      milkEl.classList.add('is-new');
+    } else if (state.day < state.milk.goodUntil) {
+      milkEl.classList.add('is-fresh');
+    } else {
+      milkEl.classList.add('is-stale');
+    }
+    fridgeTagsEl.textContent =
+      '保质期至第 ' + state.milk.goodUntil + ' 天 · 今天第 ' + state.day + ' 天' +
+      (state.day < state.milk.goodUntil ? '（强缓存有效）' : '（强缓存已过期）');
+    storeTagsEl.textContent = '货架当前批次：' + state.serverEtag +
+      (state.serverEtag === state.milk.etag ? '（与冰箱里一致）' : '（冰箱里的是旧批次）');
+  }
+
+  function reset() {
+    state = {
+      day: 1,                                        // 今天是第几天
+      milk: { etag: 'A1', goodUntil: 3, justSwapped: false }, // 冰箱里的鲜奶：批次号 + 保质期
+      serverEtag: 'A1',                              // 超市货架当前批次（模拟服务端内容版本）
+      phase: 'want'                                  // 判定阶段：want → check → ask → compare → done
+    };
+    stepBtn.disabled = false;
+    phoneEl.textContent = '';
+    consoleEl.innerHTML = '';
+    log('初始：第 1 天，冰箱里有一盒批次 A1 的鲜奶，保质期 3 天（相当于 max-age=3 天）。点「单步执行」开始第一次请求…', 'is-muted');
+    render();
+  }
+
+  /* 单步执行：一次只推进判定链的一个阶段，便于观察「强缓存 → 协商缓存」的切换 */
+  function step() {
+    phoneEl.textContent = '';
+    if (state.phase === 'want') {
+      fridgeEl.classList.add('is-active');
+      storeEl.classList.remove('is-active');
+      log('第 ' + state.day + ' 天：想喝牛奶（发起资源请求）→ 判定第一步：先查自家冰箱（强缓存）');
+      state.phase = 'check';
+    } else if (state.phase === 'check') {
+      if (state.day < state.milk.goodUntil) {
+        storeEl.classList.remove('is-active');
+        log('保质期到第 ' + state.milk.goodUntil + ' 天，今天第 ' + state.day + ' 天 → 强缓存命中：直接喝冰箱里的，请求根本没出门（memory/disk cache）', 'is-ok');
+        state.phase = 'done';
+      } else {
+        log('保质期已过 → 强缓存失效，但先别扔：转入协商缓存，得先问问超市', 'is-end');
+        state.phase = 'ask';
+      }
+    } else if (state.phase === 'ask') {
+      fridgeEl.classList.remove('is-active');
+      storeEl.classList.add('is-active');
+      phoneEl.textContent = '电话中：「我的批次是 ' + state.milk.etag + '，换货了吗？」（请求头 If-None-Match: ' + state.milk.etag + '）';
+      log('协商请求发出：带上冰箱里那盒的批次号（If-None-Match: ' + state.milk.etag + '）问超市换货没');
+      state.phase = 'compare';
+    } else if (state.phase === 'compare') {
+      if (state.serverEtag === state.milk.etag) {
+        phoneEl.textContent = '超市：「批次没变。」（304 Not Modified，不含牛奶正文）';
+        log('超市比对货架：批次一致 → 回 304 Not Modified，没有正文、几乎不耗流量 → 继续喝冰箱那盒', 'is-ok');
+      } else {
+        phoneEl.textContent = '超市：「换到批次 ' + state.serverEtag + ' 了。」（200 OK + 完整新内容）';
+        log('超市发现批次已换成 ' + state.serverEtag + ' → 回 200 OK 并送来新牛奶 → 旧奶下架，新奶进冰箱（更新缓存与新指纹）', 'is-end');
+        state.milk = { etag: state.serverEtag, goodUntil: state.day + 3, justSwapped: true };
+      }
+      state.phase = 'done';
+    } else { // done：本轮结束，提示可以制造变化再玩一轮
+      state.milk.justSwapped = false;
+      log('—— 本轮结束。试试「快进一天」让强缓存过期，或「超市换货」制造服务端变化，再点「单步执行」开始新一轮 ——', 'is-muted');
+      state.phase = 'want';
+    }
+    render();
+  }
+
+  /* 快进一天：让时间流逝，观察「保质期内命中强缓存」到「过期转协商」的切换 */
+  function passDay() {
+    state.day += 1;
+    log('—— 快进：今天是第 ' + state.day + ' 天 ——', 'is-muted');
+    render();
+  }
+
+  /* 超市换货：模拟服务端内容更新（ETag 变化），用户端毫不知情 */
+  function swapGoods() {
+    state.serverEtag = (state.serverEtag === 'A1') ? 'B2' : 'A1';
+    log('（后台）超市货架悄悄换成了批次 ' + state.serverEtag + '，小美还蒙在鼓里——协商时才会被发现', 'is-muted');
+    render();
+  }
+
+  stepBtn.addEventListener('click', step);
+  dayBtn.addEventListener('click', passDay);
+  swapBtn.addEventListener('click', swapGoods);
+  resetBtn.addEventListener('click', reset);
+  reset();
+})();
+</script>
+</body>
+</html>

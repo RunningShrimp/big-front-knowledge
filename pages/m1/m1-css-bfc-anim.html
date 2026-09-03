@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>CSS 进阶：BFC、层叠上下文与动画 · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ===== 本页专属：BFC 透明罩实验台 + 逐帧翻页对比（纯手写 CSS，无外部资源） ===== */
+/* 场景一：父容器塌陷 —— 只有浮动子元素时，常规流内没有内容撑起高度 */
+.bfc-parent { border: 2px dashed var(--fg-c-bad); margin: 8px 0; transition: border-color .3s; }
+.bfc-parent.is-bfc { display: flow-root; border-color: var(--fg-c-ok); } /* 罩上 BFC：包裹住浮动 */
+.bfc-float {
+  float: left; width: 96px; height: 64px; margin: 8px; border-radius: 6px;
+  background: var(--fg-c-primary); color: #fff; font-size: 12px;
+  display: flex; align-items: center; justify-content: center;
+}
+.bfc-float.f2 { background: #0e9f8a; }
+/* 场景二：margin 合并 —— 上下两盒 margin-bottom:30 与 margin-top:20 相邻 */
+.bfc-box { padding: 10px 14px; border-radius: 6px; background: #dbe5ff; color: var(--fg-c-primary-deep); font-size: 13px; }
+.bfc-top { margin-bottom: 30px; }
+.bfc-bottom { margin-top: 20px; }
+.bfc-isolator { display: flow-root; } /* 透明罩：罩内 margin 不再与罩外合并 */
+/* 逐帧翻页对比：transition 连续插值 vs animation steps() 跳帧 */
+.sa-track { background: var(--fg-c-card); border: 1px solid var(--fg-c-line); border-radius: 8px; padding: 10px; margin: 10px 0; }
+.sa-card {
+  width: 128px; height: 60px; border-radius: 8px; background: var(--fg-c-primary); color: #fff;
+  font-size: 12px; display: flex; align-items: center; justify-content: center; text-align: center;
+}
+#sa-card-t { transition: transform 1s linear; }        /* 连续插值：平滑滑动 */
+#sa-card-t.is-run { transform: translateX(200px); }
+#sa-card-a.is-run { animation: sa-flip 1s steps(5, end) forwards; } /* steps(5)：翻书式跳 5 帧 */
+@keyframes sa-flip {
+  from { transform: translateX(0); }
+  to { transform: translateX(200px); }
+}
+.bfc-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+</style>
+</head>
+<body data-page="m1-css-bfc-anim">
+
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">盒模型与布局之后，还要回答三个经典难题：为什么父元素「抱不住」浮动的孩子？为什么 z-index 设了 9999 还是被盖住？为什么有的动画丝滑、有的动画卡顿？</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p><strong>前置知识</strong>：建议先学完 <a href="./m1-css-box.html">CSS 盒模型与 Flex·Grid 布局</a>——BFC 讨论的正是「盒子如何参与布局」，层叠与动画也都建立在盒子之上。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：讲解 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>从一个怪现象说起：父元素抱不住浮动的孩子</h3>
+    <p>子元素设置 <code>float: left</code> 后会「脱离常规文档流」——父元素计算高度时<strong>不再把它们算进去</strong>。于是容器里看起来明明有内容，高度却是 0，边框塌成一条线，下方的兄弟内容还会窜上来和浮动元素重叠。要解释并修复它，就得请出 BFC。</p>
+
+    <h3>BFC：给盒子罩一层「透明罩」</h3>
+    <p>BFC（Block Formatting Context，块级格式化上下文）是一块<strong>独立的渲染区域</strong>：罩子内部的布局无论多乱，都不会影响外部，外部的规则也管不进来。常见的触发方式：</p>
+    <ul>
+      <li>根元素 <code>&lt;html&gt;</code> 天生就是一个 BFC；</li>
+      <li>浮动元素（float 非 none）；绝对/固定定位（position: absolute / fixed）；</li>
+      <li>overflow 为 hidden、auto、scroll（非 visible）；</li>
+      <li>display 为 flow-root（语义就是「创建 BFC」，推荐、无副作用）、inline-block、flex、grid、table-cell 等。</li>
+    </ul>
+    <p>三大实战应用：① <strong>清除浮动</strong>——给塌陷的父元素触发 BFC（如 display:flow-root），罩子会包裹住浮动的孩子，高度恢复正常；② <strong>防止 margin 合并</strong>——相邻块的上下 margin 会合并成较大者，把其中一个包进 BFC 容器，两层 margin 各自生效、变成相加；③ <strong>自适应两栏布局</strong>——侧栏浮动后，让内容列触发 BFC，它就不会与浮动元素重叠，自动收窄成旁边的自适应栏。</p>
+
+    <h3>层叠上下文：先比「部门」，再比「职级」</h3>
+    <p>元素谁盖住谁，不是全局比大小，而是<strong>分层比较</strong>。某些元素会创建「层叠上下文」：根元素、定位元素且 z-index 非 auto、opacity &lt; 1、transform、filter 等。规则是：z-index 只在同一层叠上下文内部排名；整个上下文作为一个「整体」去和外部的其他上下文比。于是出现了经典翻车——子元素 z-index:9999，但它的父元素因为 transform 创建了上下文且层级较低，这个「9999」只在父部门内部算数，出了部门门就归零。</p>
+
+    <h3>动画：transition 与 animation 的分工</h3>
+    <p><code>transition</code> 是「两个状态之间的补间」：只有起始和结束两组样式，需要触发（如 :hover、类名变化）才会播放，适合交互反馈。<code>animation</code> 配合 <code>@keyframes</code> 可以定义任意多帧，能自动播放、循环、往复、暂停，适合主动演绎；加 <code>steps(n)</code> 还能关掉平滑插值、一帧一帧地跳——像翻页小人书。</p>
+    <h3>为什么动画推荐 transform 和 opacity</h3>
+    <p>改 width、top 这类几何属性会触发<strong>重排</strong>（重新计算所有受影响盒子的位置），改颜色会触发<strong>重绘</strong>；而 transform 和 opacity 只发生在<strong>合成阶段</strong>——浏览器把元素当作一张现成的「贴片」直接移动、变透明，跳过重排与重绘，所以最流畅。这个结论在「重排、重绘与合成层」一页还会展开。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 独立厨房与部门层级</div>
+      <p>老式筒子楼里各家厨房共用一条走廊：张叔家一炒辣椒，整层楼跟着咳嗽，油烟还会飘进对门李婶家的汤锅（浮动窜出父容器、margin 互相合并）。后来每户改装了带排风罩的独立厨房——从这一刻起，各家的油烟只在自家罩子里打转（BFC 的隔离特性）：张叔家再怎么颠勺爆炒，李婶家的汤都是清的。给塌陷的父元素加 <code>display: flow-root</code>，就是给它装上这个「透明罩」。</p>
+      <p>层叠上下文则像公司晒员工牌：跨部门比工牌编号（z-index）之前，先看你属于哪个部门（上下文）。市场部（transform 创建的上下文）整体排在技术部后面，那么市场部里工牌编号 9999 的实习生，见了技术部编号 1 的前台也得让路——部门整体先行，内部编号只在部门内部有效。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：BFC 透明罩实验台（可切换场景 / 点击触发） + transition vs 逐帧翻页对比 -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p><strong>实验一 · BFC 透明罩实验台</strong>：两个经典翻车现场，点击按钮亲手「装上/拆掉」透明罩：</p>
+    <div class="anim-stage">
+      <div class="bfc-tabs">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="bfc-tab1">场景一 · 父元素高度塌陷</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="bfc-tab2">场景二 · margin 相邻合并</button>
+      </div>
+      <!-- 场景一：两个浮动子元素，父元素高度塌陷 -->
+      <div id="bfc-scene1">
+        <div class="bfc-parent" id="bfc-parent">
+          <div class="bfc-float">浮动块 A</div>
+          <div class="bfc-float f2">浮动块 B</div>
+        </div>
+        <p class="anim-caption" id="bfc-hinfo">父容器高度：4px（塌陷！虚线框里其实有两个浮动孩子，但都不算高度）</p>
+        <div class="anim-controls">
+          <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="bfc-btn">给父容器装透明罩（display: flow-root）</button>
+        </div>
+      </div>
+      <!-- 场景二：结构 A 直接相邻 → 合并为 30；结构 B 下盒被 BFC 包住 → 30 + 20 = 50 -->
+      <div id="bfc-scene2" hidden>
+        <div id="bfc-merge-a">
+          <div class="bfc-box bfc-top">上盒子 · margin-bottom: 30px</div>
+          <div class="bfc-box bfc-bottom">下盒子 · margin-top: 20px</div>
+        </div>
+        <div id="bfc-merge-b" hidden>
+          <div class="bfc-box bfc-top">上盒子 · margin-bottom: 30px</div>
+          <div class="bfc-isolator">
+            <div class="bfc-box bfc-bottom">下盒子（被透明罩包住）· margin-top: 20px</div>
+          </div>
+        </div>
+        <p class="anim-caption" id="bfc-gapinfo">当前实际间距：30px —— 30 和 20 相邻合并，取较大者 30</p>
+        <div class="anim-controls">
+          <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="bfc-iso-btn">给下盒子装透明罩</button>
+        </div>
+      </div>
+      <div class="anim-console" id="bfc-console">
+        <div class="anim-line is-muted">切换场景、点击按钮开始实验……</div>
+      </div>
+    </div>
+
+    <p><strong>实验二 · 平滑滑动 vs 逐帧翻页</strong>：同样从左到右移动 200px，左卡片用 transition 连续插值，右卡片用 animation + steps(5) 一帧一帧跳——注意两者都只用 transform，都不引起重排：</p>
+    <div class="anim-stage">
+      <div class="sa-track"><div class="sa-card" id="sa-card-t">transition：连续滑动</div></div>
+      <div class="sa-track"><div class="sa-card" id="sa-card-a" style="background:#0e9f8a">animation：steps(5) 逐帧翻页</div></div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="sa-play">播放</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="sa-reset">复位</button>
+      </div>
+      <p class="anim-caption" id="sa-note">点击「播放」观察差异：上者匀速滑过去；下者像翻页小人书，跳 5 次瞬移到位——这就是 steps() 关掉插值的效果。</p>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（真实课程路径） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="./m1-css-box.html">CSS 盒模型与 Flex·Grid 布局</a> —— BFC 研究的是盒子的布局行为，层叠与动画也都作用于盒子。</p>
+    <p><strong>向后延伸</strong>：BFC、重排、合成发生在渲染流水线的不同阶段；「transform 动画为什么快」的完整答案藏在合成层与重排重绘里；父容器高度塌陷造成的布局跳动，正是 CLS 指标抓的头号问题。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="../../pages/m2/m2-reflow.html">重排、重绘与合成层</a> —— transform/opacity「免重绘」的合成层特权，动画性能的底层答案</li>
+      <li><a href="../../pages/m2/m2-pipeline.html">浏览器渲染流水线</a> —— Layout / Paint / Composite 全景，看懂 BFC 作用在哪一步</li>
+      <li><a href="../../pages/m4/m4-cwv.html">Core Web Vitals 性能指标</a> —— 高度塌陷等布局突变如何被 CLS 量化扣分</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（含解析），mode:'main' -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后把最佳成绩写入进度仓库（见页面底部内联脚本）：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：BFC 是给盒子罩上「透明罩」，罩内布局再乱也不影响外面；层叠上下文决定「谁盖住谁」，要先比部门再比个人；做动画要用 transform 和 opacity，让浏览器直接「挪贴片」而不是重新排版。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前背出 4 类 BFC 触发条件 + 讲一遍 z-index 失效的故事；1 天、3 天、7 天后各回来重做例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：问法 + 答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：什么是 BFC？触发条件有哪些？工作里什么场景会用到？</summary>
+      <ul>
+        <li>定义：块级格式化上下文，一块独立的渲染区域，内部布局不影响外部。</li>
+        <li>触发：根元素；float 非 none；position:absolute/fixed；overflow 非 visible（hidden/auto/scroll）；display:flow-root/inline-block/flex/grid/table-cell 等。</li>
+        <li>应用：父元素 BFC 包裹浮动修复高度塌陷；隔离相邻 margin 合并；浮动旁的内容列触发 BFC 实现自适应两栏。</li>
+        <li>加分项：优先 display:flow-root——语义明确、无 overflow:hidden 裁剪溢出内容的副作用。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：为什么设置了 z-index 却不生效？说说层叠上下文的比较规则。</summary>
+      <ul>
+        <li>两个前提先自查：z-index 只对定位元素（非 static）或 flex/grid 子项生效；数值再大也要在同一比较体系里才有意义。</li>
+        <li>核心规则：z-index 只在同一个层叠上下文内排名；父元素若因 transform/opacity&lt;1/filter 等创建了上下文，子元素的 z-index 只在父上下文内部有效，整个上下文以父级的层级参与外部比较。</li>
+        <li>排查思路：向上找是谁创建了「层叠够不着」的祖先上下文，要么提升祖先层级，要么移除祖先的触发属性。</li>
+        <li>加分项：同一上下文内 z-index 相同时，DOM 中靠后者在上；opacity &lt; 1 也会创建上下文，动画半透明时层级突变的坑常来自这里。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm1-css-bfc-anim'; // 与 body[data-page] 保持一致
+
+  /* 预热题（mode:'warmup'）：题目 id 以知识点 id 开头 */
+  var WARMUP = [{
+    id: 'm1-css-bfc-anim-warmup-1',
+    type: 'single',
+    stem: '预热：子元素全部 float 之后父元素高度塌陷，其本质原因是？',
+    options: [
+      '父元素被浏览器自动删除了',
+      '浮动元素脱离常规文档流，父元素计算高度时不把它们算进去',
+      '父元素必须显式设置 overflow:hidden 才能有高度',
+      'float 会把子元素的 display 改成 none'
+    ],
+    answer: [1],
+    explain: 'float 让元素脱离常规文档流，父元素按常规流内容计算高度时「数不到」浮动孩子，于是高度塌成 0；给父元素触发 BFC 即可把浮动孩子重新包裹进来。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm1-css-bfc-anim-q1',
+      type: 'multi',
+      stem: '下列哪些做法会创建 BFC（多选）？',
+      options: [
+        '根元素 html 天生就是一个 BFC',
+        '元素设置 float: left',
+        '元素设置 overflow: hidden',
+        '元素设置 display: inline'
+      ],
+      answer: [0, 1, 2],
+      explain: 'A/B/C 都是经典触发条件，此外还有 position:absolute/fixed、display:flow-root/inline-block/flex/grid/table-cell 等。D 错：display:inline 是行内盒，根本不参与块级布局，不会创建 BFC。工程上推荐 display:flow-root——它的语义就是「创建一个 BFC」，且没有 overflow:hidden 误裁阴影弹窗之类的副作用。'
+    },
+    {
+      id: 'm1-css-bfc-anim-q2',
+      type: 'single',
+      stem: '弹窗 A 的子元素已 position:absolute 且 z-index:9999，却仍被弹窗 B（z-index:2）盖住。检查发现 A 的某个父级设有 transform: translateZ(0)。最可能的原因是？',
+      options: [
+        'z-index 数值不够大，改成 99999 就一定能盖住',
+        '父级的 transform 创建了层叠上下文，子元素的 z-index 只在该上下文内部排名；整个上下文以父级层级参与比较，低于 B 所以被盖住',
+        'z-index 对绝对定位元素无效',
+        '浏览器渲染出错，刷新页面即可解决'
+      ],
+      answer: [1],
+      explain: '层叠比较「先比部门再比职级」：transform 使父级成为层叠上下文，子元素的 9999 只在父部门内部算数；父部门整体层级（z-index:auto，按 0 处理）低于 B 的 2，于是子元素再大也翻不了身。解法是提升那个祖先上下文的层级，或移除 transform 等触发属性。'
+    },
+    {
+      id: 'm1-css-bfc-anim-q3',
+      type: 'code',
+      stem: '手写题：实现 realGap(m1, m2, isolated)，计算上下相邻两块的实际间距（均为正 margin）。m1 是上盒 margin-bottom，m2 是下盒 margin-top；isolated 表示两块之间是否隔了一层 BFC（透明罩）。未隔离：相邻 margin 合并，取较大者；已隔离：两层 margin 各自生效，相加。',
+      stub: 'function realGap(m1, m2, isolated) {\n  // 未隔离：margin 相邻合并 → 取较大者\n  // 已隔离：隔了 BFC 透明罩 → 两层 margin 相加\n}\n',
+      reference: 'function realGap(m1, m2, isolated) {\n  if (isolated) return m1 + m2; // BFC 隔离：各自生效，相加\n  return Math.max(m1, m2);      // 相邻合并：正 margin 取较大者\n}',
+      asserts: [
+        'realGap(30, 20, false) === 30',
+        'realGap(30, 20, true) === 50',
+        'realGap(0, 40, false) === 40',
+        'realGap(10, 10, true) === 20'
+      ],
+      explain: 'margin 合并的规则是：同一 BFC 内相邻块级盒的上下外边距会「合二为一」，正 margin 取较大者（30 与 20 相邻得 30，而不是 50）——这也是为什么第一、三条断言里间距「缩水」了。一旦中间隔了一层 BFC（比如把下盒包进 display:flow-root 的容器），下盒的 margin-top 就在罩子内部、不再与外层接触，两层间距各自生效变成 30 + 20 = 50。理解「合并」与「隔离」这一对概念，BFC 的第二的应用你就真正吃透了。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（会推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画一：BFC 透明罩实验台（场景切换 + 点击装/拆罩，纯 DOM 手写） */
+(function () {
+  'use strict';
+  var consoleEl = document.getElementById('bfc-console');
+  var scene1 = document.getElementById('bfc-scene1');
+  var scene2 = document.getElementById('bfc-scene2');
+  var tab1 = document.getElementById('bfc-tab1');
+  var tab2 = document.getElementById('bfc-tab2');
+  var parentEl = document.getElementById('bfc-parent');
+  var bfcBtn = document.getElementById('bfc-btn');
+  var hInfo = document.getElementById('bfc-hinfo');
+  var isoBtn = document.getElementById('bfc-iso-btn');
+  var mergeA = document.getElementById('bfc-merge-a');
+  var mergeB = document.getElementById('bfc-merge-b');
+  var gapInfo = document.getElementById('bfc-gapinfo');
+
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* 场景切换（互斥显示） */
+  function showScene(n) {
+    scene1.hidden = n !== 1;
+    scene2.hidden = n !== 2;
+    tab1.className = 'fg-btn ' + (n === 1 ? 'fg-btn--primary' : 'fg-btn--ghost') + ' fg-btn--sm';
+    tab2.className = 'fg-btn ' + (n === 2 ? 'fg-btn--primary' : 'fg-btn--ghost') + ' fg-btn--sm';
+    consoleEl.innerHTML = '';
+    log(n === 1 ? '场景一：两个 float 子元素，父容器没有设置高度……' : '场景二：上盒 margin-bottom:30 与下盒 margin-top:20 相邻……', 'is-muted');
+  }
+
+  /* 场景一：装/拆透明罩（display:flow-root 触发 BFC） */
+  bfcBtn.addEventListener('click', function () {
+    var on = parentEl.classList.toggle('is-bfc');
+    var h = parentEl.offsetHeight; // 直接读真实渲染高度，眼见为实
+    consoleEl.innerHTML = '';
+    if (on) {
+      log('已给父容器装上透明罩（display: flow-root → 触发 BFC）', 'is-ok');
+      log('BFC 会把浮动的孩子包裹进来：父容器高度 ' + h + 'px，塌陷修复', 'is-end');
+      bfcBtn.textContent = '拆掉透明罩（回到塌陷）';
+      bfcBtn.className = 'fg-btn fg-btn--ghost fg-btn--sm';
+    } else {
+      log('已拆掉透明罩：浮动子元素脱离常规流，父容器高度只有 ' + h + 'px（塌陷）', 'is-end');
+      log('下方兄弟内容还会窜上来与浮动元素重叠——这就是需要清浮动的原因', 'is-muted');
+      bfcBtn.textContent = '给父容器装透明罩（display: flow-root）';
+      bfcBtn.className = 'fg-btn fg-btn--primary fg-btn--sm';
+    }
+    hInfo.textContent = '父容器高度：' + h + 'px' + (h <= 6 ? '（塌陷！虚线框里其实有两个浮动孩子，但都不算高度）' : '（BFC 包住了浮动孩子，高度恢复）');
+  });
+
+  /* 场景二：给下盒装/拆透明罩（隔离 margin 合并） */
+  isoBtn.addEventListener('click', function () {
+    var on = mergeA.hidden; // 当前显示 B 结构则视为「已隔离」
+    mergeA.hidden = on;     // 切回结构 A（未隔离）
+    mergeB.hidden = !on;    // 切到结构 B（隔离）
+    consoleEl.innerHTML = '';
+    if (!on) { // 即将进入隔离态
+      log('已给下盒子装上透明罩（外面包了一层 display: flow-root）', 'is-ok');
+      log('下盒的 margin-top:20 被关进了罩子内部，不再与上盒的 30 合并', 'is-ok');
+      log('实际间距 = 30 + 20 = 50px（两层 margin 各自生效）', 'is-end');
+      gapInfo.textContent = '当前实际间距：50px —— 透明罩隔开了合并，两层 margin 相加';
+      isoBtn.textContent = '拆掉透明罩（恢复合并）';
+    } else {
+      log('已拆掉透明罩：两盒重新直接相邻', 'is-muted');
+      log('同一 BFC 内相邻块级盒的上下 margin 合并为较大者：max(30, 20) = 30px', 'is-end');
+      gapInfo.textContent = '当前实际间距：30px —— 30 和 20 相邻合并，取较大者 30';
+      isoBtn.textContent = '给下盒子装透明罩';
+    }
+  });
+
+  tab1.addEventListener('click', function () { showScene(1); });
+  tab2.addEventListener('click', function () { showScene(2); });
+  showScene(1);
+})();
+
+/* ③ 动画二：transition 连续滑动 vs animation steps(5) 逐帧翻页（点击播放/复位） */
+(function () {
+  'use strict';
+  var cardT = document.getElementById('sa-card-t');
+  var cardA = document.getElementById('sa-card-a');
+  var playBtn = document.getElementById('sa-play');
+  var resetBtn = document.getElementById('sa-reset');
+  var note = document.getElementById('sa-note');
+
+  /* 播放：同时给两张卡片加 is-run 类，观察两种动画机制的差异 */
+  playBtn.addEventListener('click', function () {
+    cardT.classList.add('is-run'); // 触发 transition：1 秒连续插值
+    cardA.classList.add('is-run'); // 触发 animation：steps(5) 跳 5 帧
+    note.textContent = '播放中：上者匀速滑过 200px；下者像翻页小人书，瞬移 5 次到位。两者都只用 transform → 只走合成，不触发重排。';
+  });
+  /* 复位：移除类，卡片回到起点，可反复播放对比 */
+  resetBtn.addEventListener('click', function () {
+    cardT.classList.remove('is-run');
+    cardA.classList.remove('is-run');
+    note.textContent = '已复位。再次点击「播放」可反复对比 transition（连续插值）与 steps()（逐帧跳变）的差异。';
+  });
+})();
+</script>
+</body>
+</html>

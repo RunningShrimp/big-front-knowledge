@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>CSS 盒模型与 Flex·Grid 布局 · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ===== 本页专属：快递箱拆解器 + Flex/Grid 对比舞台（纯手写 CSS，无外部资源） ===== */
+/* 四层嵌套的盒模型：margin（包裹间距）→ border（纸箱）→ padding（泡沫棉）→ content（商品） */
+.bx-wrap { text-align: center; margin: 12px 0; }
+.bx-margin { display: inline-block; background: #eef1f7; position: relative; padding: 12px; }
+.bx-border { background: #f6c79a; position: relative; border-style: solid; border-color: #e08c3a; }
+.bx-padding { background: #cdebd7; position: relative; }
+.bx-content {
+  width: 200px; height: 56px; background: #dbe5ff; color: var(--fg-c-primary-deep);
+  display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 13px;
+}
+/* 每层左上角的层名标签 */
+.bx-margin::before, .bx-border::before, .bx-padding::before {
+  position: absolute; left: 6px; top: 4px; font-size: 11px; font-family: var(--fg-mono);
+  color: var(--fg-c-ink-3);
+}
+.bx-margin::before { content: 'margin · 包裹间距'; }
+.bx-border::before { content: 'border · 纸箱'; }
+.bx-padding::before { content: 'padding · 泡沫棉'; }
+/* 滑块控件行 */
+.bx-ctrl { display: inline-flex; align-items: center; gap: 6px; margin: 4px 10px; font-size: 13px; }
+.bx-ctrl input[type="range"] { width: 120px; }
+.bx-ctrl-val { font-family: var(--fg-mono); min-width: 42px; display: inline-block; }
+/* Flex / Grid 对比舞台 */
+.fgd-row {
+  display: flex; gap: 8px; align-items: center; min-height: 120px; padding: 8px;
+  background: var(--fg-c-card); border: 1px solid var(--fg-c-line); border-radius: 8px; margin: 10px 0;
+}
+.fgd-row.is-grid { display: grid; grid-template-columns: repeat(3, 1fr); }
+.fgd-item {
+  flex: 1; height: 44px; border-radius: 6px; color: #fff; font-weight: 600; font-size: 13px;
+  display: flex; align-items: center; justify-content: center; background: var(--fg-c-primary);
+}
+.fgd-item:nth-child(2) { background: #0e9f8a; }
+.fgd-item:nth-child(3) { background: #b26205; }
+.fgd-item:nth-child(4) { background: #8a56c2; }
+.fgd-item:nth-child(5) { background: #cf3f56; }
+.fgd-item:nth-child(6) { background: #4a6fb5; }
+</style>
+</head>
+<body data-page="m1-css-box">
+
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">CSS 眼里万物皆「盒子」。本页拆开这只盒子看四层结构，再用 Flex 与 Grid 两种思路，把一堆盒子排成想要的版面。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p><strong>前置知识</strong>：建议先学完 <a href="./m1-html-semantic.html">HTML 语义化与页面结构</a>——你得先认识页面里的「结构」，再来谈给结构排版。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：讲解 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>四层结构：content、padding、border、margin</h3>
+    <p>每个元素都是四层同心结构，由内到外：<code>content</code> 是内容本身（文字、图片）；
+      <code>padding</code> 是内容与边框之间的内边距，属于元素自己，背景色默认会画到这一层；
+      <code>border</code> 是边框线，有粗细与样式；
+      <code>margin</code> 是元素与邻居之间的外边距，完全透明、不属于元素自身。一个元素「实际占据的水平空间」，就是这四层的横向总和。</p>
+
+    <h3>box-sizing：width 到底管到哪一层</h3>
+    <p>关键分歧在于：<code>width</code> 写的数字指的到底是哪一层？</p>
+    <ul>
+      <li><strong>标准盒模型（content-box，默认）</strong>：width 只指 content。padding 和 border 会「额外撑大」元素——写 width:200px 再加 20px padding，实际占位 240px+；</li>
+      <li><strong>IE 盒模型（border-box）</strong>：width 指到 border 为止（content + padding + border）。写 width:200px，无论 padding/border 怎么调，边框外沿永远 200px，content 自动被压缩。</li>
+    </ul>
+    <p>日常选型的约定俗成：全局设 <code>* { box-sizing: border-box; }</code>。因为「我写了多宽它就多宽」符合直觉，增删 padding 不会把布局挤乱——几乎所有现代 CSS 框架都这么干。</p>
+
+    <h3>Flex：排队上公交——一根轴上的伸缩分配</h3>
+    <p>给父容器设 <code>display: flex</code>，子元素就沿「主轴」排成一队，垂直于主轴的是「交叉轴」。<code>flex-direction</code> 决定主轴方向（row 横 / column 纵）。
+      空间分配看三兄弟：<code>flex-basis</code> 是上车前「想占的座位宽」，<code>flex-grow</code> 是「有剩余空间时按什么比例分」，<code>flex-shrink</code> 是「空间不够时按什么比例让」。
+      分配公式：剩余空间 = 容器宽 − Σbasis，每人分得 剩余空间 × 自己的 grow ÷ Σgrow。常用 <code>flex: 1</code> 即 grow:1 shrink:1 basis:0%——人人平分剩余空间。</p>
+
+    <h3>Grid：电影院对号入座——先画座位表再入座</h3>
+    <p>给父容器设 <code>display: grid</code>，用 <code>grid-template-columns</code> / <code>grid-template-rows</code> 先画出列与行的「座位表」，子元素按顺序自动入座。
+      单位 <code>fr</code> 表示「剩余空间的份数」：<code>1fr 2fr</code> 就是把空间按 1:2 切。经典栅格 <code>repeat(12, 1fr)</code> 一步画出 12 列栅格，配合 <code>gap</code> 控制间距。二维布局（行 + 列同时规划）选 Grid，一维排队能伸能缩选 Flex。</p>
+
+    <h3>面试常客：垂直水平居中</h3>
+    <p>至少备好三种写法：① 父 <code>display:flex</code> + <code>justify-content:center</code> + <code>align-items:center</code>；② 父 <code>display:grid</code> + <code>place-items:center</code>（最短）；③ 子绝对定位 + <code>top/left:50%</code> + <code>transform:translate(-50%,-50%)</code>（不依赖父尺寸，兼容老浏览器）。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 快递包裹、公交与电影院</div>
+      <p>盒模型像一只快递包裹：商品是 content，四周垫的泡沫棉是 padding（减震，属于包裹内部），纸箱板是 border（围出边界），包裹与包裹之间要求的摆放间距是 margin（不属于包裹，只是邻居间的距离）。快递单上写「箱内物品 200cm」指的是商品本身（content-box）；如果写「整箱外沿 200cm」，那泡沫棉再厚也得从 200 里抠（border-box）。</p>
+      <p>Flex 像排队上公交：一队人沿车门方向站好（主轴），车上空位多就按约定比例舒展开站（flex-grow），人太多就按比例挤一挤（flex-shrink）。Grid 像电影院对号入座：开场前座位表（行列模板）已经画好，观众按票根顺序坐下，谁也不用挤——二维空间各就各位。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：快递箱拆解器（拖动滑块）+ Flex/Grid 切换（点击），零外部库 -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p><strong>实验一 · 快递箱拆解器</strong>：一只写死 <code>width: 200px</code> 的包裹。拖动滑块增减泡沫棉（padding）、纸箱板（border）和包裹间距（margin），并切换 box-sizing，实时观察「实际占据的总宽」如何变化：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">拖动滑块，或点击切换盒模型，注意控制台里的宽度算式：</p>
+      <div class="bx-wrap">
+        <div class="bx-margin" id="bx-margin">
+          <div class="bx-border" id="bx-border">
+            <div class="bx-padding" id="bx-padding">
+              <div class="bx-content" id="bx-content">content 商品</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <label class="bx-ctrl">padding
+          <input type="range" id="bx-pad" min="0" max="40" value="12">
+          <span class="bx-ctrl-val" id="bx-pad-v">12px</span>
+        </label>
+        <label class="bx-ctrl">border
+          <input type="range" id="bx-bor" min="0" max="20" value="6">
+          <span class="bx-ctrl-val" id="bx-bor-v">6px</span>
+        </label>
+        <label class="bx-ctrl">margin
+          <input type="range" id="bx-mar" min="0" max="40" value="16">
+          <span class="bx-ctrl-val" id="bx-mar-v">16px</span>
+        </label>
+      </div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="bx-swap">切换为 border-box</button>
+      </div>
+      <div class="anim-console" id="bx-console">
+        <div class="anim-line is-muted">拖动滑块开始实验……</div>
+      </div>
+    </div>
+
+    <p><strong>实验二 · 排队 vs 对号入座</strong>：同一排六个色块，点击切换两种布局思路：</p>
+    <div class="anim-stage">
+      <div class="fgd-row" id="fgd-row">
+        <span class="fgd-item">1</span><span class="fgd-item">2</span><span class="fgd-item">3</span>
+        <span class="fgd-item">4</span><span class="fgd-item">5</span><span class="fgd-item">6</span>
+      </div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="fgd-flex">Flex：排队上公交</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="fgd-grid">Grid：影院对号入座</button>
+      </div>
+      <p class="anim-caption" id="fgd-note">Flex 模式：六个乘客挤在主轴一整行，flex:1 让他们平分车厢宽度——再挤也不换行。</p>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（真实课程路径） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="./m1-html-semantic.html">HTML 语义化与页面结构</a> —— 盒模型排版的对象，正是语义化标签搭出的结构。</p>
+    <p><strong>向后延伸</strong>：盒模型是浏览器「布局（Layout）」一步的计算依据，学渲染流水线与重排重绘时，你会知道改一次 padding 的真实代价；布局尺寸突变还是性能指标 CLS（累积布局偏移）的头号元凶。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="../../pages/m2/m2-pipeline.html">浏览器渲染流水线</a> —— DOM + 盒模型 → 布局 → 绘制，盒子是在哪一步被算出尺寸的</li>
+      <li><a href="../../pages/m2/m2-reflow.html">重排、重绘与合成层</a> —— 为什么改 margin 会触发重排、改 transform 却不会</li>
+      <li><a href="../../pages/m4/m4-cwv.html">Core Web Vitals 性能指标</a> —— CLS 专抓「页面乱跳」，根因常是没约束好的盒尺寸</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（含解析），mode:'main' -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后把最佳成绩写入进度仓库（见页面底部内联脚本）：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：网页里每个元素都是一只快递箱——商品（内容）、泡沫棉（内边距）、纸箱（边框）和包裹间距（外边距）；Flex 是让箱子排队伸缩，Grid 是让箱子按座位表入座。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前口述「border-box 下 width:200 + padding:20 + border:5 的内容区宽」并给出算式；1 天、3 天、7 天后各回来重做例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：问法 + 答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：谈谈 CSS 盒模型，标准盒模型与 IE 盒模型的区别？项目里怎么选？</summary>
+      <ul>
+        <li>四层结构：content → padding → border → margin；占据总宽 = width(所指层) + padding + border + margin 中未计入 width 的部分。</li>
+        <li>content-box：width 只指内容区，padding/border 向外撑大；border-box：width 管到 border 外沿，内容区 = width − padding − border。</li>
+        <li>选型：全局 <code>* { box-sizing: border-box }</code>，写多宽就多宽，增减 padding 不破坏布局；margin 永远不计入 width。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：垂直水平居中有哪几种写法？</summary>
+      <ul>
+        <li>Flex：父级 display:flex + justify-content:center + align-items:center，最通用。</li>
+        <li>Grid：父级 display:grid + place-items:center，声明最短。</li>
+        <li>绝对定位 + transform：子元素 top/left:50% + translate(-50%,-50%)，无需知道父子尺寸。</li>
+        <li>加分项：绝对定位 + margin:auto（四方向为 0）；定高定时也可用 line-height / text-align 这类文本方案。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm1-css-box'; // 与 body[data-page] 保持一致
+
+  /* 预热题（mode:'warmup'）：题目 id 以知识点 id 开头 */
+  var WARMUP = [{
+    id: 'm1-css-box-warmup-1',
+    type: 'single',
+    stem: '预热：标准盒模型（content-box）下，元素内容区宽 100px、左右 padding 各 10px、左右 border 各 2px，它实际占据的水平总宽度是？',
+    options: ['100px', '112px', '124px', '120px'],
+    answer: [2],
+    explain: 'content-box 下 width 只指内容区：100 + 2×10(padding) + 2×2(border) = 124px，padding 与 border 都向外撑大占位。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm1-css-box-q1',
+      type: 'single',
+      stem: '设 box-sizing: border-box，元素 width:200px、padding:20px、border:5px，其内容区宽度是？',
+      options: ['200px', '150px', '250px', '190px'],
+      answer: [1],
+      explain: 'border-box 下 width 管到 border 外沿：内容区 = 200 − 2×20(padding) − 2×5(border) = 150px。若换成 content-box，内容区才是 200px，而占据总宽会变成 200+40+10=250px——这正是两种模型的分水岭。'
+    },
+    {
+      id: 'm1-css-box-q2',
+      type: 'multi',
+      stem: '关于盒模型，下列说法正确的有（多选）？',
+      options: [
+        '默认情况下，元素背景会绘制覆盖到 padding 区域',
+        'margin 允许负值，padding 不允许负值',
+        '相邻兄弟块级元素的上下外边距会合并，正 margin 时取较大者',
+        'box-sizing: border-box 会让 margin 也计入 width'
+      ],
+      answer: [0, 1, 2],
+      explain: 'A 对：背景默认绘制范围为 border-box（覆盖 content+padding）；B 对：负 margin 是「贴更近」的合法手段，padding 属于内部填充不可为负；C 对：正 margin 相邻合并取较大者（30 与 20 相邻得 30）；D 错：无论哪种盒模型，margin 永远不计入 width——它压根不属于元素自身。'
+    },
+    {
+      id: 'm1-css-box-q3',
+      type: 'code',
+      stem: '手写题：实现 Flex 剩余空间分配器 distribute(containerWidth, bases, grows)。规则：剩余空间 = 容器宽 − Σbasis；Σgrow > 0 时，第 i 个元素最终宽 = basis + Math.round(剩余空间 × grow[i] ÷ Σgrow)；Σgrow = 0 时全部保持 basis。返回数组。',
+      stub: 'function distribute(containerWidth, bases, grows) {\n  // 1. 求剩余空间 = containerWidth - basis 之和\n  // 2. Σgrow > 0：每人分 剩余空间 × 自己 grow / Σgrow（用 Math.round 取整）\n  // 3. Σgrow = 0：不分配，保持 basis\n  // 返回最终宽度数组\n}\n',
+      reference: 'function distribute(containerWidth, bases, grows) {\n  var sumB = 0, sumG = 0, i;\n  for (i = 0; i < bases.length; i++) sumB += bases[i];\n  for (i = 0; i < grows.length; i++) sumG += grows[i];\n  var free = containerWidth - sumB; // 剩余空间\n  var out = [];\n  for (i = 0; i < bases.length; i++) {\n    var extra = sumG > 0 ? Math.round(free * grows[i] / sumG) : 0;\n    out.push(bases[i] + extra);\n  }\n  return out;\n}',
+      asserts: [
+        'JSON.stringify(distribute(500, [100, 100], [1, 3])) === "[175,325]"',
+        'JSON.stringify(distribute(400, [100, 100, 100], [2, 1, 1])) === "[150,125,125]"',
+        'JSON.stringify(distribute(300, [100, 200], [0, 0])) === "[100,200]"'
+      ],
+      explain: '这就是 flex-grow 的工作原理：先按 basis（想要的座位）坐好，剩下的空间按 grow 比例瓜分。断言一：剩余 300 按 1:3 分成 75/225 → [175,325]；断言二：剩余 100 按 2:1:1 分成 50/25/25；断言三：全是 grow:0 说明谁也不想多占，剩余空间宁可空着（比如容器比内容宽时的普通 div）。理解了它，flex:1 为什么「人人等宽」也就不言自明——basis 全是 0，剩余空间平分。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（会推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画一：快递箱拆解器（拖动滑块实时改 padding/border/margin + 切换 box-sizing） */
+(function () {
+  'use strict';
+  var W = 200; // width 属性写死的 200px
+  var contentBox = true; // 当前盒模型：true=content-box / false=border-box
+  var padEl = document.getElementById('bx-pad');
+  var borEl = document.getElementById('bx-bor');
+  var marEl = document.getElementById('bx-mar');
+  var swapBtn = document.getElementById('bx-swap');
+  var consoleEl = document.getElementById('bx-console');
+  var contentEl = document.getElementById('bx-content');
+  var paddingEl = document.getElementById('bx-padding');
+  var borderEl = document.getElementById('bx-border');
+  var marginEl = document.getElementById('bx-margin');
+
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* 核心更新：按盒模型算内容区宽，驱动四层样式，并输出宽度算式 */
+  function update() {
+    var p = Number(padEl.value), b = Number(borEl.value), m = Number(marEl.value);
+    var contentW;
+    if (contentBox) {
+      contentW = W; // width 只管内容区
+    } else {
+      contentW = W - 2 * p - 2 * b; // 内容区被 padding+border 从 width 里抠走
+      if (contentW < 0) contentW = 0; // 极端情况：内容被压没了（浏览器中内容会溢出）
+    }
+    /* 驱动四层视觉：内容宽 / 泡沫棉厚度 / 纸箱厚度 / 包裹间距 */
+    contentEl.style.width = contentW + 'px';
+    paddingEl.style.padding = p + 'px';
+    borderEl.style.borderWidth = b + 'px';
+    marginEl.style.margin = m + 'px';
+    document.getElementById('bx-pad-v').textContent = p + 'px';
+    document.getElementById('bx-bor-v').textContent = b + 'px';
+    document.getElementById('bx-mar-v').textContent = m + 'px';
+
+    consoleEl.innerHTML = '';
+    var total = marginEl.offsetWidth; // 直接读真实渲染宽度，眼见为实
+    if (contentBox) {
+      log('box-sizing: content-box → width:200px 只是商品区（content）', 'is-ok');
+      log('占据总宽 = 200(content) + 2×' + p + '(padding) + 2×' + b + '(border) + 2×' + m + '(margin) = ' + total + 'px', 'is-end');
+      log('加厚泡沫棉和纸箱会把包裹越撑越大——width 说了不算', 'is-muted');
+    } else {
+      log('box-sizing: border-box → width:200px 管到纸箱外沿', 'is-ok');
+      log('内容区 = 200 − 2×' + p + '(padding) − 2×' + b + '(border) = ' + Math.max(0, W - 2 * p - 2 * b) + 'px；占据总宽 = 200 + 2×' + m + '(margin) = ' + total + 'px', 'is-end');
+      if (2 * p + 2 * b >= W) log('泡沫棉 + 纸箱已经撑爆 width，内容区被压成 0（真实浏览器中内容会溢出）', 'is-muted');
+      else log('无论泡沫棉多厚，纸箱外沿始终 200px——加厚只能向内挤压商品区', 'is-muted');
+    }
+  }
+
+  /* 切换盒模型：同步按钮文案后重算 */
+  swapBtn.addEventListener('click', function () {
+    contentBox = !contentBox;
+    swapBtn.textContent = contentBox ? '切换为 border-box' : '切回 content-box';
+    update();
+  });
+  padEl.addEventListener('input', update);
+  borEl.addEventListener('input', update);
+  marEl.addEventListener('input', update);
+  update();
+})();
+
+/* ③ 动画二：Flex 排队 vs Grid 对号入座（点击切换布局模式） */
+(function () {
+  'use strict';
+  var row = document.getElementById('fgd-row');
+  var note = document.getElementById('fgd-note');
+  var flexBtn = document.getElementById('fgd-flex');
+  var gridBtn = document.getElementById('fgd-grid');
+
+  function setMode(isGrid) {
+    row.classList.toggle('is-grid', isGrid);
+    flexBtn.className = 'fg-btn ' + (isGrid ? 'fg-btn--ghost' : 'fg-btn--primary') + ' fg-btn--sm';
+    gridBtn.className = 'fg-btn ' + (isGrid ? 'fg-btn--primary' : 'fg-btn--ghost') + ' fg-btn--sm';
+    if (isGrid) {
+      /* grid-template-columns: repeat(3, 1fr) 已写在 CSS 里 */
+      note.textContent = 'Grid 模式：先画好 3 列 × 2 行的座位表（repeat(3,1fr)），六个观众按顺序对号入座——一维空间装不下就换行。';
+    } else {
+      note.textContent = 'Flex 模式：六个乘客挤在主轴一整行，flex:1 让他们平分车厢宽度——再挤也不换行。';
+    }
+  }
+  flexBtn.addEventListener('click', function () { setMode(false); });
+  gridBtn.addEventListener('click', function () { setMode(true); });
+})();
+</script>
+</body>
+</html>

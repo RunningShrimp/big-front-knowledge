@@ -1,0 +1,19 @@
+# macOS 本地杂项
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+
+# 本地工具 / 会话状态目录
+.mimosa/
+.playwright-mcp/
+
+# 编辑器与系统杂项
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
+.vscode/
+.idea/

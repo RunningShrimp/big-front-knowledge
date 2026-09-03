@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>React 核心与 Hooks · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ===== 本页动画专用样式（纯手写，无外部资源） ===== */
+.rk-wrap { display: flex; flex-wrap: wrap; gap: 14px; margin: 10px 0; }
+.rk-col { flex: 1 1 260px; min-width: 240px; }
+.rk-col-title { font-size: 13px; font-weight: 600; margin-bottom: 6px; color: var(--fg-c-ink-2); }
+.rk-code {
+  background: #232838; color: #dfe4f2; border-radius: 8px;
+  padding: 10px 12px; font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.rk-line { padding: 2px 6px; border-radius: 4px; white-space: pre-wrap; transition: background .2s; }
+.rk-line.is-active { background: rgba(48, 86, 211, .45); }
+.rk-line.is-bad { background: rgba(207, 63, 86, .5); }
+.rk-note {
+  border: 1px dashed var(--fg-c-line); border-radius: 6px;
+  padding: 6px 10px; margin: 6px 0; font-size: 12px; color: var(--fg-c-ink-3);
+  background: var(--fg-c-card); transition: background .25s, border-color .25s, color .25s;
+}
+.rk-note.is-filled { border-style: solid; border-color: var(--fg-c-primary); color: var(--fg-c-ink); background: var(--fg-c-primary-weak); }
+.rk-note.is-back { box-shadow: 0 0 0 2px rgba(48, 86, 211, .3); }
+.rk-note.is-bad { border-color: var(--fg-c-bad); background: var(--fg-c-bad-weak); color: var(--fg-c-bad); }
+</style>
+</head>
+<body data-page="m3-react">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">抓住 React 的两句话：视图是状态的函数（UI = f(state)）；Hook 的状态记在「调用顺序」上。本页不引入任何框架，用纯 JS 动画拆原理。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>前置知识：React 每次 setState 都会生成新虚拟树再 Diff 更新，建议先看
+      <a href="./m3-vdom.html">虚拟 DOM 与 Diff 算法</a>，否则「重渲染」三个字没有落点。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：讲解 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、心智模型：UI = f(state)</h3>
+    <p>老写法（如 jQuery）是「找到那个 <code>&lt;span&gt;</code>，把它的文字改掉」——你得自己维护几十处「改 DOM 的命令」。
+      React 换了个思路：把「界面长什么样」写成状态的函数。<code>state</code>（数据）是输入，<code>UI</code>（界面）是输出；
+      数据一变，React 重新执行一遍组件函数，算出新虚拟树，Diff 后只把变化的部分更新到页面。
+      整条链路永远是单向的：<strong>state → 视图 → 用户事件 → setState → 重新渲染</strong>。你从不下场改 DOM，只改数据。</p>
+
+    <h3>二、组件与 props：一份只读的契约</h3>
+    <p>组件是「接收 props、返回界面」的函数。props 是父组件传进来的原料，约定是<strong>只读</strong>：
+      子组件不能偷偷改 props，只能通过回调通知父组件去改 state——数据从上往下流，改动请求从下往上报，方向不混。
+      表单里也有个经典选择：<strong>受控组件</strong>把输入框的值交给 state 管（value 来自 state，onChange 回写）；
+      <strong>非受控组件</strong>让 DOM 自己保存输入，需要时再用 ref 去取。受控是默认推荐，因为「数据只有一份源头」。</p>
+
+    <h3>三、Hooks：函数组件的「瑞士军刀」</h3>
+    <p>函数组件本来没有记忆，Hooks 给它补上了能力，常用的五个各管一摊：</p>
+    <ul>
+      <li><code>useState(初始值)</code>：声明一块可变状态，返回「当前值 + 修改函数」。</li>
+      <li><code>useEffect(函数, 依赖数组)</code>：处理副作用（请求数据、订阅、改标题），依赖不变就不重复执行，返回的函数用于清理。</li>
+      <li><code>useMemo(计算函数, 依赖)</code>：依赖没变就复用上次算好的结果，避免昂贵重复计算。</li>
+      <li><code>useCallback(函数, 依赖)</code>：让函数引用在依赖不变时保持稳定，常配合子组件减少无谓重渲染。</li>
+      <li><code>useRef(初始值)</code>：一个跨渲染存续的「盒子」，改它不触发重渲染，也用来直接抓 DOM 节点。</li>
+    </ul>
+
+    <h3>四、常见陷阱：都是「快照」惹的祸</h3>
+    <p><strong>闭包旧值</strong>：每次渲染都是一次独立的函数执行，那一帧里的 <code>count</code> 是个常量。
+      定时器、事件回调如果捕获了旧帧的 <code>count</code>，3 秒后读到的仍是旧数字。
+      <strong>依赖数组漏写</strong>：useEffect 声明「只在依赖变化时重跑」，漏写依赖就是骗 React「不用重跑」，读到的自然是旧值。
+      <strong>不必要的重渲染</strong>：父组件一渲染，子组件默认跟着渲染；列表大、计算重时，用 useMemo/useCallback、拆状态做减法。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 点单机与后厨规程</div>
+      <p>React 像一台点单机。你是顾客（开发者），只负责改订单（setState），从不冲进厨房亲手端菜；
+        厨房（React）看到订单变了，就按新订单<strong>整个重出一份菜</strong>（重渲染出新虚拟树），
+        但传菜口会对比新旧两份，只把变了的菜端上桌（Diff + Patch），没变的纹丝不动。</p>
+      <p>Hooks 则是后厨的操作规程：调料盒严格按「出餐时要用的先后顺序」摆成一排，厨师每次取料都按同样的次序
+        拿第 1 格、第 2 格、第 3 格。谁要是把某个调料盒收进了柜子（把 Hook 写进 if，某次渲染不执行），
+        后面所有的取料就整体错一位——盐当糖用，菜全毁。这就是「Hooks 不能写在条件分支里」的真正原因。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：.anim-stage 内的纯手写可交互动画（单步执行） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>单步模拟「React 给 Hooks 发便签」：左边是组件代码（高亮当前执行行），右边是便签墙（Hook 状态槽）。
+      先看正确写法，再一键切换到「useState 写进 if 里」的错误写法，亲眼看状态怎么错位：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">规则：React 按调用顺序发便签（首次渲染）/ 取便签（重渲染）。顺序一变，对号入座就乱。</p>
+      <div class="rk-wrap">
+        <div class="rk-col">
+          <div class="rk-col-title">组件函数（当前执行行会高亮）</div>
+          <div class="rk-code" id="rk-code"></div>
+        </div>
+        <div class="rk-col">
+          <div class="rk-col-title">便签墙（Hook 状态槽）</div>
+          <div id="rk-notes">
+            <div class="rk-note">便签 #1 · 待发放</div>
+            <div class="rk-note">便签 #2 · 待发放</div>
+            <div class="rk-note">便签 #3 · 待发放</div>
+          </div>
+        </div>
+      </div>
+      <div class="anim-console" id="rk-console">
+        <div class="anim-line is-muted">点击「单步执行」开始第一次渲染…</div>
+      </div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="rk-step">单步执行</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="rk-mode">切换为「错误写法」：把 useState 放进 if</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="rk-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（真实课程路径） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="./m3-vdom.html">虚拟 DOM 与 Diff 算法</a>——「重渲染」不是重画页面，
+      而是重算虚拟树再 Diff，这层底盘不先搞懂，Hooks 的很多行为只能死记。</p>
+    <p><strong>向后延伸</strong>：组件多了、状态共享复杂了，就该看
+      <a href="./m3-state.html">状态管理思想</a>（把跨组件状态收归单一数据源）；
+      想把组件写得可复用、边界清晰，接着看 <a href="./m3-component.html">组件设计原则</a>。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="../m1/m1-js-scope.html">作用域与闭包</a> —— 「闭包旧值」陷阱的根源：回调捕获的是那一帧渲染的常量快照。</li>
+      <li><a href="../m5/m5-rn.html">React Native 原理</a> —— 同一套「UI = f(state)」思想如何跨端跑在原生组件上。</li>
+      <li><a href="../m7/m7-handwrite-async.html">手写异步系列</a> —— useEffect 里的定时器、订阅与清理，考的就是异步回调功底。</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（含解析），mode:'main' -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后把最佳成绩写入进度仓库（见页面底部内联脚本）：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：React 像点单机——你只管改订单（数据），厨房自动按新订单重新出餐（界面跟着变）；
+      而 Hooks 的规矩是「调料按固定顺序摆、按固定顺序取」，谁乱插队，整锅菜的味道就全串了。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前把「state → 视图 → 事件 → setState → 重渲染」复述 1 遍，1 天后、3 天后、7 天后各回来重做例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：2 个问法，答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：useEffect 和类组件的生命周期是怎么对应的？</summary>
+      <ul>
+        <li>依赖数组为空 <code>[]</code>：只在挂载后执行一次，近似 componentDidMount。</li>
+        <li>有依赖且依赖变化时重跑：近似 componentDidUpdate（但它先比较依赖，变了才跑）。</li>
+        <li>返回的清理函数：在下次 effect 执行前与卸载时调用，近似 componentWillUnmount（订阅解绑、清定时器都靠它）。</li>
+        <li>加分项：不要机械照搬生命周期心智——useEffect 的本质是「让副作用与依赖保持同步」，一次渲染对应一次同步机会。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：为什么 Hooks 不能写在条件分支、循环里？</summary>
+      <ul>
+        <li>React 靠「调用顺序」记账：每个 Hook 在首次渲染时按顺序领到自己的状态槽（类似内部链表节点）。</li>
+        <li>重渲染时 React 只按顺序逐个取回，完全不认识变量名；若某次渲染少调了一个 Hook，后面全部错位，状态张冠李戴。</li>
+        <li>开发环境下 React 会检测到 Hook 数量/顺序变化并直接抛错拦截。</li>
+        <li>正确做法：把条件逻辑写进 Hook 内部（如 useEffect 的依赖判断、useState 存布尔值），而不是条件地「调不调用」Hook。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 + Hooks 发便签动画 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm3-react'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'） */
+  var WARMUP = [{
+    id: 'm3-react-warmup-1',
+    type: 'single',
+    stem: '预热：「UI = f(state)」这个心智模型是什么意思？',
+    options: [
+      '界面是状态的函数：状态一变，框架重新计算出新界面',
+      '每次都要手动找到对应 DOM 元素逐个修改',
+      'UI 是浏览器内核的缩写',
+      '状态和界面互相独立、互不影响'
+    ],
+    answer: [0],
+    explain: 'f 是组件函数，state 是输入，UI 是输出。开发者只改输入（setState），React 负责重算输出并最小化地更新页面。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm3-react-q1',
+      type: 'single',
+      stem: '把 useState 写进 if 分支里，二次渲染时条件不成立，会发生什么？',
+      options: [
+        '没任何问题，React 会自动记住变量名找回状态',
+        '后续 Hook 的调用顺序整体前移，按顺序取到别人的状态槽，状态张冠李戴，React 开发环境直接报错',
+        '只是代码风格不好，运行结果完全一致',
+        'if 里的 state 会自动提升为全局变量'
+      ],
+      answer: [1],
+      explain: 'Hook 的状态记在「调用顺序」上而不是变量名上：首次渲染按顺序发状态槽，重渲染按同样顺序取回。if 把某个 Hook 藏起来后，排在后面的 Hook 全部前移一位，取到的是前面 Hook 的状态——错位是系统性的。这不是风格建议，而是 Hooks 记账机制决定的硬规则。'
+    },
+    {
+      id: 'm3-react-q2',
+      type: 'single',
+      stem: '组件内有 const [count, setCount] = useState(0)，点击按钮时先执行 setTimeout(() => { alert(count) }, 3000)，随后 3 秒内又连点 3 次 setCount(count + 1)。3 秒后 alert 弹出的是？',
+      options: ['3', '0', '报错：count 未定义', '有时 0 有时 3，不确定'],
+      answer: [1],
+      explain: '每次渲染都是一次独立的函数执行，那一帧里的 count 是常量 0。setTimeout 的回调捕获的是「点击那一帧」的 count 快照（闭包旧值），后续 setCount 触发的是新一轮渲染、新的 count 变量，与旧回调无关，所以 3 秒后弹出的还是 0。想拿最新值要用 useRef 存可变引用，或在函数式更新 setCount(c => c + 1) 里基于前值计算。'
+    },
+    {
+      id: 'm3-react-q3',
+      type: 'code',
+      stem: '动手实现 memoize(fn)：模拟 useMemo 的核心思想——参数和上次相同就直接返回缓存结果，不重复执行 fn；参数变了才重新计算。',
+      stub: 'function memoize(fn) {\n  // 在闭包里记一个缓存：是否算过、上次参数、上次结果\n  // 返回一个新函数：参数没变 → 直接返回缓存；参数变了 → 重新执行 fn 并更新缓存\n}\n',
+      reference: 'function memoize(fn) {\n  var hasCache = false;\n  var lastArg = null;\n  var lastValue;\n  return function (arg) {\n    if (hasCache && arg === lastArg) {\n      return lastValue; // 依赖没变：复用上次结果（useMemo 的核心）\n    }\n    lastArg = arg;\n    lastValue = fn(arg); // 依赖变了：重新计算并记账\n    hasCache = true;\n    return lastValue;\n  };\n}',
+      asserts: [
+        'var times = 0; var slow = function (n) { times = times + 1; return n * 10; }; var fast = memoize(slow); fast(3) === 30 && times === 1',
+        'fast(3) === 30 && times === 1',
+        'fast(5) === 50 && times === 2',
+        'var a = memoize(function (s) { return s + "!" }); a("hi") === "hi!"'
+      ],
+      explain: 'useMemo 的本质就是「依赖没变 → 返回上次算好的值」。实现的关键是把缓存放进闭包：hasCache 记录算没算过，lastArg 记录依赖，lastValue 记录结果。断言 2 专门验证缓存：第二次调用 fast(3) 时 times 仍是 1，说明原函数根本没被执行。真实 useMemo 还要比较「依赖数组」而不是单个参数，但记账思想一模一样。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（会推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：React 按调用顺序给 Hooks 发/取便签（纯 DOM 手写，单步执行 + 正误两种写法对比） */
+(function () {
+  'use strict';
+
+  /* 两种写法的演示脚本：lines 是组件代码（逐行显示），steps 是单步脚本 */
+  var MODES = {
+    ok: {
+      modeBtnText: '切换为「错误写法」：把 useState 放进 if',
+      lines: [
+        'function Profile() {',
+        '  const [count] = useState(0);        // Hook ①',
+        '  useEffect(() => { 登记副作用 });     // Hook ②',
+        '  const [name] = useState("阿明");     // Hook ③',
+        '  return <div>{count} · {name}</div>;',
+        '}'
+      ],
+      steps: [
+        { line: 0, msg: '第一次渲染（挂载）：React 准备按「调用顺序」给每个 Hook 发一张便签，也就是它的状态槽。' },
+        { line: 1, note: 0, noteText: 'useState(0) · 存入 0', msg: '遇到第 1 个 useState(0)：发便签 #1，读出初始值 0，count = 0。' },
+        { line: 2, note: 1, noteText: 'useEffect · 登记副作用', msg: '遇到 useEffect：发便签 #2，登记副作用，渲染完成后执行。' },
+        { line: 3, note: 2, noteText: 'useState("阿明") · 存入 "阿明"', msg: '遇到第 2 个 useState：发便签 #3，存入 "阿明"。' },
+        { line: 4, cls: 'is-end', msg: '第一次渲染完成，页面显示「0 · 阿明」。用户点了按钮，setCount 触发重渲染！' },
+        { line: 1, back: 0, msg: '组件函数重新执行：React 不发新便签，按顺序取回 #1 —— count 拿回自己的 0。' },
+        { line: 2, back: 1, msg: '取回 #2 —— useEffect 拿回自己的登记信息。' },
+        { line: 3, back: 2, msg: '取回 #3 —— name 还是 "阿明"。三次顺序完全一致，全部对号入座。' },
+        { line: -1, cls: 'is-end', msg: '结论：Hook 的状态记在「调用顺序」上，与变量名无关。顺序稳定，状态就永远不错乱。' }
+      ]
+    },
+    bad: {
+      modeBtnText: '切换回「正确写法」',
+      lines: [
+        'function Profile({ loggedIn }) {',
+        '  if (!loggedIn) {',
+        '    const [name] = useState("游客");  // Hook 写在了 if 里！',
+        '  }',
+        '  const [count] = useState(0);        // 它后面的 Hook',
+        '  // ……页面渲染 name 与 count'
+      ],
+      steps: [
+        { line: 0, msg: '第一次渲染：loggedIn = false，走进 if 分支。' },
+        { line: 2, note: 0, noteText: 'useState("游客") · 存入 "游客"', msg: '发便签 #1 给 useState("游客")，本次渲染一切正常。' },
+        { line: 4, note: 1, noteText: 'useState(0) · 存入 0', msg: '发便签 #2 给 useState(0)。目前一切正常，页面显示「游客 · 0」。' },
+        { line: 5, cls: 'is-end', msg: '用户登录了：loggedIn = true，触发重渲染——注意，这次 if 条件不成立！' },
+        { line: 1, msg: '重渲染执行到 if：条件为假，里面那个 useState 被整个跳过，一张便签都不领。' },
+        { line: 4, back: 0, bad: true, cls: 'is-end', msg: 'useState(0) 前移到第 1 位，按顺序取回便签 #1 —— 里面存的却是「游客」！count 被塞进了别人家的状态，全面错位。' },
+        { line: -1, bad: true, cls: 'is-end', msg: 'React 在开发环境会检测到「Hook 数量 / 顺序变了」并抛错拦截。所以规则不是风格偏好，而是记账机制的必然要求：Hook 只能出现在函数顶层。' }
+      ]
+    }
+  };
+
+  var codeEl = document.getElementById('rk-code');
+  var notesEl = document.getElementById('rk-notes');
+  var slots = notesEl.children;      // 3 个便签槽
+  var consoleEl = document.getElementById('rk-console');
+  var stepBtn = document.getElementById('rk-step');
+  var modeBtn = document.getElementById('rk-mode');
+  var resetBtn = document.getElementById('rk-reset');
+
+  var mode = 'ok';
+  var idx = 0;
+  var done = false;
+
+  /* 输出一行执行日志 */
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* 按当前模式渲染代码行，并清掉所有高亮 */
+  function renderLines() {
+    codeEl.innerHTML = '';
+    MODES[mode].lines.forEach(function (text) {
+      var div = document.createElement('div');
+      div.className = 'rk-line';
+      div.textContent = text;
+      codeEl.appendChild(div);
+    });
+  }
+
+  /* 清理高亮：代码行、便签的「取回」光圈都还原 */
+  function clearActives() {
+    var lines = codeEl.children;
+    for (var i = 0; i < lines.length; i++) lines[i].className = 'rk-line';
+    for (var j = 0; j < slots.length; j++) slots[j].classList.remove('is-back');
+  }
+
+  /* 便签槽恢复为「待发放」 */
+  function resetSlots() {
+    for (var i = 0; i < slots.length; i++) {
+      slots[i].className = 'rk-note';
+      slots[i].textContent = '便签 #' + (i + 1) + ' · 待发放';
+    }
+  }
+
+  /* 单步执行一步 */
+  function step() {
+    if (done) return;
+    var s = MODES[mode].steps[idx];
+    clearActives();
+    /* 高亮当前执行行（line 为 -1 表示结论行，不高亮代码） */
+    if (s.line >= 0) {
+      var ln = codeEl.children[s.line];
+      if (ln) ln.classList.add(s.bad ? 'is-bad' : 'is-active');
+    }
+    /* 发便签：填入内容 */
+    if (typeof s.note === 'number') {
+      slots[s.note].textContent = s.noteText;
+      slots[s.note].className = 'rk-note is-filled';
+    }
+    /* 取便签：闪一下光圈表示「按序取回」 */
+    if (typeof s.back === 'number') {
+      slots[s.back].classList.add('is-back');
+      if (s.bad) slots[s.back].classList.add('is-bad');
+      setTimeout(function () { slots[s.back].classList.remove('is-back'); }, 700);
+    }
+    log(s.msg, s.cls || (s.bad ? 'is-end' : 'is-ok'));
+    idx = idx + 1;
+    if (idx >= MODES[mode].steps.length) {
+      done = true;
+      stepBtn.disabled = true;
+      log('本模式演示完毕，可点「重置」重看，或切换另一种写法对比。', 'is-muted');
+    }
+  }
+
+  /* 重置为当前模式的初始状态 */
+  function reset() {
+    idx = 0;
+    done = false;
+    stepBtn.disabled = false;
+    consoleEl.innerHTML = '';
+    renderLines();
+    resetSlots();
+    log('已重置：点击「单步执行」，逐行观察 React 如何给 Hooks 记账…', 'is-muted');
+  }
+
+  /* 切换正确 / 错误写法 */
+  modeBtn.addEventListener('click', function () {
+    mode = (mode === 'ok') ? 'bad' : 'ok';
+    modeBtn.textContent = MODES[mode].modeBtnText;
+    reset();
+  });
+  stepBtn.addEventListener('click', step);
+  resetBtn.addEventListener('click', reset);
+  reset();
+})();
+</script>
+</body>
+</html>

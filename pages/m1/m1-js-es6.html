@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>ES6+ 核心特性 · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ========== 本页动画样式：行李箱解构取物（纯手写 CSS，无任何动画库） ========== */
+.es-luggage {
+  display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+  padding: 12px 14px; border: 2px solid #8B5CF6; border-radius: 12px;
+  background: #f6f2ff; margin: 12px 0;
+}
+.es-luggage-title { width: 100%; font-size: 13px; color: #6d5bb5; font-weight: 700; }
+/* 行李格：每个属性一个格子 */
+.es-cell {
+  padding: 8px 12px; border-radius: 8px; border: 1px solid #d8ccf5;
+  background: #fff; font-size: 13px; color: #2c3550;
+  transition: transform .3s ease, box-shadow .3s ease;
+}
+.es-cell.is-lit { transform: translateY(-4px); box-shadow: 0 6px 14px rgba(139, 92, 246, .35); border-color: #8B5CF6; }
+/* 取出的变量格子：初始隐藏，执行解构后逐个弹入 */
+.es-vars { display: flex; gap: 10px; flex-wrap: wrap; min-height: 46px; margin: 10px 0; }
+.es-var {
+  padding: 8px 12px; border: 1.5px dashed #8B5CF6; border-radius: 8px;
+  background: #fff; font-size: 13px; font-family: monospace; color: #2c3550;
+  opacity: 0; transform: translateY(10px) scale(.9);
+  transition: opacity .35s ease, transform .35s ease;
+}
+.es-var.is-in { opacity: 1; transform: translateY(0) scale(1); }
+.es-var b { color: #8B5CF6; }
+/* 取物清单按钮的选中态 */
+.es-pattern.is-on { border-color: #8B5CF6; background: #efe9ff; font-weight: 700; }
+</style>
+</head>
+<body data-page="m1-js-es6">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">本页对应知识点「ES6+ 核心特性」（建议 30 分钟）：let/const、解构与展开、模板字符串、箭头函数，再速览 Map/Set、可选链、空值合并与 Proxy。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>let/const 的「块级作用域」与「暂时性死区」要讲得通，得先知道 var 时代的作用域与变量提升是怎么回事。建议先学前置知识：<a href="./m1-js-scope.html">JS 类型、作用域与闭包</a>。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：讲解 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>1. 变量声明升级：let 与 const</h3>
+    <p><code>let</code>/<code>const</code> 相比 var 有三大升级：① <strong>块级作用域</strong>——一对 <code>{}</code> 就是一个独立房间，出房门就看不见；② <strong>不可重复声明</strong>——同名标签一房间只挂一个；③ <strong>暂时性死区（TDZ）</strong>——声明语句执行之前访问直接抛 ReferenceError，而不是像 var 那样安静地给你一个 undefined。经典差异体现在循环里：</p>
+    <pre><code>for (var i = 0; i &lt; 3; i++) {
+  setTimeout(function () { console.log(i); }); // 打印 3 3 3：三个回调共用同一个 var i
+}
+for (let j = 0; j &lt; 3; j++) {
+  setTimeout(function () { console.log(j); }); // 打印 0 1 2：每轮循环都是一个全新的 j
+}</code></pre>
+    <p><code>const</code> 声明的是「不可重新赋值的绑定」：不能 <code>a = 别的</code>，但对象/数组<strong>内部内容仍可修改</strong>——锁的是「钥匙不能换锁」，不是「房间里的东西不能动」。实践口径：默认 const，需要重新赋值才用 let，不再写 var。</p>
+
+    <h3>2. 解构赋值：一次拆包</h3>
+    <p>解构是「按 pattern 取物」：对象解构<strong>按属性名</strong>取（顺序无关），数组解构<strong>按位置</strong>取，两者都支持默认值与重命名：</p>
+    <pre><code>const trip = { city: '成都', days: 3, gear: ['伞', '充电宝'] };
+const { city, days } = trip;              // 按名取：city='成都', days=3
+const { city: c, note = '无备注' } = trip; // 重命名 + 默认值：c='成都', note='无备注'
+const [first, second] = trip.gear;        // 按位取：first='伞', second='充电宝'
+function greet({ name, city }) { ... }    // 函数参数也能解构，调用即拆包</code></pre>
+
+    <h3>3. 展开 / 剩余运算符：... 的两副面孔</h3>
+    <p>同一个 <code>...</code>，「摊开」时是展开运算符，「收拢」时是剩余（rest）：</p>
+    <pre><code>const arr = [1, 2, 3];
+const copy = [...arr, 4];              // 展开：合并数组 → [1,2,3,4]
+const obj2 = { ...trip, days: 5 };     // 展开对象并覆盖属性（浅拷贝）
+function sum(...nums) { return nums.reduce((a, b) =&gt; a + b, 0); } // 收拢成数组
+const { city, ...rest } = trip;        // 点名的拿走，剩下的打包进 rest</code></pre>
+
+    <h3>4. 模板字符串</h3>
+    <p>反引号字符串支持 <code>${表达式}</code> 内嵌与多行书写，从此告别 <code>'a' + x + 'b'</code> 的加号马拉松，也告别手拼换行符。</p>
+
+    <h3>5. 箭头函数：更短，而且「没有自己的 this」</h3>
+    <p>箭头函数除了写法紧凑，更本质的区别是：<strong>它不创建自己的 this、arguments</strong>，而是沿用「定义时所在外层作用域」的 this——普通函数的 this 由「谁调用」决定，箭头函数的 this 由「在哪定义」决定。代价是它不能当构造函数（new 会报错）、也不适合做需要动态 this 的对象方法或 DOM 事件回调。</p>
+
+    <h3>6. 进阶速览：Map / Set、可选链、空值合并、Proxy</h3>
+    <ul>
+      <li><strong>Map / Set</strong>：Map 可以用任意类型做键（对象当键时比普通对象可靠）；Set 天然去重：<code>[...new Set(arr)]</code>。</li>
+      <li><strong>可选链 <code>?.</code></strong>：遇到 null/undefined 不再报错，而是短路返回 undefined，深层数据放心访问：<code>res?.data?.list</code>。</li>
+      <li><strong>空值合并 <code>??</code></strong>：只在左侧是 null/undefined 时取右侧；与 <code>||</code> 的区别是 0、''、false 不会被误判为「空」。</li>
+      <li><strong>Proxy</strong>：对整个对象的读写做全面拦截，Vue 3 的响应式正是基于它。</li>
+    </ul>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比：手机系统的大版本更新</div>
+      <p>老周的手机弹出提示：「系统已升级至 6.0 大版本」。更新说明写着——所有老功能照常可用（向后兼容，老代码一行不改照样跑），另附一批新手势。</p>
+      <p>以前复制一段话要长按、全选、光标微调，一步步点（老写法：var 加一堆加号拼字符串）；升级后一个快捷手势直达（解构一行拆包、模板字符串直接嵌变量）。深夜刷手机自动进入暗色模式，界面再暗也不刺眼（可选链 ?.：遇到「空的」不再闪退，而是安静地返回 undefined）。相册里批量多选、一拖全选（展开运算符 ...，一次摊开一整个数组）。</p>
+      <p>升级完成那一刻老周感叹：「以前是怎么忍下来的？」——ES6（ECMAScript 2015）对 JS 就是这种量级的更新：不推翻旧世界，但新手势一旦用惯，就再也回不去了。此后每年小步快跑的 ES2016、ES2017…… 都是这个「系统」的年度小版本。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：可点击交互的行李箱解构（纯 DOM 手写，无动画库） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>解构赋值就像按清单从行李箱里取物：对象解构按「标签名」拿，数组解构按「格位」拿。亲手选一张取物清单，执行解构看变量怎么被装满：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">先点选一张「取物清单」，再点「执行解构」——被点名的格子会亮起，变量逐个弹入：</p>
+      <div class="es-luggage" id="es-luggage">
+        <div class="es-luggage-title">行李箱 trip（源对象）</div>
+        <!-- 格子由脚本渲染 -->
+      </div>
+      <div class="anim-console" id="es-log">
+        <div class="anim-line is-muted">点选下方任一取物清单，然后点「执行解构」…</div>
+      </div>
+      <div class="es-vars" id="es-vars"></div>
+      <div class="anim-controls" id="es-patterns">
+        <!-- 三张取物清单按钮由脚本渲染 -->
+      </div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="es-run">执行解构</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="es-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（均为课程数据中的真实路径） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="./m1-js-scope.html">JS 类型、作用域与闭包</a>——var 的函数作用域与提升，是理解 let/const 块级作用域与暂时性死区的参照系；循环里的闭包陷阱也在那页。</p>
+    <p><strong>向后延伸</strong>：下一步去 <a href="./m1-ts-basic.html">TypeScript 基础</a>——TS 是在 ES6+ 语法之上叠加的类型系统；模块化的 <a href="../m3/m3-module.html">模块化：ESM 与 CommonJS</a> 中，import/export 本身就是 ES6 的一员。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="./m1-js-prototype.html">原型链与 this</a> —— 普通函数 this 的四种绑定规则，正是「箭头函数没有自己的 this」这句话的完整背景。</li>
+      <li><a href="../m3/m3-vue.html">Vue 响应式原理</a> —— Vue 3 弃用 defineProperty 改用 ES6 Proxy 全面拦截，是「进阶速览」里 Proxy 的最佳实战样本。</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（含解析），mode:'main' -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后把最佳成绩写入进度仓库（见页面底部内联脚本）：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：ES6 就是 JS 的一次手机系统级大更新——拆东西更省事（解构）、拼话更直观（模板字符串）、函数更短而且不再为 this 烦恼（箭头函数），老程序全部照常运行。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前口头对比一遍 var / let / const（作用域、提升、重复声明、重赋值四条线）；1 天、3 天、7 天后各回来重做例题，并手写一遍「对象解构 + rest + 参数解构默认值」的组合。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：2 个问法，答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：箭头函数与普通函数的区别有哪些？</summary>
+      <ul>
+        <li>this：普通函数由调用方式决定（默认/隐式/显式/new 四种绑定）；箭头函数没有自己的 this，沿用定义时外层作用域，call/apply/bind 也改不动。</li>
+        <li>arguments：箭头函数没有自己的 arguments（可用剩余参数 ...args 代替）。</li>
+        <li>构造能力：箭头函数没有原型与内部构造方法，用 new 调用直接报错。</li>
+        <li>适用边界：适合回调、需要沿用外层 this 的场景；不适合对象方法、原型方法、需要动态 this 的事件回调与构造函数。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：var、let、const 三者声明变量有什么区别？</summary>
+      <ul>
+        <li>作用域：var 是函数作用域；let/const 是块级作用域（一对花括号一个房间）。</li>
+        <li>提升行为：var 声明提升并初始化为 undefined；let/const 也提升但不初始化，声明前访问抛 ReferenceError（暂时性死区）。</li>
+        <li>重复声明：var 允许重复声明；let/const 同一作用域内不允许。</li>
+        <li>重赋值：const 的绑定不可重新赋值，但对象/数组内部内容仍可修改。</li>
+        <li>实践结论：默认 const，需要重新赋值用 let，新代码不再使用 var。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm1-js-es6'; // 与 body data-page 一字不差
+
+  /* 预热题（mode:'warmup'） */
+  var WARMUP = [{
+    id: 'm1-js-es6-warmup-1',
+    type: 'single',
+    stem: '预热：下面代码的运行结果是？\nif (true) { let x = 1; }\nconsole.log(x);',
+    options: [
+      '打印 1',
+      '打印 undefined',
+      '抛出 ReferenceError',
+      '打印 null'
+    ],
+    answer: [2],
+    explain: 'let 是块级作用域：x 只活在那对花括号（那个「房间」）里，出了块就不可见，块外访问直接抛 ReferenceError。换成 var 则会提升到函数作用域，打印 undefined——这正是 let 对 var 的关键升级之一。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm1-js-es6-q1',
+      type: 'single',
+      stem: '下面代码输出什么？\nconst user = {\n  name: "小李",\n  sayHi: function () {\n    setTimeout(() =&gt; { console.log(this.name); }, 100);\n  }\n};\nuser.sayHi();',
+      options: [
+        '输出 "小李"：箭头函数沿用外层 sayHi 的 this，而 sayHi 由 user 调用',
+        '输出 undefined：this 指向全局对象',
+        '直接抛出 TypeError',
+        '输出 "setTimeout"：this 指向定时器'
+      ],
+      answer: [0],
+      explain: '箭头函数不创建自己的 this，它用的是「定义时所在作用域」的 this——这里的外层是普通函数 sayHi，sayHi 由 user 调用（隐式绑定），this 为 user，于是 100 毫秒后仍能读到 user.name。若把回调换成普通 function，其 this 会退化为 undefined/window，就会输出 undefined。这正是「箭头函数拯救回调 this」的经典场景。'
+    },
+    {
+      id: 'm1-js-es6-q2',
+      type: 'multi',
+      stem: '关于 var / let / const，下列说法正确的有（多选，全部选对才得分）：',
+      options: [
+        'let 声明的变量只在所在代码块内可见',
+        'var 声明会提升，且同一作用域内允许重复声明',
+        'const 声明的对象，其属性完全不能修改',
+        'let/const 存在暂时性死区：声明语句执行前访问会抛 ReferenceError'
+      ],
+      answer: [0, 1, 3],
+      explain: 'C 是唯一错误项：const 锁的是「绑定不可重新赋值」，不是「对象不可变」——const obj = {}; obj.a = 1 完全合法，只有 obj = 别的值 才报错。A、B、D 分别对应块级作用域、var 的提升与可重复声明、暂时性死区三条核心规则。'
+    },
+    {
+      id: 'm1-js-es6-code-1',
+      type: 'code',
+      stem: '用「参数解构 + 默认值」实现 greet(profile)：从参数对象中取出 name 与 city，拼出问候语；字段缺失或整个参数不传时使用默认值（name 缺省为"游客"，city 缺省为"未知城市"）。',
+      stub: 'function greet(profile) {\n  // TODO：把参数改成「解构写法」，直接在参数表里完成三件事：\n  //   1. 从 profile 中解构出 name 与 city\n  //   2. name 缺省为 "游客"，city 缺省为 "未知城市"（解构默认值）\n  //   3. 让 greet() 不传参数也不报错（参数默认值兜底）\n  // 返回格式示例：\'你好，来自未知城市的游客\'\n}\n',
+      reference: "function greet({ name = '游客', city = '未知城市' } = {}) {\n  return '你好，来自' + city + '的' + name;\n}",
+      asserts: [
+        "greet({ name: '小明', city: '杭州' }) === '你好，来自杭州的小明'",
+        "greet({ name: '阿芳' }) === '你好，来自未知城市的阿芳'",
+        "greet({}) === '你好，来自未知城市的游客'",
+        "greet() === '你好，来自未知城市的游客'"
+      ],
+      explain: '三个默认值层次缺一不可：① { name = "游客" } 是解构默认值——属性缺失或值为 undefined 时生效（断言二、三）；② 参数表末尾的 = {} 是参数默认值——只在整个参数为 undefined 时触发，它兜住了「完全不传参」的 greet()（断言四）；③ 注意一个经典坑：greet(null) 会直接抛错，因为参数默认值只认 undefined、不认 null。写成 function greet(profile) 再在函数体内解构也可以过断言，但参数表解构是 ES6 更惯用的写法。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库 */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：行李箱解构取物（纯 DOM 手写，无动画库）
+   三种解构模式：对象按名取 / rest 收拢剩余 / 数组按位取 */
+(function () {
+  'use strict';
+  /* 行李箱源数据（仅作展示，与清单按钮一一对应） */
+  var trip = { city: '成都', days: 3, gear: ['伞', '充电宝'] };
+
+  /* 三张取物清单：code 展示的语句 + note 讲解 + vars 取出的变量 */
+  var PATTERNS = [
+    {
+      code: 'const { city, days } = trip;',
+      note: '对象解构：按「属性名」取物——要 city 写 city，要 days 写 days，与顺序无关。',
+      lit: ['city', 'days'],
+      vars: [
+        { name: 'city', val: '"成都"' },
+        { name: 'days', val: '3' }
+      ]
+    },
+    {
+      code: 'const { city, ...rest } = trip;',
+      note: '剩余运算符 ...：点名的 city 单独拿走，没被点名的属性全部打包进 rest。',
+      lit: ['city'],
+      vars: [
+        { name: 'city', val: '"成都"' },
+        { name: 'rest', val: '{ days: 3, gear: ["伞", "充电宝"] }' }
+      ]
+    },
+    {
+      code: 'const [first, second] = trip.gear;',
+      note: '数组解构：按「格位」取物——第 1 格进 first，第 2 格进 second，与名字无关。',
+      lit: ['gear'],
+      vars: [
+        { name: 'first', val: '"伞"' },
+        { name: 'second', val: '"充电宝"' }
+      ]
+    }
+  ];
+
+  var picked = 0; // 当前选中的清单下标
+  var luggageEl = document.getElementById('es-luggage');
+  var patternsEl = document.getElementById('es-patterns');
+  var varsEl = document.getElementById('es-vars');
+  var logEl = document.getElementById('es-log');
+  var runBtn = document.getElementById('es-run');
+  var resetBtn = document.getElementById('es-reset');
+
+  /* 追加一行日志并自动滚到底部 */
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    logEl.appendChild(line);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  /* 渲染行李箱格子：key 显示属性名，val 显示值摘要 */
+  function renderLuggage() {
+    luggageEl.innerHTML = '';
+    var title = document.createElement('div');
+    title.className = 'es-luggage-title';
+    title.textContent = '行李箱 trip（源对象）';
+    luggageEl.appendChild(title);
+    var cells = [
+      ['city', '"成都"'],
+      ['days', '3'],
+      ['gear', '["伞", "充电宝"]']
+    ];
+    cells.forEach(function (pair) {
+      var cell = document.createElement('span');
+      cell.className = 'es-cell';
+      cell.setAttribute('data-key', pair[0]);
+      cell.textContent = pair[0] + ': ' + pair[1];
+      luggageEl.appendChild(cell);
+    });
+  }
+
+  /* 渲染三张取物清单按钮 */
+  function renderPatterns() {
+    PATTERNS.forEach(function (p, i) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'fg-btn fg-btn--ghost fg-btn--sm es-pattern' + (i === picked ? ' is-on' : '');
+      btn.textContent = p.code;
+      btn.addEventListener('click', function () {
+        picked = i;
+        /* 重绘选中态：清掉所有按钮高亮，只留当前 */
+        var btns = patternsEl.querySelectorAll('.es-pattern');
+        for (var k = 0; k < btns.length; k++) btns[k].classList.toggle('is-on', k === picked);
+        log('已选择取物清单：' + p.code, 'is-muted');
+      });
+      patternsEl.appendChild(btn);
+    });
+  }
+
+  /* 执行解构：点亮被取的格子 → 变量逐个弹入 → 逐行讲解 */
+  function run() {
+    var p = PATTERNS[picked];
+    /* 清空上一次的产出 */
+    varsEl.innerHTML = '';
+    /* 点亮源对象中参与取物的格子 */
+    var cells = luggageEl.querySelectorAll('.es-cell');
+    for (var k = 0; k < cells.length; k++) {
+      cells[k].classList.toggle('is-lit', p.lit.indexOf(cells[k].getAttribute('data-key')) !== -1);
+    }
+    log('// ' + p.code, 'is-muted');
+    log(p.note, 'is-ok');
+    /* 变量格子逐个弹入：用 setTimeout 拉开间隔形成动画序列 */
+    p.vars.forEach(function (v, i) {
+      setTimeout(function () {
+        var box = document.createElement('span');
+        box.className = 'es-var';
+        box.innerHTML = '<b>' + v.name + '</b> = ' + v.val;
+        varsEl.appendChild(box);
+        /* 下一帧再加 is-in，保证过渡动画生效 */
+        requestAnimationFrame(function () { box.classList.add('is-in'); });
+        log(v.name + ' → ' + v.val);
+      }, i * 260);
+    });
+  }
+
+  /* 重置：清空变量与日志，取消格子高亮 */
+  function reset() {
+    varsEl.innerHTML = '';
+    logEl.innerHTML = '';
+    var cells = luggageEl.querySelectorAll('.es-cell');
+    for (var k = 0; k < cells.length; k++) cells[k].classList.remove('is-lit');
+    log('已重置：换一张取物清单再试试', 'is-muted');
+  }
+
+  runBtn.addEventListener('click', run);
+  resetBtn.addEventListener('click', reset);
+  renderLuggage();
+  renderPatterns();
+})();
+</script>
+</body>
+</html>

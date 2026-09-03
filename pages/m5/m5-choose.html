@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>跨端方案选型 · 跨端开发</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ============================================================
+   本页动画专用样式：可交互选型对比矩阵
+   切换场景 / 点维度筹码临时排除维度，实时重算加权分并动画更新
+   纯手写 CSS，无任何外部依赖，仅本页使用
+   ============================================================ */
+.ch-scenarios { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0 6px; }
+.ch-scenarios .fg-btn.is-active { border-color: #2f5bea; color: #2f5bea; font-weight: 700; }
+.ch-desc { font-size: 13px; color: #4a5568; margin: 6px 0 10px; }
+/* 维度筹码：点击可临时把该维度权重清零，观察排名变化 */
+.ch-dims { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; align-items: center; }
+.ch-dims-label { font-size: 12px; color: #6b7280; }
+.ch-dims .fg-btn.is-off { opacity: 0.45; text-decoration: line-through; }
+/* 矩阵行：方案名 + 动画条形图 + 总分 + 推荐徽标 */
+.ch-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 13px; }
+.ch-name { flex: 0 0 118px; text-align: right; color: #4a5568; }
+.ch-barwrap { flex: 1 1 auto; min-width: 120px; height: 18px; background: #eef1f6; border-radius: 999px; overflow: hidden; }
+.ch-bar { height: 100%; width: 0; border-radius: 999px; background: #8fa8d8; transition: width 0.5s ease; }
+.ch-row.is-best .ch-bar { background: #2f9e63; }
+.ch-row.is-best .ch-name { color: #1b7a45; font-weight: 700; }
+.ch-score { flex: 0 0 40px; font-weight: 700; text-align: right; }
+.ch-badge { flex: 0 0 auto; background: #2f9e63; color: #fff; font-size: 11px; padding: 2px 8px; border-radius: 999px; visibility: hidden; }
+.ch-row.is-best .ch-badge { visibility: visible; }
+.ch-reason { font-size: 13px; line-height: 1.8; color: #4a5568; margin-top: 10px; }
+.ch-reason strong { color: #1b7a45; }
+</style>
+</head>
+<body data-page="m5-choose">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">H5、小程序、RN、Flutter、原生都能「一套代码多端跑」——选型没有标准答案，只有场景与约束下的推理过程。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>本页是 M5 的收官页，三个前置都过一遍再来做决策：
+      <a href="./m5-rn.html">React Native 原理</a>（映射原生控件）、
+      <a href="./m5-flutter.html">Flutter 自绘引擎</a>（自绘一切）、
+      <a href="./m5-hybrid.html">Hybrid 开发与 JSBridge</a>（WebView 装 H5）。
+      知道每条路线「强在哪、弱在哪」，选型才不是抽签。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：讲解 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、先把候选方案排成一条光谱</h3>
+    <p>把主流方案按「渲染路径与性能上限」从左到右排开，能看得非常清楚：
+      <strong>H5（WebView 渲染）→ 小程序（WebView 为主、双线程管控）→ RN（映射原生控件）→
+      Flutter（自带引擎自绘）→ 原生（系统直绘）</strong>。
+      越靠左，开发越快、发版越灵活、多端复用越省，但性能与体验上限越低；
+      越靠右，性能与系统能力越强，但开发节奏慢、双端要维护两套代码。
+      选型不是找「最好的方案」，而是在这条光谱上找<strong>业务约束对应的那个位置</strong>。</p>
+
+    <h3>二、四维评估法：给每个方案打分</h3>
+    <p>拍脑袋容易翻车，工程上通行的是四个维度逐项打分：</p>
+    <ul>
+      <li><strong>性能体验</strong>：渲染路径长短、动画流畅度、启动速度——重交互场景的一票否决项。</li>
+      <li><strong>开发效率</strong>：改版发布节奏、热更新能力、一套代码复用度——活动类页面的生命线。</li>
+      <li><strong>团队技术栈</strong>：团队是 React 栈还是原生栈？会不会 Dart？这是经常被低估的硬约束——
+        方案再好，团队驾驭不了就是负资产。</li>
+      <li><strong>生态成熟度</strong>：组件库、坑的文档、招人难度——冷门方案省下的工时会在排坑时加倍还回去。</li>
+    </ul>
+    <p>给每个维度一个权重（按场景定），加权总分最高的方案就是当前约束下的推荐——
+      注意是「当前约束下」：换一个场景重排权重，推荐很可能就换了。</p>
+
+    <h3>三、三个典型场景走一遍</h3>
+    <p><strong>电商大促会场页</strong>：一周改三版、几天内上线、还要同时投 App 内与小程序。
+      开发效率与多端复用权重拉满，性能只要「够用」——H5 / 小程序一类 Web 容器方案胜出，
+      原生壳配上离线包兜住首屏。<strong>工具类 App</strong>：交互较复杂、长期迭代、团队是前端 React 栈——
+      性能与效率都要，RN 顺理成章；若更看重双端像素一致，Flutter 是有力备选。
+      <strong>重交互核心链路</strong>（交易下单、密集动画）：性能上限一票否决——
+      Flutter 或原生优先，且核心交易模块往往保留原生兜底。</p>
+
+    <h3>四、混合策略：成熟团队的组合拳</h3>
+    <p>真实项目很少「一股脑全跨端」或「全部原生」，而是<strong>按模块分而治之</strong>：
+      交易、支付等核心链路用原生或高性能方案保体验上限；
+      运营活动、内容展示等常改页面用 H5 换发版自由；多端铺量的小程序用一套跨端框架维护。
+      「核心原生 + 边缘跨端」的组合，让每个模块都落在光谱上最合适的位置——
+      这也是面试里最能体现工程判断力的答案。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比：通勤选交通工具</div>
+      <p>搬家前先搞清楚通勤怎么走。<strong>地铁（原生）</strong>速度最快、班次稳定，
+        但线路是修出来的——不到你家门口，你就得为「最后三公里」另外想办法，修线路的成本极高（原生开发慢、双端各一套）。
+        <strong>共享单车（H5）</strong>随处可用、扫码就走（改版即上线、端端能跑），
+        但刮风下雨、远距离就吃不消（复杂交互与性能上限低）。
+        <strong>网约车（RN / Flutter）</strong>在两者之间：随时叫车、速度不错、价钱适中（跨端复用 + 性能够用）。</p>
+      <p>真正的通勤高手不会迷信某一种车：先看<strong>今天去哪儿、几点出门、几个人同行</strong>
+        （场景与约束），再决定坐什么；甚至地铁加单车组合着来（混合策略）。
+        让一个天天坐地铁的人改骑单车上班，和让一个买菜的人天天打车，都是「方案没错、场景配错」——
+        选型失误的根源从来不是车不好，而是没先看路。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：可交互选型对比矩阵（切场景 / 点维度筹码排除维度，实时重算推荐） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>下面是一台「选型计算器」：先点一个业务场景，四个维度的权重随之变化，五个方案的加权总分与推荐实时重算；
+      再试试<strong>点击维度筹码</strong>把它临时排除（权重清零），看看「只看性能」或「不管团队」时排名会怎么变：</p>
+    <div class="anim-stage">
+      <div class="ch-scenarios">
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm is-active" id="ch-sc-a">场景一：电商大促会场页</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="ch-sc-b">场景二：工具类 App 核心界面</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="ch-sc-c">场景三：重交互核心链路</button>
+      </div>
+      <p class="ch-desc" id="ch-desc"></p>
+      <div class="ch-dims">
+        <span class="ch-dims-label">维度权重（点击筹码可临时排除该维度）：</span>
+        <span id="ch-dims-chips"></span>
+      </div>
+      <div id="ch-matrix"></div>
+      <p class="ch-reason" id="ch-reason"></p>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（真实课程路径） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：三条技术路线各自成一页——
+      <a href="./m5-rn.html">React Native 原理</a>、<a href="./m5-flutter.html">Flutter 自绘引擎</a>、
+      <a href="./m5-hybrid.html">Hybrid 开发与 JSBridge</a>。本页把它们的强弱项放上同一个天平。</p>
+    <p><strong>向后延伸</strong>：选型的论证过程正是面试项目深挖的常客——把本页的四维评估与混合策略
+      组织成自己的答题框架，配合「小程序一族」的原理页复习效果更佳。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="./m5-mp-arch.html">小程序双线程架构</a> ——
+        小程序在光谱上的位置由它的双线程设计决定，先懂原理再看选型排名。</li>
+      <li><a href="./m5-mp-web.html">小程序与 Web 的差异</a> ——
+        「多端铺量」场景里小程序为什么常与 H5 并列出镜。</li>
+      <li><a href="../../pages/m4/m4-cwv.html">Core Web Vitals 性能指标</a> ——
+        「性能体验」这个维度怎么量化：不是感觉快慢，而是可度量的指标。</li>
+      <li><a href="../../pages/m2/m2-pipeline.html">浏览器渲染流水线</a> ——
+        光谱从左到右的性能差距，根源都在渲染路径的长短。</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（mode:'main'） -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后把最佳成绩写入进度仓库（见页面底部内联脚本）：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：选跨端方案就像选交通工具——先看要去哪儿、多急、几个人，
+      再决定坐地铁（原生）、打车（RN / Flutter）还是骑共享单车（H5）；而且成熟团队常常几种车换着坐，
+      核心路段坐地铁，最后一公里骑单车。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前复述 1 次，1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：让你为一个新产品选跨端方案，你会怎么论证？</summary>
+      <ul>
+        <li>先讲方法再给结论：明确场景与约束（性能要求、迭代节奏、团队栈、目标端），再上四维评估（性能体验、开发效率、团队技术栈、生态成熟度）。</li>
+        <li>列出候选光谱：H5 / 小程序 / RN / Flutter / 原生各自的位置，说明为何纳入或排除某几个。</li>
+        <li>按场景给权重打分，输出推荐与<strong>混合策略</strong>：核心模块原生保上限、活动与内容模块跨端换效率。</li>
+        <li>补充风险与再评估触发条件：如团队扩招、性能不达标、生态变化时重审选型。</li>
+        <li>加分项：能引用典型结论——大促页 H5 优先、工具类 RN/Flutter 看团队栈、重交互链路原生或 Flutter 兜底。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：跨端方案的性能差距，根源是什么？</summary>
+      <ul>
+        <li>渲染路径：WebView 渲染走完整浏览器管线；RN 映射原生控件（旧架构有跨语言桥）；Flutter 自绘指令直达 GPU；原生路径最短。</li>
+        <li>跨边界通信开销：JSBridge 传参序列化、小程序 setData 跨线程、旧 RN Bridge 的 JSON 消息，高频通信时都会成为瓶颈。</li>
+        <li>启动与体积：WebView 初始化、JS 引擎启动、Flutter 引擎打进包的固定增量，各有代价。</li>
+        <li>结论表述：性能差异不是「跨端」三个字的锅，而是「谁画像素、消息怎么过界」这两个架构决定的。</li>
+        <li>加分项：把该结论与四维评估法勾连——性能维度的打分依据正是这些架构事实，而非口碑。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* ============================================================
+ * 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评
+ * ============================================================ */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm5-choose'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'） */
+  var WARMUP = [{
+    id: 'm5-choose-warmup-1',
+    type: 'single',
+    stem: '预热：跨端方案选型的第一步应该是？',
+    options: [
+      '直接选团队最熟的技术，熟练度就是生产力',
+      '选 GitHub 星星最多的框架，社区热代表一切',
+      '先明确业务场景与约束（性能、迭代节奏、团队栈、目标端），再按维度匹配方案'
+    ],
+    answer: [2],
+    explain: '选型的本质是「约束求解」：先明确场景与约束，权重才有的放矢。团队熟悉度确实是重要维度之一，但它只是四维评估中的一维，不能替代对场景的分析。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm5-choose-q1',
+      type: 'single',
+      stem: '电商大促会场页：一周改三版、几天内要上线、需同时投放 App 内与小程序。主页面最适合的方案是？',
+      options: [
+        '纯原生开发，双端各写一套，体验最好',
+        'H5 / 小程序类 Web 容器方案，原生壳配离线包优化首屏',
+        'Flutter 全量自绘，保证双端像素一致',
+        '自研一套新跨端框架，长期收益最大'
+      ],
+      answer: [1],
+      explain: '会场页的核心约束是「改版快 + 多端投放」，性能只需够用——权重落在开发效率与生态复用上，H5 / 小程序改版即上线、一套内容多端跑，正中要害；离线包与缓存把首屏速度兜住。A 用上限最高的方案去打效率瓶颈，工期直接爆；C 的像素一致对该场景并非痛点，D 在工期以天计的项目里是典型的过度设计。'
+    },
+    {
+      id: 'm5-choose-q2',
+      type: 'multi',
+      stem: '关于四维评估法与混合策略，下列说法正确的有？',
+      options: [
+        '团队技术栈是硬约束之一：方案再先进，团队驾驭不了就是负资产',
+        '「核心模块原生 + 边缘模块跨端」是工程上常见的折中组合拳',
+        '跨端方案的性能上限普遍高于原生开发',
+        '四维评估中只要「性能体验」得分最高，就无脑选它，其余维度可以忽略'
+      ],
+      answer: [0, 1],
+      explain: 'A、B 正是本页的两个核心方法论：团队栈决定方案能否真正落地，混合策略让每个模块落在光谱上最合适的位置。C 说反了——渲染路径决定了跨端方案的性能上限普遍不高于原生，选型是在「够用的性能」与「更高的效率」之间做交换。D 是典型误区：四维的价值就在于权重因场景而变，只看单一维度等于回到拍脑袋。'
+    },
+    {
+      id: 'm5-choose-q3',
+      type: 'code',
+      stem: '手写按权重打分的选型函数 pickTech(candidates, weights)：candidates 是方案数组，每项形如 { name: "Flutter", scores: { perf: 5, speed: 3, team: 2, eco: 4 } }；weights 是各维度权重，形如 { perf: 3, speed: 2, team: 1, eco: 2 }。总分 = 各维度（得分 × 权重）之和，候选缺少某维度按 0 分计；返回总分最高的方案名，并列时返回数组中先出现的那个，候选为空返回 null。',
+      stub: 'function pickTech(candidates, weights) {\n  // candidates: [{ name, scores: { perf, speed, team, eco } }, ...]\n  // weights:    { perf, speed, team, eco }（部分维度可缺省）\n  // 规则：总分 = Σ(得分 × 权重)；缺维度按 0 分；并列取先出现者；空数组返回 null\n}\n',
+      reference: 'function pickTech(candidates, weights) {\n  var best = null, bestScore = -Infinity;\n  (candidates || []).forEach(function (c) {\n    var total = 0;\n    Object.keys(weights || {}).forEach(function (dim) {\n      total += ((c.scores || {})[dim] || 0) * weights[dim];   // 缺维度按 0 分计\n    });\n    if (total > bestScore) {          // 严格大于：并列时保留先出现者\n      bestScore = total;\n      best = c.name;\n    }\n  });\n  return best;\n}',
+      asserts: [
+        'pickTech([{name:"A",scores:{perf:5}},{name:"B",scores:{perf:4}}],{perf:2}) === "A"',
+        'pickTech([{name:"A",scores:{perf:5}},{name:"B",scores:{perf:1,eco:5}}],{perf:1,eco:1}) === "B"',
+        'pickTech([{name:"A",scores:{perf:3}},{name:"B",scores:{perf:3}}],{perf:2}) === "A"',
+        'pickTech([],{perf:1}) === null'
+      ],
+      explain: '这道题就是把「四维评估法」写成了可执行的代码——本页动画里的推荐排名，正是这么算出来的。三个易错点都有工程含义：其一，缺维度按 0 分计（第二条断言里 A 的 eco 缺失，总分 5 输给 B 的 6），对应「方案在某维度没有积累时不能假装它有分」；其二，比较用严格大于号，并列时自然保留先出现者，与动画「同分取先」规则一致；其三，初始 bestScore 用负无穷而不是 0，否则「全负分」的候选会被误判为没有赢家。把选型逻辑沉淀成这样一个纯函数，场景权重一变、结论立刻重算——这正是「选型是推理不是站队」的代码表达。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ============================================================
+ * ③ 动画演示：可交互选型对比矩阵
+ * 场景按钮切换权重模板 → 实时重算五个方案的加权总分；
+ * 点击维度筹码可临时把该维度权重清零，观察「只看某几维」时排名怎么变
+ * ============================================================ */
+(function () {
+  'use strict';
+
+  /* 候选方案光谱（得分 1~5）：从左到右渲染路径变短、性能上限变高 */
+  var CANDIDATES = [
+    { name: 'H5（WebView）', scores: { perf: 2, speed: 5, team: 5, eco: 5 } },
+    { name: '小程序', scores: { perf: 3, speed: 4, team: 4, eco: 4 } },
+    { name: 'React Native', scores: { perf: 4, speed: 4, team: 4, eco: 4 } },
+    { name: 'Flutter', scores: { perf: 5, speed: 3, team: 2, eco: 4 } },
+    { name: '原生开发', scores: { perf: 5, speed: 1, team: 1, eco: 5 } }
+  ];
+
+  /* 四个评估维度 */
+  var DIMS = [
+    { key: 'perf', label: '性能体验' },
+    { key: 'speed', label: '开发效率' },
+    { key: 'team', label: '团队栈' },
+    { key: 'eco', label: '生态成熟度' }
+  ];
+
+  /* 三个典型场景：约束描述 + 各维度权重 + 推荐理由 */
+  var SCENARIOS = {
+    a: {
+      label: '电商大促会场页',
+      desc: '约束：一周改三版、几天内上线、同时投放 App 内与小程序——改得快、铺得广比极限性能重要。',
+      weights: { perf: 1, speed: 3, team: 3, eco: 2 },
+      reason: '会场页是典型的「内容常变型」页面，开发效率与多端复用权重拉满，性能够用即可；原生壳可用离线包把首屏兜住。'
+    },
+    b: {
+      label: '工具类 App 核心界面',
+      desc: '约束：交互较复杂、要长期迭代、团队是前端 React 栈——性能不能拉胯，节奏也不能慢。',
+      weights: { perf: 3, speed: 2, team: 2, eco: 1 },
+      reason: '团队 React 栈让 RN 的组件模型平滑复用，性能对工具类场景足够；若更看重双端像素一致与动画上限，可再评估 Flutter。'
+    },
+    c: {
+      label: '重交互核心链路',
+      desc: '约束：动画密集、交易链路、体验上限一票否决——这里性能权重必须拉满。',
+      weights: { perf: 4, speed: 1, team: 1, eco: 1 },
+      reason: '自绘管线的帧稳定性占优；注意工程上仍常用混合策略——核心交易与深度系统能力保留原生兜底，业务面用跨端提效。'
+    }
+  };
+
+  var current = 'a';      // 当前场景
+  var excluded = {};      // 被临时排除的维度：key → true（权重按 0 计）
+
+  var descEl = document.getElementById('ch-desc');
+  var chipsEl = document.getElementById('ch-dims-chips');
+  var matrixEl = document.getElementById('ch-matrix');
+  var reasonEl = document.getElementById('ch-reason');
+  var scBtns = {
+    a: document.getElementById('ch-sc-a'),
+    b: document.getElementById('ch-sc-b'),
+    c: document.getElementById('ch-sc-c')
+  };
+
+  /* 矩阵行先建一次（条形图靠 CSS transition 呈现动画），之后只更新数据 */
+  var rows = CANDIDATES.map(function (c) {
+    var row = document.createElement('div');
+    row.className = 'ch-row';
+    var name = document.createElement('span');
+    name.className = 'ch-name';
+    name.textContent = c.name;
+    var wrap = document.createElement('div');
+    wrap.className = 'ch-barwrap';
+    var bar = document.createElement('div');
+    bar.className = 'ch-bar';
+    wrap.appendChild(bar);
+    var score = document.createElement('span');
+    score.className = 'ch-score';
+    var badge = document.createElement('span');
+    badge.className = 'ch-badge';
+    badge.textContent = '推荐';
+    row.appendChild(name);
+    row.appendChild(wrap);
+    row.appendChild(score);
+    row.appendChild(badge);
+    matrixEl.appendChild(row);
+    return { root: row, bar: bar, score: score };
+  });
+
+  /* 维度筹码：点击在「计入 / 排除」间切换 */
+  var chipBtns = {};
+  DIMS.forEach(function (d) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'fg-btn fg-btn--ghost fg-btn--sm';
+    b.addEventListener('click', function () {
+      excluded[d.key] = !excluded[d.key];
+      render();
+    });
+    chipsEl.appendChild(b);
+    chipBtns[d.key] = b;
+  });
+
+  /* 生效权重：场景模板权重，被排除的维度按 0 计 */
+  function effectiveWeights() {
+    var base = SCENARIOS[current].weights;
+    var out = {};
+    DIMS.forEach(function (d) {
+      out[d.key] = excluded[d.key] ? 0 : (base[d.key] || 0);
+    });
+    return out;
+  }
+
+  /* 主渲染：算总分 → 更新条形与徽标 → 更新理由文案 */
+  function render() {
+    var scen = SCENARIOS[current];
+    var w = effectiveWeights();
+
+    /* 筹码外观 */
+    DIMS.forEach(function (d) {
+      var off = !!excluded[d.key];
+      chipBtns[d.key].classList.toggle('is-off', off);
+      chipBtns[d.key].textContent = d.label + ' ×' + (off ? 0 : scen.weights[d.key]);
+    });
+
+    /* 加权总分与满分（用于归一化条长） */
+    var bestIdx = -1, bestTotal = -Infinity, maxTotal = 0;
+    var totals = CANDIDATES.map(function (c, i) {
+      var total = 0;
+      DIMS.forEach(function (d) { total += (c.scores[d.key] || 0) * w[d.key]; });
+      if (total > bestTotal) { bestTotal = total; bestIdx = i; }
+      return total;
+    });
+    DIMS.forEach(function (d) { maxTotal += 5 * w[d.key]; });
+
+    /* 更新行：条长动画、分数、推荐徽标 */
+    totals.forEach(function (total, i) {
+      var pct = maxTotal > 0 ? Math.round(total / maxTotal * 100) : 0;
+      rows[i].bar.style.width = pct + '%';
+      rows[i].score.textContent = String(total);
+      rows[i].root.classList.toggle('is-best', i === bestIdx);
+    });
+
+    /* 场景描述与理由 */
+    descEl.textContent = scen.desc;
+    var excludedList = DIMS.filter(function (d) { return excluded[d.key]; })
+      .map(function (d) { return d.label; }).join('、');
+    reasonEl.innerHTML =
+      '<strong>当前推荐：' + FG.esc(CANDIDATES[bestIdx].name) + '（' + bestTotal + ' 分）</strong>' +
+      ' —— ' + FG.esc(scen.reason) +
+      (excludedList ? '（注意：你已临时排除了「' + FG.esc(excludedList) + '」，排名按剩余维度实时重算）' : '');
+  }
+
+  /* 场景切换：重置临时排除，权重模板整体替换 */
+  function setScenario(key) {
+    current = key;
+    excluded = {};
+    Object.keys(scBtns).forEach(function (k) {
+      scBtns[k].classList.toggle('is-active', k === key);
+    });
+    render();
+  }
+  scBtns.a.addEventListener('click', function () { setScenario('a'); });
+  scBtns.b.addEventListener('click', function () { setScenario('b'); });
+  scBtns.c.addEventListener('click', function () { setScenario('c'); });
+
+  render();
+})();
+</script>
+</body>
+</html>

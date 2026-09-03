@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>运行时优化：防抖、节流与计算缓存 · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ========== 本页动画专用样式：防抖电梯 与 节流闸机 对比台 ========== */
+.rt-panel {
+  border: 1px solid #d5dbe8;
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px 12px;
+  margin: 10px 0;
+}
+.rt-panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 13px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.rt-panel-head b { font-size: 14px; }
+.rt-panel-note { font-size: 12px; color: #6b7488; margin: 6px 0; }
+.rt-bar {
+  height: 14px;
+  border-radius: 999px;
+  background: #eef1f7;
+  overflow: hidden;
+  margin: 6px 0;
+}
+.rt-bar-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+}
+.rt-bar-fill.is-db { background: linear-gradient(90deg, #6f92ff, #4c6fff); }
+.rt-bar-fill.is-th { background: linear-gradient(90deg, #ffc46f, #f59e0b); }
+.rt-panel-actions { display: flex; gap: 8px; margin-top: 6px; }
+</style>
+</head>
+<body data-page="m4-runtime">
+
+<!-- 壳层自动渲染区：site.js 检测到 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">浏览器主线程只有一条，滚动、输入这类事件每秒能触发几十上百次。防抖、节流、计算缓存是三件最常用的「限流与省力」工具，也是手写题的常客。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>建议先过一遍前置知识：<a href="../m1/m1-js-scope.html">JS 类型、作用域与闭包</a>——防抖和节流的实现全靠「闭包里保存定时器变量」，闭包不牢，手写必翻车。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：讲解 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>问题从哪来：主线程只有一条</h3>
+    <p>浏览器用一条主线程跑 JS、排排版、响应点击。scroll、input、mousemove 这类事件<strong>触发频率远高于人眼需要的更新频率</strong>——滚动一秒能触发上百次回调。如果每次回调都做重活（发请求、算布局），页面就卡。思路于是很朴素：<strong>少干、按需干、干过的别重干。</strong></p>
+
+    <h3>防抖（debounce）：等你彻底停手再执行</h3>
+    <p>防抖的规则：<strong>事件停止触发 wait 毫秒后，才执行一次；期间每多触发一次，就重新计时。</strong>就像电梯关门：有人陆续进来，门就一直推迟关闭，直到几秒内没人再进来，门才真的关上。适合「只关心最后一次」的场景：搜索框输入联想（等用户停手再发请求）、输入实时校验、窗口 resize 结束后重算布局。</p>
+
+    <h3>节流（throttle）：按固定频率放行</h3>
+    <p>节流的规则：<strong>无论触发多频繁，每 interval 毫秒内最多执行一次</strong>，像地铁闸机每两秒只放一个人，排队再长也按固定节奏走。适合「过程本身需要持续反馈」的场景：滚动监听（吸顶、回到顶部按钮显隐）、mousemove 拖拽、按钮防连点。实现上分「首次立即执行」和「结束后补一次」两种流派，核心不变：单位时间内只放行一个。</p>
+
+    <h3>怎么选：一句话对照</h3>
+    <ul>
+      <li>只要<strong>最终结果</strong>（最后一次输入）→ 防抖；比如搜索联想，前 99 次按键的请求都是浪费。</li>
+      <li>要<strong>过程中的反馈</strong>（滚动位置）→ 节流；防抖会让反馈「憋」到你停下来才出现。</li>
+      <li>两者都靠<strong>闭包保存定时器状态</strong>——这正是前置知识的作用。</li>
+    </ul>
+
+    <h3>计算缓存（记忆化）：把算过的答案抄下来</h3>
+    <p>对<strong>纯函数</strong>（同样的输入永远得到同样的输出、不产生副作用），重复计算就是浪费。记忆化的做法：用 Map 以「参数」为键缓存「结果」，再问同一道题直接念答案，以空间换时间。两个注意点：参数是对象时要先序列化再当键；缓存要设上限或过期策略，否则越攒越大。Vue/React 里的 computed、useMemo 都是这一思想的产品化。</p>
+
+    <h3>顺带一提：虚拟滚动</h3>
+    <p>一万行的列表不必渲染一万个 DOM：只渲染<strong>可视区上下再加一段缓冲</strong>的那几十行，滚动时动态替换内容、用上下留白撑出总高度。DOM 数量恒定，滚动才不掉帧——它和节流配合，是长列表的标配组合。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 电梯、闸机与数学家的便签</div>
+      <p><strong>防抖是电梯关门键</strong>：你按下关门，快合上时有人跑进来，门「叮」一声重新打开、重新倒计时；陆陆续续进来十个人，就重计十次。直到 3 秒内没人再进来，门才真正关上、电梯启动。对应到搜索框：用户每敲一个字都重置计时，停手 300 毫秒后才发<strong>唯一一次</strong>请求——前面 99 次冲动全部作废，正合「最后按的人说了算」。</p>
+      <p><strong>节流是地铁早高峰的闸机</strong>：无论站台上挤了多少人，闸机每 2 秒只放行一个，节奏雷打不动；狂按刷卡也没用，下一秒自然轮到你。对应到滚动监听：不管 scroll 一秒触发多少次，回调每 200 毫秒最多执行一次，界面以稳定频率更新，主线程不被打爆。</p>
+      <p><strong>计算缓存是数学家的便签</strong>：有人反复问他「37 乘以 43 等于几」，他第一次老老实实算出 1591，顺手抄在便签上；之后再有人问，他瞄一眼便签直接报答案——算力没花，结果一样。唯一的风险是便签贴满一面墙（缓存膨胀），得定期撕掉几张。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：防抖电梯 vs 节流闸机，点击按钮对比触发与执行次数 -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>两个面板各有一个按钮，代表高频事件。疯狂连点它们，对比「触发次数」与「真正执行次数」的差距。</p>
+    <div class="anim-stage">
+      <p class="anim-caption">面板一：防抖（电梯）——每次触发都重置倒计时，停手 1.2 秒后才执行一次；面板二：节流（闸机）——首次立即执行，随后冷却 1.2 秒，冷却期内的触发全部忽略：</p>
+      <div class="rt-panel">
+        <div class="rt-panel-head">
+          <b>防抖 · 电梯关门</b>
+          <span>触发 <b id="rt-db-count">0</b> 次 / 执行 <b id="rt-db-exec">0</b> 次</span>
+        </div>
+        <div class="rt-bar"><div class="rt-bar-fill is-db" id="rt-db-fill"></div></div>
+        <p class="rt-panel-note" id="rt-db-note">静默倒计时未启动——点击下方按钮模拟事件触发。</p>
+        <div class="rt-panel-actions">
+          <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="rt-db-btn">触发事件（有人进电梯）</button>
+        </div>
+      </div>
+      <div class="rt-panel">
+        <div class="rt-panel-head">
+          <b>节流 · 地铁闸机</b>
+          <span>触发 <b id="rt-th-count">0</b> 次 / 执行 <b id="rt-th-exec">0</b> 次</span>
+        </div>
+        <div class="rt-bar"><div class="rt-bar-fill is-th" id="rt-th-fill"></div></div>
+        <p class="rt-panel-note" id="rt-th-note">闸机空闲——首次刷卡立即放行，随后进入 1.2 秒冷却。</p>
+        <div class="rt-panel-actions">
+          <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="rt-th-btn">触发事件（有人刷卡）</button>
+        </div>
+      </div>
+      <div class="anim-console" id="rt-console">
+        <div class="anim-line is-muted">分别在两个面板连续点击按钮，观察执行次数的差异…</div>
+      </div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="rt-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接 -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="../m1/m1-js-scope.html">JS 类型、作用域与闭包</a>——防抖节流的实现核心是「闭包里的定时器变量」，先弄懂闭包再手写不迟。</p>
+    <p><strong>向后延伸</strong>：本页是手写题的地基，<a href="../m7/m7-handwrite-basic.html">手写题·JS 基础篇</a>会在这版基础上加「立即执行选项」「取消功能」等面试要求。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="../m1/m1-js-eventloop.html">事件循环与任务队列</a> —— setTimeout 到底何时执行，决定了防抖节流的「时间感」</li>
+      <li><a href="../m1/m1-js-scope.html">JS 类型、作用域与闭包</a> —— 闭包让每次返回的防抖函数都记得「自己的」定时器</li>
+      <li><a href="../m7/m7-handwrite-basic.html">手写题·JS 基础篇（防抖节流、深拷贝、柯里化）</a> —— 带选项的完整版手写与答题套路</li>
+      <li><a href="../m5/m5-mp-arch.html">小程序双线程架构</a> —— 另一个「高频调用拖垮性能」的现场：频繁 setData 同样需要节流</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：1 道选择 + 2 道代码题（mode:'main'） -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>代码题请动手补全 stub；为便于断言，定时器函数通过参数注入（真实场景传入 setTimeout 即可）。</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：防抖是等用户彻底停手再干活（电梯等人进完才关门），节流是按固定节奏干活（闸机每两秒放一个人），计算缓存是把算过的答案抄在便签上，下次直接念。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前复述 1 次，1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：手写防抖和节流，并说明各自的适用场景。</summary>
+      <ul>
+        <li>防抖要点：闭包保存定时器 id；每次触发先 clearTimeout 旧的再重设；执行时用闭包保留的 this 和 arguments 调原函数。</li>
+        <li>节流要点：时间戳版（距上次执行超过 interval 才放行）或定时器冷却版（冷却期内直接 return）；两种都保证单位时间最多一次。</li>
+        <li>场景辨析：搜索联想、输入校验用防抖（只要最后一次）；滚动/resize/mousemove 监听用节流（要过程反馈）；按钮防连点常配节流。</li>
+        <li>加分项：能说出进阶需求——立即执行选项、取消方法、最后一次触发的尾随执行。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：除了防抖和节流，高频计算场景还有哪些优化手段？</summary>
+      <ul>
+        <li>计算缓存（记忆化）：纯函数以参数为键缓存结果，适合重复输入多的场景；注意缓存上限与失效策略。</li>
+        <li>虚拟滚动：长列表只渲染可视区加缓冲的几十行，DOM 数量恒定。</li>
+        <li>任务切片：把长任务拆成小块放进 requestAnimationFrame 或 setTimeout 分帧执行，避免长时间霸占主线程（对应 INP 指标）。</li>
+        <li>Web Worker：把纯计算挪到后台线程，主线程只收结果。</li>
+        <li>本质一句话：减少计算量（缓存）、摊平计算密度（防抖节流切片）、转移计算位置（Worker）。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm4-runtime'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'） */
+  var WARMUP = [{
+    id: 'm4-runtime-warmup-1',
+    type: 'single',
+    stem: '预热：搜索框每敲一个字就发一次请求，后端快被刷爆了。最直接的解决办法是？',
+    options: [
+      '换更快的网络',
+      '等用户停手一段时间后再发请求（防抖）',
+      '每个请求都发两遍保证成功',
+      '把搜索框去掉'
+    ],
+    answer: [1],
+    explain: '搜索联想只关心「最后一次输入」，防抖正好只放行最后一次：每次按键重置计时，停手才发请求。这比换网络实在得多，也不会重复请求。'
+  }];
+
+  /* 正式例题（mode:'main'）：1 道选择 + 2 道代码题（防抖 / 节流，注入时钟以便断言） */
+  var QUESTIONS = [
+    {
+      id: 'm4-runtime-q1',
+      type: 'single',
+      stem: '监听 window 的 scroll 事件控制「回到顶部」按钮的显隐，为什么常用节流而不是防抖？',
+      options: [
+        'scroll 事件不支持防抖，加了会报错',
+        '防抖要等滚动彻底停下才执行，滚动过程中按钮状态一直不更新；节流保证滚动期间以固定频率更新',
+        '节流更节省内存，防抖会内存泄漏',
+        '两者没有区别，纯粹是习惯问题'
+      ],
+      answer: [1],
+      explain: '按钮显隐需要「滚动过程中的持续反馈」：防抖会把反馈憋到用户停手后才给，滚动时按钮纹丝不动；节流每 interval 毫秒放行一次，反馈频率稳定。scroll 支持防抖也不泄漏内存，A、C 是迷惑项。'
+    },
+    {
+      id: 'm4-runtime-q2',
+      type: 'code',
+      stem: '手写防抖 debounce(fn, wait, setT, clearT)：连续触发时只执行最后一次，每次触发都重新计时。setT/clearT 是注入的定时器函数（真实场景即 setTimeout/clearTimeout），便于沙箱同步断言。要求：保留最后一次触发的参数；前几次触发的定时器要被真正取消。',
+      stub: 'function debounce(fn, wait, setT, clearT) {\n  // 在此实现：\n  // 1) 闭包变量保存当前定时器 id\n  // 2) 返回一个新函数：每次调用先清掉旧定时器，再用 setT 重新计时\n  // 3) 静默期满后用「最后一次触发时的参数」调用 fn\n  var st = setT || setTimeout;   // 注入的定时器（默认真 setTimeout）\n  var ct = clearT || clearTimeout;\n  // 提示：返回的函数里用闭包记住 this 和 arguments，到期时 fn.apply 回去\n}\n',
+      reference: 'function debounce(fn, wait, setT, clearT) {\n  var st = setT || setTimeout;\n  var ct = clearT || clearTimeout;\n  var timer = null;                    // 闭包变量：当前这轮的定时器 id\n  return function () {\n    var self = this, args = arguments; // 记住本次触发的 this 与参数\n    if (timer !== null) ct(timer);     // 又触发了：取消上一轮的闹钟\n    timer = st(function () {\n      timer = null;\n      fn.apply(self, args);            // 静默期满：用最后一次的参数执行\n    }, wait);\n  };\n}',
+      asserts: [
+        '(function () { var log = []; var clock = []; function setT(task) { clock.push(task); return clock.length; } function clearT(id) { clock[id - 1] = null; } function flush() { var due = clock; clock = []; due.forEach(function (t) { if (t) t(); }); } var d = debounce(function (x) { log.push(x); }, 300, setT, clearT); d("a"); d("b"); d("c"); flush(); return log.length === 1 && log[0] === "c"; })()',
+        '(function () { var pending = 0; function setT() { pending += 1; return pending; } function clearT() { pending -= 1; } var d = debounce(function () {}, 300, setT, clearT); d(); d(); d(); return pending === 1; })()',
+        '(function () { var log = []; var clock = []; function setT(task) { clock.push(task); return clock.length; } function clearT(id) { clock[id - 1] = null; } function flush() { var due = clock; clock = []; due.forEach(function (t) { if (t) t(); }); } var d = debounce(function (n) { log.push(n); }, 300, setT, clearT); d(1); flush(); d(2); flush(); return log.join("") === "12"; })()'
+      ],
+      explain: '断言 1 是灵魂：连喊三声只应最后一次——每次触发 clearTimeout 掉上一轮，所以只有 d("c") 的定时器活到了静默期满。断言 2 验证「取消」是真的发生了：三次触发后待执行定时器只剩 1 个，说明 clearTimeout 确实在清。断言 3 验证防抖不是只执行一次就失效：两轮相隔较远的触发各执行一次，且参数分别被正确保留。this/args 的保留靠闭包里的 self/args 变量，这是面试追问的高频点。'
+    },
+    {
+      id: 'm4-runtime-q3',
+      type: 'code',
+      stem: '手写节流 throttle(fn, interval, setT)：首次触发立即执行，随后进入 interval 毫秒冷却期，冷却期内的所有触发直接忽略，冷却结束后才接受下一次。setT 是注入的定时器函数（真实场景即 setTimeout）。',
+      stub: 'function throttle(fn, interval, setT) {\n  // 在此实现（冷却期式节流）：\n  // 1) 闭包布尔变量表示「是否冷却中」\n  // 2) 触发时若冷却中 → 直接 return（忽略）\n  // 3) 否则立即执行 fn，进入冷却，setT 到点后解除冷却\n  var st = setT || setTimeout;   // 注入的定时器（默认真 setTimeout）\n  // 提示：执行 fn 时用 fn.apply(this, arguments) 保留参数\n}\n',
+      reference: 'function throttle(fn, interval, setT) {\n  var st = setT || setTimeout;\n  var cooling = false;               // 冷却开关：true 表示这一拍已放行过\n  return function () {\n    if (cooling) return;             // 冷却期内：直接忽略本次触发\n    cooling = true;\n    fn.apply(this, arguments);       // 立即执行首次触发（立即执行流派）\n    st(function () { cooling = false; }, interval); // interval 后解除冷却\n  };\n}',
+      asserts: [
+        '(function () { var count = 0, timers = 0; function setT() { timers += 1; return timers; } var t = throttle(function () { count += 1; }, 500, setT); t(); t(); t(); return count === 1 && timers === 1; })()',
+        '(function () { var log = []; var tasks = []; function setT(task) { tasks.push(task); return tasks.length; } function runAll() { var due = tasks; tasks = []; due.forEach(function (f) { f(); }); } var t = throttle(function (n) { log.push(n); }, 500, setT); t(1); t(2); runAll(); t(3); t(4); runAll(); return log.join("") === "13"; })()',
+        '(function () { var got = null; function setT() { return 1; } var t = throttle(function (a, b) { got = a + b; }, 500, setT); t(20, 22); return got === 42; })()'
+      ],
+      explain: '断言 1：连按三下只执行 1 次、且只安排了 1 个冷却定时器——这就是「闸机每秒只放一人」。断言 2：t(1) 放行后 t(2) 被忽略；模拟时钟推进 500ms 冷却解除，t(3) 才被放行，t(4) 又被忽略，所以输出是 "13"——固定频率放行的完整节奏。断言 3 验证参数保留：fn.apply(this, arguments) 把 20 和 22 原样带给了原函数。注意本实现是「立即执行」流派，另有「尾随执行」流派（冷却结束时补执行最后一次），面试时能对比说出两者算加分。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库 */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：防抖电梯 vs 节流闸机（纯手写 DOM + 定时器驱动进度条，无动画库） */
+(function () {
+  'use strict';
+  var WAIT_MS = 1200;   // 静默期 / 冷却期时长（毫秒）
+  var TICK = 40;        // 进度条刷新间隔（毫秒）
+  var STEP = 100 / (WAIT_MS / TICK); // 每个 tick 前进的百分比
+
+  var dbFill = document.getElementById('rt-db-fill');
+  var dbNote = document.getElementById('rt-db-note');
+  var dbBtn = document.getElementById('rt-db-btn');
+  var dbCount = document.getElementById('rt-db-count');
+  var dbExec = document.getElementById('rt-db-exec');
+  var thFill = document.getElementById('rt-th-fill');
+  var thNote = document.getElementById('rt-th-note');
+  var thBtn = document.getElementById('rt-th-btn');
+  var thCount = document.getElementById('rt-th-count');
+  var thExec = document.getElementById('rt-th-exec');
+  var consoleEl = document.getElementById('rt-console');
+  var resetBtn = document.getElementById('rt-reset');
+
+  /* 防抖状态：count 触发次数 / exec 执行次数 / progress 倒计时进度 / running 是否在计时 */
+  var db = { count: 0, exec: 0, progress: 0, running: false };
+  /* 节流状态：cooling 是否冷却中，progress 为冷却进度 */
+  var th = { count: 0, exec: 0, progress: 0, cooling: false };
+
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  function paint() {
+    dbFill.style.width = db.progress + '%';
+    thFill.style.width = th.progress + '%';
+    dbCount.textContent = db.count;
+    dbExec.textContent = db.exec;
+    thCount.textContent = th.count;
+    thExec.textContent = th.exec;
+  }
+
+  /* 全局心跳：推进两条进度条 */
+  setInterval(function () {
+    if (db.running) {
+      db.progress += STEP;
+      if (db.progress >= 100) {
+        db.progress = 100;
+        db.running = false;
+        db.exec += 1;
+        dbNote.textContent = '静默期满 → 真正执行了一次（电梯关门）。再触发将重新计时。';
+        log('【防抖】静默期满，执行最后一次触发 → 第 ' + db.exec + ' 次真正执行', 'is-ok');
+      }
+    }
+    if (th.cooling) {
+      th.progress += STEP;
+      if (th.progress >= 100) {
+        th.progress = 0;
+        th.cooling = false;
+        thNote.textContent = '冷却结束，闸机就绪——下次刷卡立即放行。';
+        log('【节流】冷却结束，可以再次放行', 'is-muted');
+      }
+    }
+    paint();
+  }, TICK);
+
+  /* 防抖：每次触发都重置倒计时（电梯不断有人进来，门一直推迟关闭） */
+  dbBtn.addEventListener('click', function () {
+    db.count += 1;
+    db.progress = 0;
+    db.running = true;
+    dbNote.textContent = '第 ' + db.count + ' 次触发 → 倒计时重置为 0，重新等 1.2 秒…';
+    log('【防抖】第 ' + db.count + ' 次触发 → 计时重置（电梯门重新打开）');
+    paint();
+  });
+
+  /* 节流：冷却期内忽略，空闲时立即放行并进入冷却（闸机按固定节奏放人） */
+  thBtn.addEventListener('click', function () {
+    th.count += 1;
+    if (th.cooling) {
+      thNote.textContent = '冷却中 → 本次触发被忽略（闸机不放行）。';
+      log('【节流】第 ' + th.count + ' 次触发 → 冷却中，忽略', 'is-muted');
+    } else {
+      th.exec += 1;
+      th.cooling = true;
+      th.progress = 0;
+      thNote.textContent = '放行并执行 → 进入 1.2 秒冷却，期间触发全部忽略。';
+      log('【节流】第 ' + th.count + ' 次触发 → 立即放行执行（第 ' + th.exec + ' 次），开始冷却', 'is-ok');
+    }
+    paint();
+  });
+
+  /* 重置：清空全部状态与日志 */
+  resetBtn.addEventListener('click', function () {
+    db = { count: 0, exec: 0, progress: 0, running: false };
+    th = { count: 0, exec: 0, progress: 0, cooling: false };
+    dbNote.textContent = '静默倒计时未启动——点击下方按钮模拟事件触发。';
+    thNote.textContent = '闸机空闲——首次刷卡立即放行，随后进入 1.2 秒冷却。';
+    consoleEl.innerHTML = '';
+    log('已重置。疯狂连点两个按钮试试…', 'is-muted');
+    paint();
+  });
+
+  paint();
+})();
+</script>
+</body>
+</html>

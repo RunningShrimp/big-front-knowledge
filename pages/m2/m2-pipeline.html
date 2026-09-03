@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>浏览器渲染流水线 · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ===== 本页动画专用样式：装修流水线五工位，单步点亮演示 ===== */
+.pl-stations { display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0; }
+.pl-station {
+  flex: 1 1 150px; min-width: 140px; padding: 8px 10px; border-radius: 10px;
+  border: 2px solid #d5dbe7; background: #f7f9fc;
+  transition: border-color .3s, box-shadow .3s, background .3s, transform .3s;
+}
+.pl-station.is-lit {
+  border-color: #0FB5A6; background: #eafaf8; transform: translateY(-3px);
+  box-shadow: 0 0 0 3px rgba(15, 181, 166, .14);
+}
+.pl-station-step { font-size: 11px; color: #8a95ab; }
+.pl-station.is-lit .pl-station-step { color: #0a8d84; font-weight: 700; }
+.pl-station-name { font-weight: 700; font-size: 13px; color: #41506b; margin-top: 2px; }
+.pl-station-deco { font-size: 12px; color: #0FB5A6; margin-top: 4px; }
+.pl-station-desc { font-size: 12px; color: #6a7690; margin-top: 4px; line-height: 1.6; min-height: 58px; }
+.pl-stage-tag { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid #d5dbe7; color: #6a7690; margin-top: 8px; transition: all .3s; }
+.pl-stage-tag.is-on { border-color: #0FB5A6; color: #0a8d84; background: #eafaf8; }
+</style>
+</head>
+<body data-page="m2-pipeline">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">知识点：浏览器渲染流水线（建议学习时长约 25 分钟）——从一份 HTML 文本到满屏像素，浏览器要经过的五道工序。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>本页前置依赖：<a href="../m1/m1-css-box.html">CSS 盒模型与 Flex·Grid 布局</a>——流水线里的「布局」工位，量的正是盒模型的宽高与间距，先知道「盒子由哪四层组成」，再看浏览器怎么给盒子排位置。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：分小标题推进 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、从「一串文字」到「满屏像素」</h3>
+    <p>打开网页的瞬间，浏览器拿到的其实只是一串纯文本——HTML 源码；而屏幕上最终显示的是一格一格的像素。从「文本」到「像素」中间有一条<strong>固定的加工流水线</strong>：
+      解析 → 合成渲染树 → 布局 → 绘制 → 合成。这条流水线就叫<strong>渲染流水线</strong>。理解了它，后面所有性能优化的讨论（这一模块后面的重排重绘、性能指标）都有了坐标系：任何一次页面改动，本质上都是问「流水线要从哪一站重新跑」。</p>
+
+    <h3>二、第一站：解析出两棵树——DOM 与 CSSOM</h3>
+    <p>浏览器读 HTML 是<strong>从上到下逐个标签</strong>读的：读到 <code>&lt;html&gt;</code> 搭树根，读到 <code>&lt;body&gt;</code> 长枝干，读到段落、图片就长出叶子——最终搭成一棵 <strong>DOM 树</strong>（文档对象模型），它回答「页面上有什么、什么结构」。
+      与此同时，遇到 CSS（无论是 <code>&lt;style&gt;</code> 内嵌还是 <code>&lt;link&gt;</code> 外链），浏览器会逐条解析出 <strong>CSSOM 树</strong>：它回答「每类节点长什么样」。为什么要分成两棵树？因为「结构」与「样式」职责不同：结构基本只在加载时构建一次，而样式可能被脚本随时增删，分开管理才能各自缓存、按需更新。</p>
+
+    <h3>三、第二站：合成渲染树——只留「画得到」的</h3>
+    <p>两棵树都就位后，浏览器遍历 DOM 中的<strong>可见节点</strong>，去 CSSOM 里查出它应该有的样式，组装成<strong>渲染树（Render Tree）</strong>。两个高频细节：
+      <code>&lt;head&gt;</code>、<code>display: none</code> 的节点<strong>不在渲染树里</strong>（它们根本不会画上屏幕）；而 <code>visibility: hidden</code> 的节点<strong>在渲染树里</strong>（看不见但占着位置，仍要参与布局）。所以「DOM 里有」和「屏幕上画」不是一回事，渲染树就是二者的分界线。</p>
+
+    <h3>四、第三站与第四站：布局（Layout）与绘制（Paint）</h3>
+    <p><strong>布局</strong>：拿着盒模型（content / padding / border / margin）给每个节点算出它在视口里的确切 x、y 坐标和宽高——相当于施工前「量尺寸、定位置」。
+      <strong>绘制</strong>：把每个节点的外观（背景色、边框、文字、阴影）画成一格一格的像素。注意此时还没直接画到屏幕上，而是先画在一层层「草稿纸」（图层）上，为最后的合成做准备。</p>
+
+    <h3>五、第五站：合成（Composite）——分层拼装亮相</h3>
+    <p>现代浏览器会把页面拆成若干<strong>图层</strong>（比如做了 transform 动画的元素、Will-change 标记的元素会单独成层），<strong>合成线程</strong>把这些图层像贴纸一样按正确顺序叠起来，输出最终画面。合成的特别之处：它主要靠 GPU 完成，<strong>不必惊动跑 JS 的主线程</strong>——这正是下一页「为什么 transform 动画快」的伏笔。</p>
+
+    <h3>六、脚本与样式的阻塞：普通、defer 与 async</h3>
+    <p>浏览器默认假设 JS 可能会改文档结构（历史遗留的安全假设），所以普通 <code>&lt;script&gt;</code> <strong>下载时会暂停 HTML 解析，执行时同样暂停</strong>——脚本越大，白屏越久。两个属性用来化解：
+      <code>defer</code>：下载不阻塞解析，等 HTML 解析完、<code>DOMContentLoaded</code> 事件之前<strong>按出现顺序</strong>执行——适合依赖完整 DOM、讲究先后顺序的主脚本；
+      <code>async</code>：下载不阻塞解析，<strong>下载完立即执行</strong>，多个之间顺序不保证——适合互不依赖的独立脚本（如统计埋点）。
+      CSS 也会阻塞：<strong>CSSOM 没建完，渲染树就合成不了</strong>，所以 CSS 会阻塞首次渲染；而且 CSS 还会阻塞它后面的普通 JS 执行（脚本可能要读取样式）。这就是「CSS 要放头部尽早加载、非关键 JS 加 defer」的根本原因。</p>
+
+    <h3>七、首屏关键路径与优化切入点</h3>
+    <p>「首屏关键路径」= 从收到 HTML 到首次画出内容，必须经过的最短资源与工序链。优化思路就三条：
+      ① <strong>关键资源早点开始下</strong>：压缩体积、减少请求数、非关键 JS 用 defer/async；
+      ② <strong>关键资源尽量小</strong>：精简首屏 CSS、关键样式内联，别让 CSSOM 迟迟建不完；
+      ③ <strong>让流水线少跑回头路</strong>：首屏别频繁改动触发重排重绘（下一页细讲）。
+      面试里「从输入 URL 到页面展示」的完整回答就是两段拼接：网络段（DNS 解析 → TCP 握手 → TLS 握手 → 发请求收响应）＋ 渲染段（解析 HTML/CSS → 渲染树 → 布局 → 绘制 → 合成 → 屏幕亮起）。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 老王家装修流水线</div>
+      <p>老王家装修新房，开工前有两份材料：设计院的<strong>图纸</strong>（DOM：客厅连着餐厅、餐厅连着厨房——只管结构关系）和一份<strong>风格清单</strong>（CSSOM：墙面米白、地面木地板、儿童房浅蓝——只管长什么样）。
+        工头把两份合成一份<strong>施工方案</strong>（渲染树）：方案里没有储物间——因为它标了「不装」（<code>display:none</code>，等于不存在）；但主卧暗柜要留位置——标的是「不外露但占地方」（<code>visibility:hidden</code>）。
+        接着<strong>量尺员</strong>进场，量出沙发距北墙 2.3 米、餐桌居中（Layout）；<strong>油漆工</strong>刷墙铺地、把颜色纹理变成实物（Paint）；最后<strong>家具进场</strong>，窗帘、挂画分层摆好，全屋拍照定格交付（Composite）。
+        装修中途改主意也有讲究：换一幅挂画，拍张照就完事；可要是<strong>砸墙改户型</strong>，量尺、刷漆、家具摆位全得重来——这正是下一页「重排与重绘」要讲的故事。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：.anim-stage 内的纯手写可交互动画（单步执行 + 自动播放） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>把渲染流水线搬进「装修工地」：五个工位依次点亮，单步观察每一步浏览器在做什么、对应装修里的哪个角色：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">点击「单步执行」逐站点亮工位，或点「自动播放」看完整流水线：</p>
+      <div class="pl-stations" id="pl-stations"></div>
+      <span class="pl-stage-tag" id="pl-tag">当前进度：尚未开工</span>
+      <div class="anim-console" id="pl-console">
+        <div class="anim-line is-muted">点击「单步执行」开始，浏览器正在等 HTML 到手……</div>
+      </div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="pl-step">单步执行</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="pl-auto">自动播放</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="pl-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接 -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="../m1/m1-css-box.html">CSS 盒模型与 Flex·Grid 布局</a>——布局工位算的就是盒模型的几何；不懂 content/padding/border/margin 四层，就看不懂浏览器在量什么。</p>
+    <p><strong>向后延伸</strong>：流水线跑完不是终点。页面会被 JS 反复改动，每次改动都可能让流水线「部分重跑」——代价多大、怎么省，就是下一页<a href="./m2-reflow.html">重排、重绘与合成层</a>的主题；再往后，<a href="../m4/m4-cwv.html">Core Web Vitals 性能指标</a>把「首屏多久亮、交互多久响应」量化成了可考核的数字。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="../m1/m1-html-semantic.html">HTML 语义化与页面结构</a> —— DOM 树长什么样，取决于你写的 HTML 结构是否清晰。</li>
+      <li><a href="../m1/m1-css-bfc-anim.html">CSS 进阶：BFC、层叠上下文与动画</a> —— 合成站「分层贴纸」怎么叠，层叠上下文说了算；transform 动画为什么快也在这里埋了线索。</li>
+      <li><a href="../m3/m3-vdom.html">虚拟 DOM 与 Diff 算法</a> —— 框架层减少真实 DOM 操作，本质是少让流水线回头重跑。</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（mode:'main'，判分写入进度仓库） -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后会把最佳成绩写入进度仓库，并推进复习计划：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：浏览器打开网页像装修房子——先照图纸搭骨架（DOM）、照清单定风格（CSSOM），合成施工方案（渲染树）后量尺寸（布局）、刷墙铺地（绘制），最后家具落位全屋亮相（合成）；任何一步没到位，页面就亮不起来。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前默写一遍「解析 → 渲染树 → 布局 → 绘制 → 合成」五站顺序，并说出 defer 与 async 的一处差别；1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：经典问法，答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：从输入 URL 到页面展示，中间发生了什么？（经典开场题）</summary>
+      <ul>
+        <li>网络段：URL 解析 → DNS 把域名换成 IP → TCP 三次握手建连（HTTPS 再加 TLS 握手）→ 发送 HTTP 请求 → 服务器返回 HTML（期间命中缓存则可能免下载）。</li>
+        <li>渲染段：解析 HTML 构建 DOM（遇到 CSS 并行构建 CSSOM；普通 script 阻塞解析，defer/async 不阻塞）→ 合成渲染树（去掉 head 与 display:none 节点）→ 布局计算几何 → 绘制生成图层像素 → 合成线程把图层叠合输出 → 屏幕亮起。</li>
+        <li>结构化答法：把回答拆成「网络段 + 渲染段」两大块，再各展开三五个小点，比想到哪说到哪清晰得多。</li>
+        <li>加分项：提到首屏关键路径与优化（关键 CSS 内联、JS 加 defer、资源压缩）；提到白屏多发生在「CSSOM 未就绪 / 阻塞脚本下载慢」。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：defer 和 async 有什么区别？各自适合什么场景？</summary>
+      <ul>
+        <li>共同点：两者下载阶段都不阻塞 HTML 解析。</li>
+        <li>defer：等 HTML 解析完成后、DOMContentLoaded 事件触发前执行；多个 defer 脚本<strong>按出现顺序</strong>执行——适合依赖完整 DOM、有先后依赖的主逻辑脚本。</li>
+        <li>async：下载完<strong>立即执行</strong>，执行时会阻塞解析；多个 async 脚本执行顺序不保证（谁先下完谁先跑）——适合互不依赖的独立脚本，如统计埋点、广告。</li>
+        <li>普通 script（无属性）：下载与执行都阻塞解析——这是浏览器「脚本可能改文档」的默认假设，放 body 底部是历史上绕开阻塞的土办法。</li>
+        <li>加分项：指出 CSS 也会阻塞首次渲染与后续普通 JS 执行（渲染树依赖 CSSOM，脚本可能读样式）；动态创建的 script 默认行为等同 async。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 + 流水线动画 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm2-pipeline'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'）：题目 id 以知识点 id 开头 */
+  var WARMUP = [{
+    id: 'm2-pipeline-warmup-1',
+    type: 'single',
+    stem: '预热：浏览器拿到一份 HTML 纯文本后，渲染流水线的第一步是做什么？',
+    options: [
+      '直接把文字原样画到屏幕上',
+      '解析 HTML 标签，构建 DOM 树',
+      '先把页面上所有图片下载完',
+      '等用户滚动页面时再开始处理'
+    ],
+    answer: [1],
+    explain: '流水线第一站是「解析」：把一串纯文本逐标签搭成 DOM 树，同时解析 CSS 构建 CSSOM 树。没有这两棵树，后面渲染树、布局、绘制全无从谈起。图片下载与绘制无关且不阻塞解析，不会是第一步。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm2-pipeline-q1',
+      type: 'single',
+      stem: '关于渲染树（Render Tree）与 DOM 树的关系，下列说法正确的是？',
+      options: [
+        '渲染树包含页面全部节点，DOM 树只包含可见节点',
+        '渲染树只包含「要画上屏幕」的节点：display:none 的节点仍在 DOM 里，但不进渲染树',
+        '两者完全相同，只是叫法不同',
+        'DOM 树是解析 CSS 得到的，渲染树是解析 HTML 得到的'
+      ],
+      answer: [1],
+      explain: 'DOM 树是文档结构的完整表达（包括 head、脚本标签、display:none 的元素——它们都「存在」）；渲染树是「要画出来的节点 + 各自样式」。display:none 的节点不进渲染树（不占位），visibility:hidden 的节点仍在渲染树里（看不见但占位、参与布局）。另外还有个反直觉细节：伪元素（如 ::before）不在 DOM 里，却会进渲染树。'
+    },
+    {
+      id: 'm2-pipeline-q2',
+      type: 'multi',
+      stem: '关于脚本加载属性对渲染的影响，下列说法正确的有哪些？（多选，全部选对才得分）',
+      options: [
+        '普通 script：下载阶段会暂停 HTML 解析，下载完立即执行，执行时同样阻塞解析',
+        'defer 脚本：下载不阻塞解析，等 HTML 解析完成后按出现顺序执行，执行完才触发 DOMContentLoaded',
+        'async 脚本：下载不阻塞解析，下载完立即执行，多个 async 脚本之间的执行顺序不保证',
+        'defer 与 async 的区别只体现在下载阶段，执行时机完全一样'
+      ],
+      answer: [0, 1, 2],
+      explain: 'D 错在执行时机：defer 排队等解析完毕后按序执行（保证依赖顺序），async 是谁先下完谁先执行（顺序随机）。A/B/C 均正确——这正是「主逻辑用 defer、独立埋点用 async」的依据。再补一个常被追问的点：CSS 也会阻塞首次渲染（CSSOM 没建完，渲染树合成不了），还会阻塞它后面普通脚本的执行（脚本可能读取样式），所以 CSS 要尽早加载。'
+    },
+    {
+      id: 'm2-pipeline-q3',
+      type: 'code',
+      stem: '实现 scriptTiming(attr)：根据脚本标签的加载属性，返回它在渲染流水线上的行为分类。',
+      stub: '/* 根据脚本标签的加载属性，返回它在渲染流水线上的行为分类：\n' +
+            ' * scriptTiming(\'defer\')  → \'parse-then-exec\'       下载不阻塞；解析完成后按顺序执行\n' +
+            ' * scriptTiming(\'async\')  → \'parallel-exec-anytime\' 下载不阻塞；下载完立即执行，顺序不保证\n' +
+            ' * 其他任何值（含 \'\'）     → \'block\'                  下载与执行都阻塞 HTML 解析（普通脚本）\n' +
+            ' */\n' +
+            'function scriptTiming(attr) {\n  // 在此实现：只有 defer / async 两种特例，其余一律按普通阻塞脚本处理\n}\n',
+      reference: 'function scriptTiming(attr) {\n  if (attr === \'defer\') return \'parse-then-exec\';\n  if (attr === \'async\') return \'parallel-exec-anytime\';\n  return \'block\'; // 无属性或其他属性 → 普通阻塞脚本\n}',
+      asserts: [
+        "scriptTiming('defer') === 'parse-then-exec'",
+        "scriptTiming('async') === 'parallel-exec-anytime'",
+        "scriptTiming('') === 'block'",
+        "scriptTiming('nomodule') === 'block'"
+      ],
+      explain: '为什么这样设计：defer 解决「要完整 DOM 且讲究顺序」的阻塞（下载提前并行、执行压后保序），async 解决「互不依赖的独立脚本」的阻塞（下完就跑，不等别人）；二者覆盖不了的场景（无属性、type 等其他属性）都是普通脚本，必须按最保守的 block 处理——浏览器的默认假设是「脚本可能改文档结构」，宁可暂停解析也要保证结果正确。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（会推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：装修流水线五工位单步点亮器（纯 DOM 手写，无动画库） */
+(function () {
+  'use strict';
+  /* 五个工位数据：name=浏览器工序，deco=装修角色，desc=这一站具体做什么 */
+  var STEPS = [
+    { name: '解析', deco: '画图纸 + 列材料清单', desc: 'HTML 逐标签搭成 DOM 树；CSS 逐条解析成 CSSOM 树（普通脚本此时会暂停解析）' },
+    { name: '渲染树', deco: '定施工方案', desc: '遍历 DOM 可见节点、去 CSSOM 查样式；display:none 不进方案，visibility:hidden 留位置' },
+    { name: '布局 Layout', deco: '量尺寸定位置', desc: '按盒模型算出每个节点的确切坐标与宽高——「沙发距北墙 2.3 米」' },
+    { name: '绘制 Paint', deco: '刷墙铺地', desc: '把背景、边框、文字、阴影画成一格格像素，先落在各图层草稿上' },
+    { name: '合成 Composite', deco: '家具落位、全屋拍照', desc: '合成线程把图层按顺序叠合输出到屏幕（主要靠 GPU，不惊动主线程）' }
+  ];
+  var TAGS = [
+    '当前进度：尚未开工',
+    '当前进度：图纸与清单就绪',
+    '当前进度：施工方案定了',
+    '当前进度：尺寸全部量完',
+    '当前进度：墙面地面画完',
+    '当前进度：页面亮相，交付！'
+  ];
+  var cur = 0;                 // 已点亮的工位数
+  var timer = null;            // 自动播放定时器
+  var stationsEl = document.getElementById('pl-stations');
+  var tagEl = document.getElementById('pl-tag');
+  var consoleEl = document.getElementById('pl-console');
+  var stepBtn = document.getElementById('pl-step');
+  var autoBtn = document.getElementById('pl-auto');
+  var resetBtn = document.getElementById('pl-reset');
+
+  /* 按数据生成五个工位卡片（只生成一次，点亮时改 class） */
+  STEPS.forEach(function (st, i) {
+    var card = document.createElement('div');
+    card.className = 'pl-station';
+    card.innerHTML =
+      '<div class="pl-station-step">第 ' + (i + 1) + ' 站</div>' +
+      '<div class="pl-station-name">' + st.name + '</div>' +
+      '<div class="pl-station-deco">' + st.deco + '</div>' +
+      '<div class="pl-station-desc">' + st.desc + '</div>';
+    stationsEl.appendChild(card);
+  });
+
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight; // 控制台自动滚到底部
+  }
+
+  /* 刷新工位点亮状态与进度标签 */
+  function paint() {
+    var cards = stationsEl.children;
+    for (var i = 0; i < cards.length; i++) {
+      cards[i].classList.toggle('is-lit', i < cur);
+    }
+    tagEl.textContent = TAGS[cur];
+    tagEl.classList.toggle('is-on', cur > 0);
+  }
+
+  /* 单步推进一站；全部点亮后结束并收尾 */
+  function step() {
+    if (cur >= STEPS.length) return;
+    var st = STEPS[cur];
+    cur += 1;
+    log('第 ' + cur + ' 站「' + st.name + '」完成：' + st.deco + '——' + st.desc, 'is-ok');
+    paint();
+    if (cur >= STEPS.length) {
+      log('五站全部走完，屏幕亮起！之后每次 JS 改动，都可能让其中几站「回头重跑」——详见下一页重排与重绘。', 'is-end');
+      stopAuto();
+      stepBtn.disabled = true;
+      autoBtn.disabled = true;
+    }
+  }
+
+  /* 自动播放：每 900ms 推进一站；播放中再点变暂停 */
+  function startAuto() {
+    if (cur >= STEPS.length) return;
+    timer = setInterval(function () {
+      if (cur >= STEPS.length) { stopAuto(); return; }
+      step();
+    }, 900);
+    autoBtn.textContent = '暂停';
+  }
+  function stopAuto() {
+    if (timer) { clearInterval(timer); timer = null; }
+    if (cur < STEPS.length) autoBtn.textContent = '自动播放';
+  }
+  function toggleAuto() {
+    if (timer) stopAuto();
+    else startAuto();
+  }
+
+  function reset() {
+    stopAuto();
+    cur = 0;
+    stepBtn.disabled = false;
+    autoBtn.disabled = false;
+    consoleEl.innerHTML = '';
+    log('已重置：浏览器刚收到 HTML，点击「单步执行」重新开工……', 'is-muted');
+    paint();
+  }
+
+  stepBtn.addEventListener('click', step);
+  autoBtn.addEventListener('click', toggleAuto);
+  resetBtn.addEventListener('click', reset);
+  paint();
+})();
+</script>
+</body>
+</html>

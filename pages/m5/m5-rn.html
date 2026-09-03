@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>React Native 原理 · 跨端开发</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ============================================================
+   本页动画专用样式：旧 Bridge 与新 JSI 通信对照演示
+   纯手写 CSS，无任何外部依赖，仅本页使用
+   ============================================================ */
+.rn-anim { display: flex; gap: 12px; align-items: stretch; margin: 12px 0; flex-wrap: wrap; }
+.rn-panel {
+  flex: 1 1 190px; min-width: 180px;
+  border: 1px solid #d7dde8; border-radius: 10px;
+  padding: 10px 12px; background: #fafbfe;
+}
+.rn-panel--js { border-color: #9cc3f5; background: #f5f9ff; }
+.rn-panel--native { border-color: #a7d7b9; background: #f4fbf6; }
+.rn-panel-title { font-weight: 700; font-size: 13px; margin-bottom: 8px; }
+.rn-panel-body { font-size: 13px; line-height: 1.7; color: #4a5568; }
+.rn-channel {
+  flex: 0 0 190px; display: flex; flex-direction: column;
+  border: 1px dashed #b9c2d4; border-radius: 10px;
+  padding: 10px 8px; background: #fbfbf6;
+}
+.rn-channel-title { font-size: 12px; font-weight: 700; margin-bottom: 8px; text-align: center; }
+.rn-mode { display: flex; gap: 6px; justify-content: center; margin-bottom: 8px; }
+.rn-mode .fg-btn.is-active { border-color: #2f5bea; color: #2f5bea; font-weight: 700; }
+/* 序列化产物展示区：旧桥模式下会显示消息被压成的 JSON 字符串 */
+.rn-serial {
+  min-height: 46px; margin-bottom: 8px; padding: 6px;
+  border-radius: 6px; background: #2b3140; color: #9fd6a8;
+  font-size: 11px; line-height: 1.5; word-break: break-all;
+}
+/* JS 侧待发送消息队列的小胶囊 */
+.rn-queue { display: flex; flex-direction: column; gap: 6px; min-height: 30px; }
+.rn-chip {
+  align-self: flex-start; padding: 2px 10px; border-radius: 999px;
+  background: #e3ecfd; color: #2f5bea; font-size: 12px;
+  animation: rn-in 0.3s ease;
+}
+/* 原生世界里被真实「画」出来的控件（对照红色按钮） */
+.rn-native-btn {
+  display: inline-block; align-self: flex-start;
+  margin: 0 0 8px 0; padding: 6px 14px; border-radius: 8px;
+  background: #e5484d; color: #fff; font-size: 13px; font-weight: 600;
+  animation: rn-in 0.35s ease;
+}
+@keyframes rn-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.9); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.rn-stat { font-size: 13px; margin: 6px 0; color: #4a5568; }
+</style>
+</head>
+<body data-page="m5-rn">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">用 React 写代码，屏幕上却是货真价实的原生控件——RN 靠什么缝合这两个世界？答案是一座桥和一次换桥。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>本页的前置知识：<a href="../../pages/m3/m3-react.html">React 核心机制</a> ——
+      RN 复用了 React 的组件模型与「状态 → 视图」的声明式思路，先懂 React，RN 就只剩「渲染交给谁」这一个问题。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：讲解 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、核心思想：JS 管逻辑，原生管渲染</h3>
+    <p>React Native 的分工非常干脆：你照常<strong>用 React 写组件</strong>，写 <code>&lt;View&gt;</code>、<code>&lt;Text&gt;</code>，
+      状态变了框架算出新界面描述——这一切发生在 JS 世界里。但真正把这行字、这个按钮<strong>画到屏幕上的，
+      是手机平台的原生控件</strong>：<code>&lt;View&gt;</code> 在 iOS 上变成 UIView，在 Android 上变成原生 View。
+      注意它不是 WebView：没有浏览器，没有 HTML，你得到的是和原生 App 一模一样的控件质感。</p>
+
+    <h3>二、旧架构 Bridge：异步消息桥</h3>
+    <p>麻烦在于 JS 和原生是两个世界：JS 跑在 JS 引擎线程，原生控件活在另一边的原生线程，
+      两边<strong>不共享内存、类型系统也不同</strong>。旧架构的办法是修一座「桥」：
+      任何跨世界交流，都要把消息<strong>序列化成 JSON 文本</strong>发过去，对面收到再反序列化、按内容办事。
+      这座桥还有三个脾气：<strong>异步</strong>（消息发出后不等待回执）、<strong>批量</strong>（攒一批一起送）、
+      <strong>单向无类型保障</strong>（发错了到对面才炸）。平时代价不明显，但遇到滚动、动画、手势这类
+      一秒几十次的高频通信，序列化开销加上异步延迟就会堆成瓶颈——列表掉帧、动画卡顿，根源常在这里。</p>
+
+    <h3>三、新架构 JSI 与 Fabric：把桥换掉</h3>
+    <p>新架构的思路不是把桥修宽，而是<strong>拆桥直连</strong>。核心是 JSI（JavaScript Interface）：
+      一层用 C++ 写的轻量接口，让 JS 可以<strong>直接持有原生对象的引用并调用它</strong>——就像不再是「写信」，
+      而是「拿到对方的电话直接讲」，同步调用成为可能，JSON 序列化这一步整个消失。
+      JSI 还与具体 JS 引擎解耦，所以 RN 能换上启动更快、内存更省的 Hermes 引擎。
+      渲染侧的新架构叫 Fabric：渲染器的核心逻辑下沉到 C++ 层维护一棵界面描述树（Shadow Tree），
+      布局计算与协调效率更高，也让「同步测量布局」这类以前做不到的事成为可能。
+      配套的 TurboModules 让原生模块按需加载，Codegen 自动生成两端的胶水代码。
+      一句话总结：<strong>从「异步文本传话」进化为「直连对象调用」</strong>。</p>
+
+    <h3>四、样式系统：Flexbox 子集，但没有 CSS 级联</h3>
+    <p>RN 没有引入 CSS 引擎，而是自带了一套基于 <strong>Flexbox 子集</strong>的布局系统，
+      样式写在 <code>StyleSheet</code> 对象里，最后被翻译成原生控件的布局属性。
+      两个高频坑必须记住：<strong>RN 里 <code>flexDirection</code> 默认是 <code>column</code></strong>（Web 的默认是 row）；
+      <code>flex: 1</code> 在 RN 里是一个权重数字，不是 CSS 里 flex-grow/shrink/basis 的简写。
+      另外因为没有 CSS 级联，组件的最终样式由<strong>样式数组的合并顺序</strong>决定——后面的覆盖前面的，
+      这让样式的计算结果完全确定，也带来一个经典手写题：实现一个样式合并函数。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比：隔着翻译的电话会 vs 随身同传</div>
+      <p>旧 Bridge 像<strong>隔着翻译开跨国电话会</strong>。中方（JS 世界）和美方（原生世界）都只说自己的语言，
+        每句话都要走三步：说给翻译听、翻译组织成另一种语言、对方听懂再执行。
+        电话还有延迟（异步），翻译习惯攒几句一起翻（批量），而且翻译只传「文字记录」（JSON 序列化），
+        你比划的手势、桌上指的实物（内存里的对象引用）统统传不过去。
+        平常开会还行；一旦会议变成连珠炮式的快速问答（高频动画通信），翻译就成了全场的瓶颈，
+        大家都在等他，节奏全乱——这就是滚动掉帧的比喻版。</p>
+      <p>新架构 JSI 像<strong>给双方配了随身同传</strong>，而且更进一步：同传就坐在你耳边（C++ 直连层），
+        你说的下一秒对方就听到（同步直调），不需要整理成文字记录（无序列化开销）。
+        甚至你可以直接「拨通对方的直线电话」——JS 拿到原生对象的引用直接调用。
+        沟通成本大降，连珠炮式对话也跟得上，这就是新架构解决旧瓶颈的方式。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：旧 Bridge vs 新 JSI 通信对照（纯手写 CSS/JS，按钮驱动） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>左边是 JS 世界，右边是原生世界。分别在「旧 Bridge」与「新 JSI」两种模式下发送同一条指令，
+      对比消息走的路、序列化开销与到达速度：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">先选通信模式，再点「发送指令」，观察消息如何抵达右侧原生世界：</p>
+      <div class="rn-anim">
+        <div class="rn-panel rn-panel--js">
+          <div class="rn-panel-title">JS 世界（React 组件）</div>
+          <div class="rn-panel-body">待发送消息队列：</div>
+          <div class="rn-queue" id="rn-queue"><span class="anim-line is-muted">（空）</span></div>
+        </div>
+        <div class="rn-channel">
+          <div class="rn-channel-title">两个世界之间的通道</div>
+          <div class="rn-mode">
+            <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm is-active" id="rn-mode-bridge">旧 Bridge</button>
+            <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="rn-mode-jsi">新 JSI</button>
+          </div>
+          <div class="rn-serial" id="rn-serial">序列化产物会显示在这里</div>
+          <div class="anim-console" id="rn-console">
+            <div class="anim-line is-muted">点击「发送指令」开始…</div>
+          </div>
+        </div>
+        <div class="rn-panel rn-panel--native">
+          <div class="rn-panel-title">原生世界（iOS / Android 控件）</div>
+          <div class="rn-panel-body" id="rn-native-list">（还没有控件）</div>
+        </div>
+      </div>
+      <p class="rn-stat" id="rn-stat">已创建原生控件：0 个 ｜ 旧桥模式累计序列化：0 次 ｜ 当前模式：旧 Bridge</p>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="rn-send">发送指令：创建一个红色按钮</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="rn-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（真实课程路径） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="../../pages/m3/m3-react.html">React 核心机制</a> ——
+      组件、状态与「状态变化 → 重新描述界面」这套心智，在 RN 里原样成立，只是渲染目标从 DOM 换成了原生控件。</p>
+    <p><strong>向后延伸</strong>：RN 解决「复用 React 与原生质感」，但它仍映射原生控件；另一个流派干脆自己画，
+      见 <a href="./m5-flutter.html">Flutter 自绘引擎</a>；把所有方案放上天平做决策，见
+      <a href="./m5-choose.html">跨端方案选型</a>。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="./m5-mp-arch.html">小程序双线程架构</a> —— 同样是「JS 世界与界面世界分离」，对比传菜口与桥的设计。</li>
+      <li><a href="./m5-hybrid.html">Hybrid 开发与 JSBridge</a> —— 第三种跨世界通话方案，与旧 Bridge 思路神似。</li>
+      <li><a href="./m5-flutter.html">Flutter 自绘引擎</a> —— 「映射原生控件」与「自绘一切」两大渲染哲学的对决。</li>
+      <li><a href="./m5-choose.html">跨端方案选型</a> —— 理解原理后，学习如何按场景论证选型。</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（mode:'main'） -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后把最佳成绩写入进度仓库（见页面底部内联脚本）：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：React Native 让你用网页的开发方式写 App，
+      但按钮和列表是真原生控件；JS 和原生原本靠「异步传纸条」沟通，新架构换成「直接打电话」，又快又省。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前复述 1 次，1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：RN、小程序、Hybrid 在渲染方式上有什么区别？</summary>
+      <ul>
+        <li>Hybrid：原生壳里嵌 WebView，页面就是 H5，由浏览器内核渲染，性能受 WebView 上限约束。</li>
+        <li>小程序：渲染层是 WebView，但组件由框架统一封装，逻辑层独立线程，靠 setData 跨线程通信驱动渲染。</li>
+        <li>RN：JS 写组件、框架算出界面描述后映射为真正的原生控件渲染，没有 WebView，控件质感与原生一致。</li>
+        <li>共同点：三者都是「JS 管逻辑 + 另一个世界管渲染」，差异在「最终由谁画像素」与「跨世界通信的通道设计」。</li>
+        <li>加分项：指出 Flutter 是第四条路——既不用 WebView 也不映射原生控件，自绘一切。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：旧 Bridge 的性能瓶颈是什么？新架构 JSI 如何解决？</summary>
+      <ul>
+        <li>旧 Bridge 三个特征：异步（无回执）、批量（攒包发送）、JSON 序列化（对象变文本再还原）。</li>
+        <li>瓶颈场景：滚动、动画、手势等一秒几十次的高频通信，序列化开销叠加异步延迟，导致掉帧。</li>
+        <li>JSI 的解法：C++ 轻量接口层，JS 直接持有原生对象引用并调用，支持同步调用，序列化步骤消失。</li>
+        <li>附带收益：JSI 与 JS 引擎解耦，使 Hermes 引擎可替换；Fabric 渲染器下沉 C++，配合 TurboModules 按需加载与 Codegen 生成胶水代码。</li>
+        <li>加分项：能概括为「从异步文本传话到直连对象调用」的架构升级，并联系高频通信场景举例。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* ============================================================
+ * 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评
+ * ============================================================ */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm5-rn'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'） */
+  var WARMUP = [{
+    id: 'm5-rn-warmup-1',
+    type: 'single',
+    stem: '预热：在 React Native 里，你写的 View、Text 组件最终由谁画到屏幕上？',
+    options: [
+      '手机浏览器内核，和 H5 一样',
+      '对应平台的原生控件（如 iOS 的 UIView、Android 的原生 View）',
+      'React 自己内置的一套画笔直接绘制像素'
+    ],
+    answer: [1],
+    explain: 'RN 的核心思想就是「JS 管逻辑，原生管渲染」：组件被映射为平台原生控件，不是 WebView，也不是自绘（自绘是 Flutter 的路线）。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm5-rn-q1',
+      type: 'single',
+      stem: '旧架构 Bridge 通信最容易在哪种场景下暴露性能瓶颈？',
+      options: [
+        '页面冷启动时加载一段 JS 配置',
+        '长列表快速滚动、手势跟手动画等一秒几十次的高频通信',
+        '用户每隔几分钟点一次普通按钮',
+        '应用退到后台后的定时同步'
+      ],
+      answer: [1],
+      explain: 'Bridge 的开销 = JSON 序列化 + 异步排队 + 批量转发。低频通信时这点开销无感；但滚动、动画、手势这类每秒几十次的通信会把序列化与排队延迟叠起来，超出帧预算，表现为掉帧、跟手性差。这正是催生 JSI 直连方案的直接原因。'
+    },
+    {
+      id: 'm5-rn-q2',
+      type: 'multi',
+      stem: '关于 RN 新架构（JSI 与 Fabric），下列说法正确的有？',
+      options: [
+        'JSI 让 JS 可以直接持有原生对象的引用并调用，序列化这一步不再需要',
+        'JSI 与具体 JS 引擎解耦，使 Hermes 等引擎可以替换使用',
+        '新架构彻底消灭了 JS 世界与原生世界的分离，两边共享同一块内存',
+        'JSI 本质上是把 JSON 序列化做得更快，通信仍然是异步文本传话'
+      ],
+      answer: [0, 1],
+      explain: 'JSI 是 C++ 轻量接口层，核心价值是直连对象调用与引擎无关，A、B 正确。C 夸大了：JS 引擎与原生仍是两个世界，只是通道从「异步文本」换成「直连引用」。D 完全说反——JSI 的意义恰恰是绕开 JSON 序列化，支持同步直调，而不是把旧的传话方式提速。'
+    },
+    {
+      id: 'm5-rn-q3',
+      type: 'code',
+      stem: '手写 RN 样式合并：RN 没有 CSS 级联，组件样式由样式数组按「后者覆盖前者」合并而成。实现函数 flattenStyle(styles)，入参是样式对象数组（可能含 null 或 undefined 项，表示「无样式」，直接跳过），返回合并后的新对象；属性值为 undefined 视为「未设置」，不参与覆盖。',
+      stub: 'function flattenStyle(styles) {\n  // 返回：合并后的新对象\n  // 规则：\n  // 1. 数组中的 null / undefined 项直接跳过\n  // 2. 从左到右遍历，后面的同名属性覆盖前面的\n  // 3. 属性值为 undefined 视为「未设置」，不覆盖\n  // 4. 不修改传入的样式对象，返回新对象\n}\n',
+      reference: 'function flattenStyle(styles) {\n  var out = {};\n  (styles || []).forEach(function (item) {\n    if (!item) return;                 // 跳过 null / undefined 项\n    Object.keys(item).forEach(function (key) {\n      if (item[key] === undefined) return; // undefined 视为未设置\n      out[key] = item[key];              // 后面的覆盖前面的\n    });\n  });\n  return out;\n}',
+      asserts: [
+        'flattenStyle([{ color: "red" }, { color: "blue" }]).color === "blue"',
+        'flattenStyle([{ color: "red", padding: 4 }, null]).padding === 4 && flattenStyle([{ color: "red", padding: 4 }, null]).color === "red"',
+        'JSON.stringify(flattenStyle([{ a: 1 }, { a: undefined, b: 2 }])) === \'{"a":1,"b":2}\'',
+        'JSON.stringify(flattenStyle([null, { m: 0 }])) === \'{"m":0}\''
+      ],
+      explain: '为什么 RN 的样式合并值得手写一遍？因为 RN 没有 CSS 级联与选择器，一个组件长什么样完全由「样式数组按序合并」的确定性结果决定，不存在「被别处的选择器意外覆盖」。规则上要注意两个细节：数组里允许混入 null（官方风格就是用 null 表示「此处无样式」），遍历时必须跳过，否则取属性会抛错；属性值为 undefined 视为「未设置」，不应把前面已确定的值抹掉。这个函数正是 RN 内部样式扁平化思路的极简版，也是「无级联 = 合并顺序即真相」这一设计的直接体现。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ============================================================
+ * ③ 动画演示：旧 Bridge vs 新 JSI 通信对照
+ * JS 世界发指令 → 通道 → 原生世界创建控件；可切换模式对比开销
+ * ============================================================ */
+(function () {
+  'use strict';
+  var mode = 'bridge';    // 'bridge' 旧架构 / 'jsi' 新架构
+  var seq = 0;            // 已发送指令序号
+  var nativeCount = 0;    // 原生世界已创建的控件数
+  var serialized = 0;     // 旧桥模式累计序列化次数（编码 + 解码各算一次）
+  var flying = false;     // 一条消息在路上时锁住发送按钮，模拟异步等待
+
+  var queueEl = document.getElementById('rn-queue');
+  var serialEl = document.getElementById('rn-serial');
+  var consoleEl = document.getElementById('rn-console');
+  var nativeEl = document.getElementById('rn-native-list');
+  var statEl = document.getElementById('rn-stat');
+  var sendBtn = document.getElementById('rn-send');
+  var resetBtn = document.getElementById('rn-reset');
+  var bridgeModeBtn = document.getElementById('rn-mode-bridge');
+  var jsiModeBtn = document.getElementById('rn-mode-jsi');
+
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  function renderStat() {
+    statEl.textContent = '已创建原生控件：' + nativeCount + ' 个 ｜ 旧桥模式累计序列化：' +
+      serialized + ' 次 ｜ 当前模式：' + (mode === 'bridge' ? '旧 Bridge' : '新 JSI');
+  }
+
+  /* JS 侧消息入队：小胶囊落进队列区 */
+  function enqueue(text) {
+    var empty = queueEl.querySelector('.anim-line');
+    if (empty) empty.remove();
+    var chip = document.createElement('span');
+    chip.className = 'rn-chip';
+    chip.textContent = text;
+    queueEl.appendChild(chip);
+    return chip;
+  }
+
+  /* 原生侧创建控件：真实「画」出一个红色按钮 */
+  function createNativeBtn(no) {
+    var empty = nativeEl.querySelector('.anim-line');
+    if (empty) empty.remove();
+    var btn = document.createElement('div');
+    btn.className = 'rn-native-btn';
+    btn.textContent = '红色按钮 #' + no;
+    nativeEl.appendChild(btn);
+    nativeCount += 1;
+    renderStat();
+  }
+
+  /* 新 JSI 模式：同步直调，一步到位 */
+  function sendViaJsi(msg) {
+    log('【JSI】JS 直接调用原生 HostObject 的创建方法（同步直调）');
+    log('【JSI】无入队、无 JSON 序列化、无异步等待，调用返回即完成', 'is-ok');
+    createNativeBtn(msg.no);
+    log('原生控件 #' + msg.no + ' 已出现——注意整个过程序列化次数为 0', 'is-end');
+  }
+
+  /* 旧 Bridge 模式：入队 → 序列化 → 异步过桥 → 反序列化 → 创建，分段延时模拟 */
+  function sendViaBridge(msg) {
+    flying = true;
+    sendBtn.disabled = true;
+    var chip = enqueue('指令 #' + msg.no);
+    log('【Bridge】消息入队，等待桥攒批发送（异步，发出后不等回执）');
+    setTimeout(function () {
+      var text = JSON.stringify(msg); // 序列化：对象被压成纯文本
+      serialEl.textContent = '→ ' + text;
+      serialized += 2;                // 编码一次 + 对面解码一次
+      log('【Bridge】序列化为 JSON：' + text, 'is-ok');
+      log('【Bridge】文本包异步过桥…（注意：对象引用传不过去，只有文字）');
+      setTimeout(function () {
+        chip.remove();
+        if (!queueEl.children.length) {
+          queueEl.innerHTML = '<span class="anim-line is-muted">（空）</span>';
+        }
+        log('【Bridge】原生侧收到文本，反序列化后创建控件');
+        createNativeBtn(msg.no);
+        log('原生控件 #' + msg.no + ' 已出现——这一趟付出了 2 次序列化 + 异步延迟', 'is-end');
+        flying = false;
+        sendBtn.disabled = false;
+      }, 650);
+    }, 400);
+  }
+
+  sendBtn.addEventListener('click', function () {
+    if (flying) return; // 旧桥模式消息还在路上，模拟异步期间不能再发
+    seq += 1;
+    var msg = { no: seq, action: 'createRedButton' };
+    log('—— JS 世界发出第 ' + seq + ' 条指令 ——', 'is-muted');
+    if (mode === 'bridge') sendViaBridge(msg);
+    else sendViaJsi(msg);
+  });
+
+  /* 模式切换：切换后清一下序列化展示区，保持画面语义一致 */
+  function setMode(next) {
+    mode = next;
+    bridgeModeBtn.classList.toggle('is-active', next === 'bridge');
+    jsiModeBtn.classList.toggle('is-active', next === 'jsi');
+    serialEl.textContent = next === 'bridge'
+      ? '序列化产物会显示在这里'
+      : 'JSI 模式：无序列化产物';
+    log('已切换到「' + (next === 'bridge' ? '旧 Bridge' : '新 JSI') + '」模式，再发一条指令对比。', 'is-muted');
+    renderStat();
+  }
+  bridgeModeBtn.addEventListener('click', function () { setMode('bridge'); });
+  jsiModeBtn.addEventListener('click', function () { setMode('jsi'); });
+
+  resetBtn.addEventListener('click', function () {
+    seq = 0;
+    nativeCount = 0;
+    serialized = 0;
+    flying = false;
+    sendBtn.disabled = false;
+    queueEl.innerHTML = '<span class="anim-line is-muted">（空）</span>';
+    nativeEl.innerHTML = '<span class="anim-line is-muted">（还没有控件）</span>';
+    serialEl.textContent = mode === 'bridge' ? '序列化产物会显示在这里' : 'JSI 模式：无序列化产物';
+    consoleEl.innerHTML = '';
+    log('已重置：两个世界恢复初始状态…', 'is-muted');
+    renderStat();
+  });
+
+  renderStat();
+})();
+</script>
+</body>
+</html>

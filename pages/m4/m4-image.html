@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>图片优化与懒加载 · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ========== 本页动画专用样式：自助餐懒加载模拟器 ========== */
+.img-viewport {
+  position: relative;
+  height: 260px;
+  overflow: hidden;
+  border: 3px solid #4c6fff;
+  border-radius: 8px;
+  background: #fff;
+  margin: 10px 0;
+}
+.img-viewport::after {
+  content: "视口（用户屏幕）";
+  position: absolute;
+  right: 6px;
+  top: 4px;
+  font-size: 11px;
+  color: #4c6fff;
+  background: rgba(228, 233, 248, 0.9);
+  padding: 1px 8px;
+  border-radius: 999px;
+}
+.img-strip { transition: transform 0.2s linear; }
+.img-card {
+  height: 130px;
+  margin-bottom: 10px;
+  border-radius: 8px;
+  border: 2px dashed #c6cede;
+  background: repeating-linear-gradient(45deg, #f2f4f9, #f2f4f9 10px, #e9edf5 10px, #e9edf5 20px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: #8a93a6;
+  gap: 4px;
+}
+.img-card b { font-size: 13px; color: #6b7488; }
+.img-card.is-loaded {
+  border: 2px solid #3fae7c;
+  background: #e4f5ec;
+  color: #1e7a52;
+}
+.img-card.is-loaded b { color: #1e7a52; }
+.img-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  margin: 8px 0;
+  flex-wrap: wrap;
+}
+.img-controls input[type="range"] { flex: 1; min-width: 160px; accent-color: #f59e0b; }
+.img-counter { font-size: 13px; margin: 4px 0; }
+.img-counter b { font-family: var(--fg-mono); }
+</style>
+</head>
+<body data-page="m4-image">
+
+<!-- 壳层自动渲染区：site.js 检测到 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">图片通常占网页流量的一半以上。本页讲清三件事：格式怎么选、尺寸怎么按屏幕下发、以及懒加载怎么做到「用户快看到才加载」。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>建议先过一遍前置知识：<a href="./m4-load.html">首屏与资源加载优化</a>——懒加载就是「资源按需加载」思想在图片上的落地。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：讲解 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>图片为什么值得单独一章</h3>
+    <p>对一个典型网页，图片常常占<strong>总流量的一半以上</strong>，而且它直接影响两大指标：图太大拖慢 LCP，图没写尺寸引发 CLS。优化图片是性价比最高的性能手段。</p>
+
+    <h3>格式怎么选：一张表看懂</h3>
+    <ul>
+      <li><strong>JPEG</strong>：照片类老将，有损压缩、兼容性拉满，色彩丰富的照片用它不会错。</li>
+      <li><strong>PNG</strong>：无损、支持透明，适合图标、截图，但照片用它体积会非常大。</li>
+      <li><strong>WebP</strong>：比同等画质 JPEG 小约 25%~35%，支持透明与动图，现代浏览器兼容已很好，是当前的默认之选。</li>
+      <li><strong>AVIF</strong>：压缩率比 WebP 更高，但编码慢、较老环境不支持，适合作为「渐进增强」的首选档。</li>
+      <li><strong>SVG</strong>：矢量格式，图标、Logo 的不二之选，任意缩放不糊。</li>
+    </ul>
+    <p>工程上常用 <code>&lt;picture&gt;</code> 元素：支持 AVIF 的浏览器拿 AVIF，退而求 WebP，再退 JPEG——一条声明多种格式，各取所需。</p>
+
+    <h3>响应式图片：srcset 与 sizes</h3>
+    <p>手机宽度 375px 的屏幕没必要收一张 2000px 宽的大图。用 <code>srcset</code> 列出同一张图的多个尺寸，用 <code>sizes</code> 告诉浏览器「这张图在我的布局里大概占多宽」，浏览器会结合屏幕宽度与像素密度<strong>自动挑最合适的一份下载</strong>。CDN 还能在此基础上实时裁剪、转格式（URL 带上宽高与格式参数即可）。</p>
+
+    <h3>懒加载：loading="lazy" 与 IntersectionObserver</h3>
+    <p>懒加载的核心思想：<strong>图片进入（或接近）视口之前，不设置真实 src，自然就不会发请求</strong>。两种实现：</p>
+    <ul>
+      <li><code>loading="lazy"</code>：原生属性，一行搞定，浏览器自动处理，绝大多数场景够用。</li>
+      <li><strong>IntersectionObserver</strong>：手动实现时的标准方案。它异步观察「目标元素与视口是否交叉」，交叉时把占位 data-src 换成真实 src 并停止观察。相比老式的监听 scroll + 手算位置，它不阻塞主线程、也不用自己节流。元素与视口的交叉判断思路，本页例题会让你亲手写一遍。</li>
+    </ul>
+    <p><code>rootMargin</code> 是关键参数：把判定区域向四周扩大 N 像素，实现「提前一点开始加载」——用户滚到时图刚好就绪，而不是看着灰块等图。</p>
+
+    <h3>两个必须配套的细节</h3>
+    <ul>
+      <li><strong>写死宽高</strong>：img 加上 width/height（或用 CSS aspect-ratio），浏览器加载前就知道占多大空间，不会把下面内容顶开——这是防 CLS 的基本功。</li>
+      <li><strong>占位体验</strong>：加载中用低分辨率缩略图、纯色块或模糊背景垫底，避免灰块闪现。</li>
+      <li><strong>首屏大图不要懒加载</strong>：它本来就该立刻加载（甚至 preload），懒加载反而让 LCP 变慢——懒加载只用于首屏之外的图。</li>
+    </ul>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 自助餐厅的出餐方式</div>
+      <p>一家自助餐厅有两千道菜（一个长页面上百张图）。策略 A 的老板很豪横：你一进门，就把两千道菜<strong>全部做好端上桌</strong>——桌子瞬间堆满（流量被打爆），你还只吃得到面前那一盘（视口外的图全白下了），账单还按两千道算（用户为看不见的图付了流量费）。</p>
+      <p>策略 B 是自助餐的正确玩法：<strong>每个餐位先摆一小份样品碟</strong>（低清占位图），你朝着某个餐台走过去（滚动接近视口），厨师看你快到了，<strong>提前两步开火、你走到正好端上热气腾腾的大份正餐</strong>（rootMargin 提前量触发真实图片加载）。你从头到尾只吃了几盘，老板也只炒了几盘——按需出餐，两全其美。</p>
+      <p>唯一的例外：门口迎宾的那盘招牌菜（首屏 hero 大图）必须一进门就端上来，让客人先「眼见为实」——所以首屏图不做懒加载。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：拖动视口滑块观察懒加载触发，可切换全量模式 -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>下面是一个「自助餐长桌」：拖动滑块移动视口，观察卡片何时从「样品碟占位」变成「正餐已上桌」。</p>
+    <div class="anim-stage">
+      <p class="anim-caption">默认开启懒加载（提前量 60px）；勾选「关闭懒加载」对比一次性全量加载的请求数：</p>
+      <div class="img-viewport">
+        <div class="img-strip" id="img-strip"></div>
+      </div>
+      <div class="img-controls">
+        <span>滚动位置</span>
+        <input type="range" id="img-scroll" min="0" max="850" step="10" value="0" aria-label="滚动位置滑块">
+        <b id="img-scroll-val">0px</b>
+      </div>
+      <p class="img-counter">已加载图片：<b id="img-count">0 / 8</b></p>
+      <label class="img-controls"><input type="checkbox" id="img-all"> 关闭懒加载（进店就把 8 道菜全端上桌）</label>
+      <div class="anim-console" id="img-console">
+        <div class="anim-line is-muted">拖动滑块向下滚动，观察加载时机…</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接 -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="./m4-load.html">首屏与资源加载优化</a>——懒加载、preload 的优先级思想都出自那一页。</p>
+    <p><strong>向后延伸</strong>：图片没写宽高引发的内容跳动，会在<a href="./m4-cwv.html">Core Web Vitals 性能指标</a>的 CLS 一节被精确量化；线上图片加载失败率、耗时分布，交给<a href="./m4-monitor.html">前端监控与错误上报</a>。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="../m1/m1-css-box.html">CSS 盒模型与 Flex·Grid 布局</a> —— 给图片写死宽高、用 aspect-ratio 占位，本质是盒模型知识</li>
+      <li><a href="./m4-cwv.html">Core Web Vitals 性能指标</a> —— 「图片引起的布局抖动」最终都会被 CLS 记账</li>
+      <li><a href="./m4-load.html">首屏与资源加载优化</a> —— 首屏大图 preload、非首屏懒加载，正是加载优先级的两面</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（mode:'main'） -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后把最佳成绩写入进度仓库（见页面底部内联脚本）：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：图片优化就像自助餐按需出餐——先用小样占住位置，等用户真的滚到跟前，再把全尺寸大图端上来；既省流量，又不让页面跳来跳去。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前复述 1 次，1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：说说图片懒加载的实现原理。</summary>
+      <ul>
+        <li>原理：初始不给真实 src（放在 data-src），因此不发请求；当图片进入视口附近，再把真实地址赋回去触发下载。</li>
+        <li>原生方案：img 加 loading="lazy"，浏览器自动判断加载时机，适合绝大多数场景。</li>
+        <li>手动方案：IntersectionObserver 观察目标与视口的交叉，异步触发、不阻塞主线程；rootMargin 设置提前量让用户滚到时图已就绪，加载后 unobserve。</li>
+        <li>边界：首屏大图不要懒加载（应立即加载甚至 preload），否则拖慢 LCP。</li>
+        <li>加分项：提到旧方案监听 scroll + getBoundingClientRect 需要自己节流，IO 方案天然规避了这个问题。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：如何避免图片加载引起的布局抖动？</summary>
+      <ul>
+        <li>根因：浏览器不知道图片尺寸，加载完成后才撑开空间，把下方内容顶开，产生 CLS。</li>
+        <li>手段一：img 写死 width/height 属性，浏览器据此按原始宽高比预留空间。</li>
+        <li>手段二：响应式场景用 CSS aspect-ratio 或「padding-top 百分比占位盒」预留空间。</li>
+        <li>手段三：加载中给低清占位图/纯色背景，视觉上更平滑。</li>
+        <li>加分项：关联 CLS 指标说明为什么要做——无尺寸图片是线上布局偏移的头号来源。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm4-image'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'） */
+  var WARMUP = [{
+    id: 'm4-image-warmup-1',
+    type: 'single',
+    stem: '预热：把一张 10MB 的相机原图直接放到网页上，最大的问题是什么？',
+    options: [
+      '会导致 JS 代码报错',
+      '下载耗时长、费用户流量，还可能因为没写宽高把页面布局顶乱',
+      '图片会自动被浏览器压缩，没有任何问题',
+      '只能导致 LCP 变差，不会引起布局问题'
+    ],
+    answer: [1],
+    explain: '大图直接上网页：下载慢拖累 LCP、浪费流量；若再不写宽高，加载完成后会把下方内容顶开，制造布局偏移（CLS）。浏览器不会自动帮你压图。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm4-image-q1',
+      type: 'single',
+      stem: '电商商品列表页有上千张商品照片，下面哪种图片策略最合理？',
+      options: [
+        '一律用原始 PNG，画质最保真',
+        '一律用原始大尺寸 JPEG，浏览器自己会缩放',
+        '照片类选 WebP/AVIF 等现代格式，配合 srcset/sizes 按屏幕下发合适尺寸，非首屏懒加载',
+        '把所有照片转成 SVG 矢量图'
+      ],
+      answer: [2],
+      explain: '照片类内容用有损的现代格式（WebP/AVIF）体积最小；srcset 按屏幕宽度避免小屏收大图；非首屏图懒加载省流量提速首屏。PNG 存照片体积爆炸；大图交给浏览器缩放浪费流量；SVG 适合图标矢量图形，不适合照片。'
+    },
+    {
+      id: 'm4-image-q2',
+      type: 'multi',
+      stem: '关于懒加载的落地细节，下面哪些做法是正确的？',
+      options: [
+        '给 img 写死 width/height，防止加载后顶开内容',
+        '首屏 hero 大图也做懒加载，进一步省流量',
+        '用 IntersectionObserver 的 rootMargin 设置提前量，提前触发加载',
+        '加载中显示占位图或背景色，避免灰块闪现'
+      ],
+      answer: [0, 2, 3],
+      explain: 'A、C、D 都是标准配套做法。B 是反例：首屏大图是 LCP 的候选元素，必须立即加载（甚至 preload），懒加载会把它拖到用户滚动附近才请求，直接拖慢最大内容绘制。'
+    },
+    {
+      id: 'm4-image-q3',
+      type: 'code',
+      stem: '手写 IntersectionObserver 的核心判断：实现 isInView(rect, viewport, rootMargin)。rect 是元素在文档中的上下边界 { top, bottom }；viewport 是视口 { scrollTop, height }；rootMargin 是提前量像素数（可省略，默认 0）。元素与扩展视口区间 [scrollTop - margin, scrollTop + height + margin] 有重叠即返回 true，否则 false。',
+      stub: 'function isInView(rect, viewport, rootMargin) {\n  // 在此实现：\n  // 1) 取提前量 m = rootMargin || 0\n  // 2) 扩展视口区间为 [scrollTop - m, scrollTop + height + m]\n  // 3) 两个区间有重叠 → 返回 true\n  // 提示：区间 [a1,a2] 与 [b1,b2] 重叠的条件是 a2 >= b1 且 a1 <= b2\n}\n',
+      reference: 'function isInView(rect, viewport, rootMargin) {\n  var m = rootMargin || 0;                       // 提前量，默认 0\n  var viewTop = viewport.scrollTop - m;          // 扩展视口上边界\n  var viewBottom = viewport.scrollTop + viewport.height + m; // 下边界\n  return rect.bottom >= viewTop && rect.top <= viewBottom;   // 区间重叠 → 可见\n}',
+      asserts: [
+        'isInView({ top: 100, bottom: 300 }, { scrollTop: 0, height: 600 }, 0) === true',
+        'isInView({ top: 700, bottom: 900 }, { scrollTop: 0, height: 600 }, 0) === false',
+        'isInView({ top: 700, bottom: 900 }, { scrollTop: 0, height: 600 }, 200) === true',
+        'isInView({ top: 0, bottom: 50 }, { scrollTop: 600, height: 600 }, 0) === false'
+      ],
+      explain: '懒加载的本质就是这一行区间重叠判断：元素下边界不高于视口上边界（rect.bottom >= viewTop），且元素上边界不低于视口下边界（rect.top <= viewBottom），两者同时成立才算「看得见」。第 3 条断言展示了 rootMargin 的作用：把判定区向下扩 200px，原本还要滚 100px 才到的图提前进入了加载队列。IntersectionObserver 在这个判断之上还做了异步批处理与回调调度，但核心几何逻辑与这里完全一致。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库 */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：自助餐懒加载模拟器（纯手写 DOM，无动画库） */
+(function () {
+  'use strict';
+  var CARD_H = 140;   // 单张卡片高度 + 间距
+  var MARGIN = 60;    // rootMargin 提前量（px）
+  var stripEl = document.getElementById('img-strip');
+  var scrollEl = document.getElementById('img-scroll');
+  var scrollVal = document.getElementById('img-scroll-val');
+  var countEl = document.getElementById('img-count');
+  var allBox = document.getElementById('img-all');
+  var consoleEl = document.getElementById('img-console');
+
+  var cards = [];       // 卡片元素列表
+  var loadedMap = [];   // 与卡片一一对应的加载状态
+  var total = 8;
+  var loadedCount = 0;
+
+  /* 向控制台追加日志并自动滚到底 */
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* 构建 8 张「菜品卡」，初始全部为样品碟占位状态 */
+  function buildCards() {
+    stripEl.innerHTML = '';
+    cards = [];
+    loadedMap = [];
+    for (var i = 0; i < total; i++) {
+      var card = document.createElement('div');
+      card.className = 'img-card';
+      card.innerHTML = '<b>菜品 #' + (i + 1) + '</b><span>样品碟占位 · 未加载</span>';
+      stripEl.appendChild(card);
+      cards.push(card);
+      loadedMap.push(false);
+    }
+    loadedCount = 0;
+    paintCount();
+  }
+
+  function paintCount() {
+    countEl.textContent = loadedCount + ' / ' + total;
+  }
+
+  /* 核心：按滚动位置判断每张卡是否进入「扩展视口」，状态变化时更新并打日志 */
+  function update() {
+    var scrollTop = Number(scrollEl.value);
+    var viewTop = scrollTop - MARGIN;                // 扩展视口上边界
+    var viewBottom = scrollTop + 260 + MARGIN;       // 视口高 260 + 提前量
+    for (var i = 0; i < cards.length; i++) {
+      var top = i * CARD_H;
+      var bottom = top + (CARD_H - 10);
+      var visible = bottom >= viewTop && top <= viewBottom; // 与例题同款区间重叠判断
+      if (visible && !loadedMap[i]) {
+        loadedMap[i] = true;
+        loadedCount += 1;
+        cards[i].classList.add('is-loaded');
+        cards[i].innerHTML = '<b>菜品 #' + (i + 1) + '</b><span>正餐已上桌 · 全尺寸图加载完成</span>';
+        log('菜品 #' + (i + 1) + ' 进入预加载范围 → 此刻才请求真实图片（懒加载触发）', 'is-ok');
+      } else if (!visible && loadedMap[i] && !allBox.checked) {
+        /* 真实懒加载只加载一次；这里允许反向演示，恢复占位便于反复观察 */
+        loadedMap[i] = false;
+        loadedCount -= 1;
+        cards[i].classList.remove('is-loaded');
+        cards[i].innerHTML = '<b>菜品 #' + (i + 1) + '</b><span>样品碟占位 · 未加载</span>';
+        log('菜品 #' + (i + 1) + ' 滚出预加载范围（演示：恢复占位，便于反复观察）', 'is-muted');
+      }
+    }
+    paintCount();
+  }
+
+  /* 切换「全量加载」模式：一次性全部上桌，模拟无懒加载的流量开销 */
+  allBox.addEventListener('change', function () {
+    if (allBox.checked) {
+      for (var i = 0; i < cards.length; i++) {
+        if (!loadedMap[i]) {
+          loadedMap[i] = true;
+          loadedCount += 1;
+          cards[i].classList.add('is-loaded');
+          cards[i].innerHTML = '<b>菜品 #' + (i + 1) + '</b><span>正餐已上桌 · 全尺寸图加载完成</span>';
+        }
+      }
+      paintCount();
+      log('已关闭懒加载：页面打开瞬间发出全部 8 个图片请求，视口外的图白白消耗流量', 'is-end');
+    } else {
+      log('已恢复懒加载：只有进入预加载范围的图才会请求', 'is-ok');
+      update();
+    }
+  });
+
+  scrollEl.addEventListener('input', function () {
+    var scrollTop = Number(scrollEl.value);
+    scrollVal.textContent = scrollTop + 'px';
+    stripEl.style.transform = 'translateY(' + (-scrollTop) + 'px)'; // 移动长桌模拟滚动
+    update();
+  });
+
+  buildCards();
+})();
+</script>
+</body>
+</html>

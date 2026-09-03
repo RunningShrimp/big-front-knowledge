@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>JWT 与 OAuth 2.0 · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ===== 本页动画专用样式：防伪工牌——JWT 三段式与签名验签示演，纯手写 CSS ===== */
+.jwt-token { display: flex; gap: 10px; flex-wrap: wrap; margin: 10px 0; }
+.jwt-seg {
+  flex: 1 1 180px; min-width: 160px; border: 2px solid #94a3b8; border-radius: 10px;
+  padding: 8px 12px; background: #fff; transition: border-color .25s, background .25s, box-shadow .25s;
+}
+.jwt-seg-name { font-size: 12px; font-weight: 700; color: #41506b; }
+.jwt-seg-val {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px; color: #8a93a6; margin-top: 4px; word-break: break-all;
+}
+.jwt-seg.is-active { border-color: #10B981; background: #ecfdf5; box-shadow: 0 0 0 3px rgba(16, 185, 129, .15); }
+.jwt-seg.is-bad { border-color: #d64560; background: #fdf0f3; box-shadow: 0 0 0 3px rgba(214, 69, 96, .12); }
+.jwt-seg.is-good { border-color: #c9a34e; background: #fffbeb; box-shadow: 0 0 0 3px rgba(201, 163, 78, .22); }
+</style>
+</head>
+<body data-page="m6-jwt">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">知识点：JWT 与 OAuth 2.0（建议学习时长约 25 分钟）——三段式结构、签名防篡改、JWT 与 Session 的取舍、第三方登录的授权码时序。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>本页前置依赖：<a href="./m6-session.html">Cookie、Session 与鉴权基础</a>——先弄懂「服务端存数据、Cookie 存钥匙」的有状态方案，才能体会 JWT 把状态搬回客户端解决了什么、又付出了什么。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：分小标题推进 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、Session 的两个烦恼</h3>
+    <p>上一页的「柜子与钥匙」好用，但有两个烦恼：其一，<strong>服务端要腾地方存</strong>，用户一多，柜子管理本身成了负担；其二，<strong>多台机器要共享一本登记簿</strong>，必须引入 Redis 这样的集中存储。能不能反过来——<strong>服务端什么都不存</strong>，把「你是谁」直接写在凭证上交给用户随身带，服务端只验真伪？这就是 JWT（JSON Web Token）的思路。</p>
+
+    <h3>二、拆开三段式：Header、Payload、Signature</h3>
+    <p>一个 JWT 长这样：三段字符串用两个点号连起来。<strong>Header</strong> 声明签名算法（如 <code>{"alg":"HS256","typ":"JWT"}</code>）；<strong>Payload</strong> 放具体信息（<code>{"uid":7,"role":"user","exp":1735689600}</code>，exp 是过期时间戳）；<strong>Signature</strong> 是前两段的签名。前两段只是做了 <strong>base64url 编码</strong>——注意，编码不是加密！拿任何工具都能解开看，所以 Payload 里<strong>绝不能放密码、身份证号这类敏感明文</strong>。真正防止「被改」的是第三段签名。</p>
+
+    <h3>三、签名：信息可见，但改不动</h3>
+    <p>签名怎么算？服务端持有一把<strong>只有自己知道的密钥</strong>，用 Header 声明的算法对「Header.Payload + 密钥」做一次不可逆的运算（真实世界是 HMAC-SHA256），得到一串签名附在末尾。验证时服务端<strong>用同样的密钥重算一遍</strong>，与 token 上带的签名比对：一致，说明前两段一个字都没被动过；不一致，直接拒绝。整个验证过程<strong>不需要查任何数据库</strong>——这就是「无状态」的含义：数学保证真伪，存储不背锅。攻击者改了 Payload？签名对不上。自己伪造签名？没有密钥算不出来。密钥一旦泄露，所有 token 都能被伪造——所以密钥的保管级别等同最高权限。</p>
+
+    <h3>四、JWT vs Session：一张对照表</h3>
+    <p>两者没有绝对优劣，只有场景取舍：<strong>JWT 的优势</strong>是服务端免存储、天然跨服务（任何持有密钥的服务都能验签），分布式扩容不再需要共享登记簿；<strong>代价</strong>也明确：① token 比一个 SessionID 大得多，每个请求都多背一点流量；② <strong>签发出去就收不回</strong>——服务端不存状态，就没法「立即作废」某个 token，注销只能靠黑名单、token 版本号这类「重新引入状态」的手段，或把有效期压短、配合 refresh token 换发；③ Payload 谁都能解码，敏感信息不能放。典型组合拳：access token（短命，十几分钟）+ refresh token（长命，用于换新），把泄露窗口压到最小。</p>
+
+    <h3>五、OAuth 2.0：不是登录，是「授权」</h3>
+    <p>「用微信登录」背后的协议是 OAuth 2.0，它解决的其实是另一个问题：<strong>让第三方在不知道你密码的前提下，拿到有限的授权</strong>。最常用的是<strong>授权码模式</strong>，完整时序五步走：① 你在 A 网站点「用微信登录」，被跳转到微信授权页；② 你确认后，微信回跳 A 网站并附上一个<strong>一次性的授权码 code</strong>（只经浏览器中转，真正的令牌不在浏览器露面）；③ A 网站后端拿 code + 自己在微信注册时获得的 client_secret，去微信服务器换 <strong>access token</strong>（密钥只走服务端之间的通道）；④ 用 token 调微信接口拿到你的昵称头像；⑤ A 网站据此建立自己的会话。为什么要 code 中转而不是直接发 token？因为浏览器这一段是「公开信道」，code 又短命又需配密钥才能兑换，把敏感令牌的交换压缩在服务端之间完成，泄露面最小。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 防伪工牌：信息印在卡上，钢印保证改不动</div>
+      <p>入职那天，HR 给小帅打印了一张工牌：正面印着「小明 · 前端组 · 实习生」——这些信息<strong>人人都看得见</strong>（Payload 只是编码不是加密，所以工资这类敏感数字千万别印上去）；背面盖上了一枚<strong>钢印</strong>（Signature）。钢印是用公司的<strong>印章模板</strong>压出来的，模板锁在 HR 保险柜里（服务端密钥），外人拿不到。</p>
+      <p>之后每天进大楼，保安<strong>不查任何系统</strong>，只掏出同款模板对着钢印比一下：对得上就放行——大楼里没有一个「会员登记处」，验真全靠比对（无状态验证）。某天小帅动起了歪脑筋，拿笔把「实习生」改成「总监」：字迹确实改了，但<strong>钢印还是旧内容的钢印</strong>，保安一比对就穿帮（篡改 Payload 立即验签失败）。他想干脆自己刻个章？没有模板，刻出来的纹路对不上（没有密钥伪造不了签名）。</p>
+      <p>但这套体系有个软肋：工牌一签发，<strong>保安只认钢印不查名单</strong>——小帅被开除了，工牌还在有效期，照样能刷卡进楼（JWT 注销难题）。公司的补救办法：把有效期印短一点，每天回 HR 换新牌（access + refresh）；或者前台放一本「作废名单」，验钢印之外再翻一眼（黑名单——代价是又引入了一点状态）。至于 OAuth 2.0，就像酒店入住：你不把身份证押在前台（不交微信密码），前台核实身份后给你一张<strong>临时房卡</strong>（token），只能开指定楼层（scope 权限范围），退房自动失效——授权完成，密码从未离开你手里。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：防伪工牌签发与验签（可单步执行，纯 DOM/CSS/JS 手写） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>亲手走一遍「盖章 → 篡改 → 验签」全流程。签名用一道简单的数字哈希模拟（真实 JWT 用 HMAC-SHA256，思想相同：同一密钥重算比对）：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">工牌三段：Header（算法声明）/ Payload（信息，人人可读）/ Signature（钢印）。单步执行，重点看第 4 步「改一个词，签名立即对不上」：</p>
+      <div class="jwt-token">
+        <div class="jwt-seg" id="jwt-seg-h"><div class="jwt-seg-name">Header</div><div class="jwt-seg-val" id="jwt-val-h">（未签发）</div></div>
+        <div class="jwt-seg" id="jwt-seg-p"><div class="jwt-seg-name">Payload</div><div class="jwt-seg-val" id="jwt-val-p">（未签发）</div></div>
+        <div class="jwt-seg" id="jwt-seg-s"><div class="jwt-seg-name">Signature（钢印）</div><div class="jwt-seg-val" id="jwt-val-s">（未签发）</div></div>
+      </div>
+      <div class="anim-console" id="jwt-console">
+        <div class="anim-line is-muted">点击「单步执行」，跟着 HR 与保安走一遍…</div>
+      </div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="jwt-step">单步执行</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="jwt-auto">自动播放</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="jwt-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（全部为课程数据中的真实 path） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="./m6-session.html">Cookie、Session 与鉴权基础</a>——JWT 的每个优点（免存储、跨服务）都对着 Session 的痛点而来，对照着学最省力。</p>
+    <p><strong>向后延伸</strong>：理解了「用密钥签名验真身」，再去看登录态在微服务间的传递、单点登录（SSO）的设计会顺理成章； token 的存放位置与传输安全是部署层课题，见<a href="./m6-deploy.html">部署基础：Nginx 与 Docker</a> 里的统一入口与 HTTPS 终结。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="../m2/m2-https.html">HTTPS 与 TLS 握手</a> —— 数字签名与 CA 证书链的「用密钥证明我是我」，和 JWT 验签是同一套数学思想的不同应用</li>
+      <li><a href="../m2/m2-security.html">Web 安全：XSS、CSRF 与 CSP</a> —— token 放 localStorage 有 XSS 风险、放 Cookie 有 CSRF 风险，权衡正是安全篇的延续</li>
+      <li><a href="./m6-rest.html">RESTful API 设计</a> —— 401（未认证：没带或带错凭证）与 403（已认证但无权限）的语义边界，靠鉴权中间件落地</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（mode:'main'，判分写入进度仓库） -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后会把最佳成绩写入进度仓库，并推进复习计划：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行听 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：JWT 是一张自带信息的防伪工牌——姓名部门印在卡上谁都看得见，但背面有公司钢印仿造不了；保安不查系统，只对钢印就知道工牌没被涂改。代价是牌发出去就收不回，只能把有效期印短点、到期换新。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前把「签发→篡改→验签失败→换密钥仍失败」四幕讲给室友听一遍，并默写三段式各自装什么；1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：JWT 注销续期 + 认证授权与 OAuth，答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：JWT 是无状态的，那如何实现「注销」和「续期」？</summary>
+      <ul>
+        <li>先点破矛盾：注销的本质是「让已签发、未过期的 token 提前失效」，而 JWT 的卖点恰恰是服务端不存状态——两者天然冲突。</li>
+        <li>方案一 黑名单：把要作废的 token（或其 jti 唯一号）存入 Redis，验签后再查一眼名单；代价是重新引入了存储与查询。</li>
+        <li>方案二 版本号：用户表存一个 token_version，签发时写进 Payload，改密码/登出全端时版本号 +1，旧 token 全部失效。</li>
+        <li>续期组合拳：access token 短命（分钟级）+ refresh token 长命（天级），过期后用 refresh 换新；refresh 服务端可存可撤，作废能力落在这里。</li>
+        <li>加分项：指出「短有效期本身就是兜底」——窗口压得足够小，泄露危害可控；再按敏感级别决定是否上黑名单。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：认证与授权的区别是什么？OAuth 2.0 授权码模式为什么要有授权码这个中转？</summary>
+      <ul>
+        <li>认证（Authentication）回答「你是谁」：验明身份，如账密登录、验 JWT；授权（Authorization）回答「你能干什么」：有没有权限做这件事，如角色、scope。</li>
+        <li>OAuth 2.0 是授权框架而非登录协议：第三方拿到的是「代表你访问某些资源的许可」（scope 限定的 token），不是你的密码。</li>
+        <li>授权码模式时序：跳转授权页 → 用户确认 → 带 code 回调 → 后端拿 code + client_secret 换 access token → 调接口取资料 → 建立自有会话。</li>
+        <li>code 存在的意义：浏览器这一段是半公开信道，code 短命、一次性、且必须配 client_secret 才能兑换——真正敏感的 token 只在服务端之间交换，泄露面最小。</li>
+        <li>加分项：能对比隐式模式（token 直接经浏览器，已不推荐）说明授权码模式在安全上的进步。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm6-jwt'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'）：题目 id 以知识点 id 开头 */
+  var WARMUP = [{
+    id: 'm6-jwt-warmup-1',
+    type: 'single',
+    stem: '预热：JWT 的 Payload 部分经过了 base64url 编码，关于它下列说法正确的是？',
+    options: [
+      'Payload 被加密了，普通用户看不到里面的内容',
+      'Payload 只是编码不是加密，谁都能解开看，所以不能放敏感明文',
+      'Payload 必须加密，否则 JWT 无法通过验证',
+      'Payload 的内容由浏览器负责保密'
+    ],
+    answer: [1],
+    explain: 'base64url 是编码不是加密：不需要密钥、人人可解码。JWT 的保密观是「信息可见，但改不动」——防篡改靠第三段签名，防偷看则只能靠你自己别把密码等敏感明文写进 Payload。B 正确；A、C 把编码误当加密；D 更是无从谈起。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm6-jwt-q1',
+      type: 'single',
+      stem: '关于 JWT 的三段式结构（用点号相连），下列说法正确的是？',
+      options: [
+        'Header 与 Payload 只是编码可见，Signature 由服务端用密钥对前两段计算得出',
+        '三段都被服务端加密，只有持有密钥的用户才能解开',
+        'Signature 存在服务端数据库里，token 上只有前两段',
+        'Payload 可以放心存放用户密码明文，反正有签名保护'
+      ],
+      answer: [0],
+      explain: 'JWT 的分工：前两段 base64url 编码（可解码查看），第三段是服务端用密钥对「Header.Payload」计算的签名（HMAC-SHA256 等）。B 错在「加密」二字；C 把 JWT 和 Session 搞反了——签名恰恰印在 token 上，验签靠重算比对而非查库；D 是最危险的误区：签名防的是篡改不是偷看，Payload 人人可解码，密码绝不能放。'
+    },
+    {
+      id: 'm6-jwt-q2',
+      type: 'single',
+      stem: '用户点「退出登录」后，要求他手里未过期的 JWT 立即失效。下列方案最合理的是？',
+      options: [
+        'JWT 天生支持服务端直接删除，登出时删掉即可',
+        '服务端维护一份黑名单（或用户 token 版本号），验签通过后再查一次，命中即拒绝',
+        '让用户清除浏览器缓存，JWT 就会全部失效',
+        '把 Payload 里的 exp 字段改小再发回去'
+      ],
+      answer: [1],
+      explain: 'JWT 的无状态意味着服务端没有这份 token 的「户口」，不存在「删除」一说（A 是 Session 的做法）；C 无效——JWT 的有效性由签名决定，与浏览器存不存无关，用户端副本再洗一遍也还在别处；D 改 Payload 必然导致验签失败，等于重签一张新牌而不是作废旧牌。B 是标准答案：黑名单/版本号让「作废」变成验签时的一次比对，是「重新引入少量状态」换取即时失效能力——工程上常用 Redis 存黑名单，配合短有效期兜底。'
+    },
+    {
+      id: 'm6-jwt-q3',
+      type: 'code',
+      stem: '手写 JWT 的签发与验签（用题目给出的 simpleHash 模拟「拿密钥重算比对」的签名思想，真实 JWT 是 HMAC-SHA256 + base64url）。实现两个函数：makeToken(payloadStr, secret) —— header 固定为字符串 \'{"alg":"SIM","typ":"JWT"}\'，签名 = String(simpleHash(header + "." + payloadStr + "." + secret))，返回 "header.payload.签名" 三段式字符串；verifyToken(token, secret) —— 按点拆分必须恰好 3 段，用相同公式重算签名与第三段比对，一致返回 JSON.parse 后的 payload 对象，否则返回 null。',
+      stub: '// 已提供：simpleHash(str) 返回一个数字（仅演示签名思想）\nfunction simpleHash(str) {\n  var h = 5381;\n  for (var i = 0; i < str.length; i++) {\n    h = (((h << 5) + h) + str.charCodeAt(i)) >>> 0;\n  }\n  return h;\n}\n\nfunction makeToken(payloadStr, secret) {\n  // 1. header 固定为字符串 \'{"alg":"SIM","typ":"JWT"}\'\n  // 2. 签名 = String(simpleHash(header + "." + payloadStr + "." + secret))\n  // 3. 返回 header + "." + payloadStr + "." + 签名\n}\n\nfunction verifyToken(token, secret) {\n  // 1. 按 "." 拆分，必须恰好 3 段，否则返回 null\n  // 2. 用与签发相同的公式对 h + "." + p 重算签名\n  // 3. 与 token 第三段比对：一致返回 JSON.parse(p)，不一致返回 null\n}\n',
+      reference: '// 演示签名函数（题目已给出；参考实现自带一份，保证可独立运行）\nfunction simpleHash(str) {\n  var h = 5381;\n  for (var i = 0; i < str.length; i++) {\n    h = (((h << 5) + h) + str.charCodeAt(i)) >>> 0;\n  }\n  return h;\n}\n\nfunction makeToken(payloadStr, secret) {\n  var header = \'{"alg":"SIM","typ":"JWT"}\';\n  var sig = String(simpleHash(header + \'.\' + payloadStr + \'.\' + secret));\n  return header + \'.\' + payloadStr + \'.\' + sig; // 签名绑定的是「原文」\n}\n\nfunction verifyToken(token, secret) {\n  var parts = String(token).split(\'.\');\n  if (parts.length !== 3) return null;                       // 格式不对直接拒\n  var expect = String(simpleHash(parts[0] + \'.\' + parts[1] + \'.\' + secret));\n  if (expect !== parts[2]) return null;                      // 钢印对不上：篡改或密钥不对\n  return JSON.parse(parts[1]);                               // 验签通过才解析内容\n}',
+      asserts: [
+        'var __tk = makeToken(\'{"uid":7,"role":"user"}\', \'k1\'); __tk.split(\'.\').length === 3',
+        'verifyToken(__tk, \'k1\').role === \'user\' && verifyToken(__tk, \'k1\').uid === 7',
+        'verifyToken(__tk, \'k2\') === null',
+        'var __ps = __tk.split(\'.\'); verifyToken(__ps[0] + \'.\' + \'{"uid":7,"role":"admin"}\' + \'.\' + __ps[2], \'k1\') === null'
+      ],
+      explain: '四条断言把「钢印思想」钉死：第一条验证签发的产物确实是三段式；第二条验证正常验签——注意是「先验签后解析」，顺序反了就把不可信内容当真了；第三条换密钥验签返回 null——签名把密钥也绑进了运算，攻击者没有 k1 既造不出新签名、旧签名也对不上，这就是「密钥保密是根基」；第四条最关键：Payload 从 user 改成 admin、Signature 原样保留，重算结果与旧签名对不上立即拒绝——签名绑定的是原文的哈希，改一个字符结果天差地别，这正是「信息可见但改不动」的数学实现。对照真实 JWT：base64url 换掉裸字符串、HMAC-SHA256 换掉 simpleHash、Payload 里加 exp 过期时间戳，再配上上一条选择题的黑名单策略，就是生产级的鉴权内核。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：防伪工牌「盖章 → 篡改 → 验签」全流程（纯 DOM 手写，无动画库） */
+(function () {
+  'use strict';
+  var HEADER = 'alg:SIM | typ:JWT';        // 工牌抬头：声明「验印方式」
+  var PAYLOAD_OK = 'name:小明 | role:员工'; // 原始信息
+  var PAYLOAD_BAD = 'name:小明 | role:管理员'; // 被篡改后的信息
+  var SECRET = 'HR-保险柜里的印章模板';      // 只有服务端知道的密钥
+  var TOKEN_KEY = 'v1';                    // 模拟 Header 中的算法声明参与运算
+
+  /* 模拟签名：把字符串折算成一个数字（真实 JWT 用 HMAC-SHA256，思想相同） */
+  function simpleHash(str) {
+    var h = 5381;
+    for (var i = 0; i < str.length; i++) {
+      h = (((h << 5) + h) + str.charCodeAt(i)) >>> 0;
+    }
+    return String(h);
+  }
+
+  var segH = document.getElementById('jwt-seg-h');
+  var segP = document.getElementById('jwt-seg-p');
+  var segS = document.getElementById('jwt-seg-s');
+  var valH = document.getElementById('jwt-val-h');
+  var valP = document.getElementById('jwt-val-p');
+  var valS = document.getElementById('jwt-val-s');
+  var consoleEl = document.getElementById('jwt-console');
+  var stepBtn = document.getElementById('jwt-step');
+  var autoBtn = document.getElementById('jwt-auto');
+  var resetBtn = document.getElementById('jwt-reset');
+
+  var sigReal = simpleHash(TOKEN_KEY + '.' + PAYLOAD_OK + '.' + SECRET);      // 真钢印
+  var sigTampered = simpleHash(TOKEN_KEY + '.' + PAYLOAD_BAD + '.' + SECRET); // 对篡改内容重算的结果
+  var sigWrongKey = simpleHash(TOKEN_KEY + '.' + PAYLOAD_OK + '.伪造模板');    // 拿错密钥重算的结果
+
+  /* 剧情步骤：每步指明三段卡的样式状态与日志文案 */
+  var STEPS = [
+    {
+      cls: ['is-active', '', ''], text: 'HR 盖章：用印章模板（密钥）对「抬头 + 信息」算出钢印 ' + sigReal + '。模板锁在保险柜里，外人拿不到'
+    },
+    {
+      cls: ['is-good', 'is-good', 'is-good'], text: '工牌生效交给小明：三段拼成 token。注意——信息印在卡面上人人可读（Payload 只是编码），所以敏感内容绝不能印上去'
+    },
+    {
+      cls: ['', 'is-bad', ''], text: '有人拿笔把卡面的 role:员工 涂改成 role:管理员。字迹变了，可背面的钢印还是「旧内容」的钢印'
+    },
+    {
+      cls: ['', 'is-bad', 'is-bad'], text: '保安验签：对「抬头 + 被改后的信息」用同一模板重算 → 得到 ' + sigTampered + '，与卡上钢印 ' + sigReal + ' 对不上 → 拒绝！改一个词，全盘作废'
+    },
+    {
+      cls: ['', 'is-good', 'is-good'], text: '换回原文再验：重算结果恰好等于卡上钢印 → 放行。整个验证没有查任何登记簿——这就是「无状态」'
+    },
+    {
+      cls: ['', '', 'is-bad'], text: '补一刀：伪造者自己刻章（用错密钥）对原文重算 → ' + sigWrongKey + '，同样对不上。密钥保密是整套体系的根基', end: true
+    }
+  ];
+
+  var idx = -1;     // 当前步下标（-1 = 未开始）
+  var timer = null; // 自动播放定时器
+
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* 应用某一步的三段卡样式，并同步卡片上的文字 */
+  function paintStep(s, payloadNow, sigNow) {
+    segH.className = 'jwt-seg' + (s.cls[0] ? ' ' + s.cls[0] : '');
+    segP.className = 'jwt-seg' + (s.cls[1] ? ' ' + s.cls[1] : '');
+    segS.className = 'jwt-seg' + (s.cls[2] ? ' ' + s.cls[2] : '');
+    valH.textContent = HEADER;
+    valP.textContent = payloadNow;
+    valS.textContent = sigNow;
+  }
+
+  function stopAuto() {
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+      autoBtn.disabled = false;
+    }
+  }
+
+  function step() {
+    if (idx >= STEPS.length - 1) return;
+    stopAuto();
+    idx += 1;
+    var s = STEPS[idx];
+    /* 按剧情进度决定卡面当前显示的内容与钢印 */
+    var payloadNow = idx >= 2 ? PAYLOAD_BAD : PAYLOAD_OK;
+    var sigNow = sigReal;
+    if (idx === 5) { payloadNow = PAYLOAD_OK; sigNow = sigWrongKey; } // 最后一步演示换密钥
+    paintStep(s, payloadNow, sigNow);
+    log((idx + 1) + '. ' + s.text, s.end ? 'is-end' : 'is-ok');
+  }
+
+  function reset() {
+    stopAuto();
+    idx = -1;
+    segH.className = 'jwt-seg';
+    segP.className = 'jwt-seg';
+    segS.className = 'jwt-seg';
+    valH.textContent = '（未签发）';
+    valP.textContent = '（未签发）';
+    valS.textContent = '（未签发）';
+    consoleEl.innerHTML = '';
+    log('空白的工牌躺在 HR 桌上。点击「单步执行」开始盖章…', 'is-muted');
+  }
+
+  function autoPlay() {
+    if (idx >= STEPS.length - 1) return;
+    autoBtn.disabled = true;
+    timer = setInterval(function () {
+      step();
+      if (idx >= STEPS.length - 1) stopAuto();
+    }, 1700);
+  }
+
+  stepBtn.addEventListener('click', step);
+  autoBtn.addEventListener('click', autoPlay);
+  resetBtn.addEventListener('click', reset);
+  reset();
+})();
+</script>
+</body>
+</html>

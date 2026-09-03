@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>事件循环与任务队列 · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ===== 本页动画专用样式：单厨师餐厅模拟事件循环（纯手写 CSS） ===== */
+.el-kitchen {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 12px 0; padding: 10px 12px;
+  border: 2px solid #d5dbe7; border-radius: 10px; background: #f7f9fc;
+}
+.el-chef {
+  font-weight: 700; font-size: 13px; color: #41506b;
+  padding: 8px 14px; border-radius: 8px;
+  border: 2px solid #d5dbe7; background: #fff;
+  transition: border-color .25s, background .25s;
+}
+.el-chef.is-cooking { border-color: #4C6FFF; background: #eef2ff; }
+.el-queue {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin: 8px 0; font-size: 13px; color: #41506b;
+}
+.el-queue-name { font-weight: 700; min-width: 150px; }
+.el-queue--micro .el-chip { background: #fff3d6; border-color: #e0b34d; }
+.el-queue--macro .el-chip { background: #eef2ff; border-color: #9db1f5; }
+.el-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.el-chip {
+  font-size: 12px; padding: 3px 9px; border-radius: 999px;
+  border: 1px solid #d5dbe7; background: #fff; color: #41506b;
+}
+.el-empty { color: #8a93a6; font-size: 12px; }
+</style>
+</head>
+<body data-page="m1-js-eventloop">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">知识点：事件循环与任务队列（建议学习时长约 30 分钟）——单线程、调用栈、宏任务与微任务的优先级规则。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>本页前置依赖：<a href="./m1-js-scope.html">JS 类型、作用域与闭包</a>——先把「函数是值、回调也是函数」捋顺，再看回调排队执行的规则。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：分小标题推进 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、为什么 JS 是单线程</h3>
+    <p>设想两个线程同时改同一个 DOM 节点：一个要删、一个要改文字，听谁的？为避免这种竞态，JS 主线程从设计上就只有一条——
+      <strong>一次只做一件事</strong>。慢活（网络请求、定时器、读文件）不自己干，而是交给浏览器的其他线程去办，办完把「回调函数」放进队列排队等主线程，这就是<strong>异步</strong>：单线程，但不傻等。</p>
+
+    <h3>二、调用栈与任务队列</h3>
+    <p><strong>调用栈</strong>像厨师手里那口锅：函数调用就下锅，返回就出锅，同一时刻只能炖一锅。
+      异步操作的回调不会立刻执行，而是先排进<strong>任务队列</strong>；每当调用栈空了，<strong>事件循环</strong>（Event Loop）就从队列取队首的回调放进锅里执行——它是个永不停歇的调度员。</p>
+
+    <h3>三、宏任务与微任务</h3>
+    <p>队列其实不止一条。<strong>宏任务</strong>（macrotask）：setTimeout / setInterval 的回调、I/O、UI 事件回调等；
+      <strong>微任务</strong>（microtask）：Promise.then / catch / finally、queueMicrotask、MutationObserver。
+      执行规则只有一句话：<strong>当前任务（含最初的同步脚本）跑完 → 一次性清空全部微任务 → 取一个宏任务 → 再清空微任务 → 如此循环</strong>。页面的渲染穿插在宏任务之间进行。</p>
+
+    <h3>四、混合输出题的推演口诀</h3>
+    <p>① 先按行划出<strong>同步代码</strong>，立即执行；② 遇到 <code>setTimeout</code> 把回调记到「宏」栏，遇到 <code>Promise.then</code> 记到「微」栏；
+      ③ 同步跑完后，先把「微」栏<strong>全部清空</strong>；④ 再取「宏」栏的一个执行，执行完又先清「微」栏。
+      记住「微任务永远插在下一个宏任务之前」，输出顺序就不会乱。</p>
+
+    <h3>五、浏览器与 Node 的差异速览</h3>
+    <p>Node 的事件循环由 libuv 驱动，分为 timers、poll、check 等多个阶段；Node 11 之前微任务在「阶段之间」统一执行，Node 11+ 已与浏览器对齐为「每个宏任务后清空微任务」。
+      另有区别：<code>process.nextTick</code> 的优先级高于普通微任务；主模块中 <code>setImmediate</code> 与 <code>setTimeout(0)</code> 的先后不确定，但在 I/O 回调内部 setImmediate 恒定先执行。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 事件循环像只有一名厨师的小馆子</div>
+      <p>店里规矩三条：第一，厨师只有一位（单线程主线程），一次只做一道菜，做完手里这道才腾出手；第二，服务员把新订单（宏任务，如 setTimeout 的回调）贴到订单墙上排队，厨师按先后取单；
+        第三，灶台边贴着 VIP 小抄（微任务，如 Promise.then），规矩是<strong>每做完一道菜，必须先把灶台上所有小抄一张不剩全部处理完，才允许去订单墙拿下一张</strong>。
+        所以哪怕订单墙的第一张单比小抄来得早，也得等小抄清完——这就是「微任务插队」。
+        开业后厨师做的第一件事是「同步脚本」，它就像开业第一单，做完才开始一轮轮「清小抄、取订单」的循环。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：单厨师餐厅（可添加任务 + 单步执行 + 自动播放，纯手写 DOM/CSS/JS） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>亲手经营这家一人餐厅，验证「做完一道菜先清小抄，再取订单」：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">初始：同步脚本「煮汤」已在灶上，VIP 小抄 1 张（加葱花）、普通订单 1 张（炒饭）在排队。
+        可随时添加任务，反复点「单步执行」观察调度顺序，或点「自动播放」看全程：</p>
+      <div class="el-kitchen">
+        <span class="el-chef" id="el-chef">厨师：闲着</span>
+        <span class="fg-muted">← 锅（调用栈）一次只能炖一锅</span>
+      </div>
+      <div class="el-queue el-queue--micro">
+        <span class="el-queue-name">VIP 小抄（微任务）</span>
+        <span class="el-chips" id="el-micro-chips"></span>
+      </div>
+      <div class="el-queue el-queue--macro">
+        <span class="el-queue-name">订单墙（宏任务）</span>
+        <span class="el-chips" id="el-macro-chips"></span>
+      </div>
+      <div class="anim-console" id="el-console"></div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="el-add-macro">来了新订单（宏任务）</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="el-add-micro">收到 VIP 小抄（微任务）</button>
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="el-step">单步执行</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="el-auto">自动播放</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="el-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（全部为课程数据中的真实 path） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="./m1-js-scope.html">JS 类型、作用域与闭包</a>——回调函数被闭包「记住」的变量，正是它进队出队后仍能正确工作的原因。</p>
+    <p><strong>向后延伸</strong>：微任务的制造者 Promise 是异步编程的主角，直接衔接<a href="./m1-js-promise.html">Promise 与 async/await</a>；
+      Node 把事件循环搬到了服务端并加了阶段机制，见<a href="../m6/m6-node.html">Node.js 运行时与事件循环</a>。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="../m5/m5-mp-arch.html">小程序双线程架构</a> —— 逻辑层单线程 + setData 通信，同样是「任务排队、跨线程传话」的思想</li>
+      <li><a href="../m4/m4-runtime.html">运行时优化：防抖、节流与计算缓存</a> —— 防抖节流全靠 setTimeout 的宏任务排队实现，理解事件循环才能用对</li>
+      <li><a href="./m1-js-promise.html">Promise 与 async/await</a> —— await 之后的代码本质是被排进微任务队列的回调</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（mode:'main'，判分写入进度仓库） -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后会把最佳成绩写入进度仓库，并推进复习计划：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：JS 是一家只有一名厨师的餐厅——先做完手里的菜（同步任务），每做完一道先把灶台上的 VIP 小抄全部清掉（微任务），再去订单墙取下一张（宏任务），如此循环。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前默写一遍「同步 → 清微 → 取宏」的推演口诀；1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：经典输出题 + 浏览器与 Node 差异，答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：下面代码输出什么？（setTimeout 与 then 链混合）</summary>
+<pre><code>setTimeout(function () { console.log('T'); }, 0);
+Promise.resolve()
+  .then(function () { console.log('P1'); })
+  .then(function () { console.log('P2'); });
+console.log('S');</code></pre>
+      <ul>
+        <li>输出 S、P1、P2、T：S 是同步代码；T 进入宏任务队列；then 链的第一段进入微任务队列。</li>
+        <li>同步跑完后清空微任务：先 P1；P1 执行完才把 then 链的第二段排进微任务队列，随即清空 → P2。</li>
+        <li>微任务全部清完，才取宏任务队列里的 T。哪怕 setTimeout 写 0 毫秒，也要等这一切结束。</li>
+        <li>加分项：then 的回调不是注册时入队，而是「前一段兑现后」才入队——说出这一点能明显加分。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：JS 单线程为什么还能高效处理异步？浏览器与 Node 的事件循环有何差异？</summary>
+      <ul>
+        <li>单线程只指 JS 主线程：耗时操作（网络、定时器、I/O）由浏览器/系统的其他线程完成，完成后再把回调排进任务队列。</li>
+        <li>事件循环负责调度：调用栈空 → 清空全部微任务 → 取一个宏任务 → 再清微任务，循环往复；页面渲染穿插在宏任务之间。</li>
+        <li>Node：libuv 分 timers / poll / check 等阶段轮转；Node 11+ 与浏览器对齐为每个宏任务后清空微任务，老版本是按阶段统一清。</li>
+        <li>Node 特有：process.nextTick 优先级高于 Promise 微任务；主模块里 setImmediate 与 setTimeout(0) 顺序不确定，I/O 回调内 setImmediate 恒定先执行。</li>
+        <li>加分项：能顺带提 requestAnimationFrame 在渲染前执行，说明对「每一帧」的调度也有概念。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm1-js-eventloop'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'）：题目 id 以知识点 id 开头 */
+  var WARMUP = [{
+    id: 'm1-js-eventloop-warmup-1',
+    type: 'single',
+    stem: "预热：console.log('A'); setTimeout(function () { console.log('B'); }, 0); console.log('C'); 的输出顺序是？",
+    options: ['A、B、C', 'A、C、B', 'B、A、C'],
+    answer: [1],
+    explain: "setTimeout 即使写 0 毫秒也不会立即执行：回调先进宏任务队列排队。同步代码 A、C 跑完（并清空微任务）之后，才轮到 B。定时器写 0 只表示「尽快」，不代表「现在」。"
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm1-js-eventloop-q1',
+      type: 'single',
+      stem: "console.log(1); setTimeout(function () { console.log(2); }, 0); Promise.resolve().then(function () { console.log(3); }); console.log(4); 依次输出？",
+      options: ['1、2、3、4', '1、4、3、2', '1、3、4、2', '1、4、2、3'],
+      answer: [1],
+      explain: '同步先行：1、4 直接打印。同步结束后清空微任务 → 3；最后取一个宏任务 → 2。口诀「同步 → 微 → 宏」一次套牢：setTimeout 的 0 毫秒只意味着尽快排队，排不进同步阶段。'
+    },
+    {
+      id: 'm1-js-eventloop-q2',
+      type: 'single',
+      stem: '关于微任务的执行时机，下列说法正确的是？',
+      options: [
+        '微任务和宏任务放在同一条队列里按先进先出混排',
+        '每个宏任务（含最初的同步脚本）执行完后，立即一次性清空全部微任务，再取下一个宏任务',
+        '微任务要等到页面下一次刷新时才批量执行',
+        'setTimeout(fn, 0) 的回调属于微任务，所以比 Promise.then 更早'
+      ],
+      answer: [1],
+      explain: '微任务有自己独立的队列，且优先级规则是「每当一个任务结束，立刻把微任务队列清空到零」；宏任务则一轮只取一个。setTimeout 的回调是宏任务，Promise.then 才是微任务，所以 then 永远插在下一个定时器回调之前。'
+    },
+    {
+      id: 'm1-js-eventloop-q3',
+      type: 'code',
+      stem: '实现迷你调度器 createScheduler()：macro(task) 把任务加入宏任务队列、micro(task) 加入微任务队列（task 是无参函数，返回一个描述字符串）；run() 按真实事件循环规则执行全部任务，并按执行顺序返回描述数组。',
+      stub: 'function createScheduler() {\n  // 提示：\n  // 1. 准备两个队列 macros / micros（数组 + shift 即先进先出）\n  // 2. 写一个内部函数 drainMicros：一次性清空全部微任务\n  // 3. run() 流程：先清空微任务 →\n  //    循环「取一个宏任务执行，随后立刻清空微任务」\n  // 4. 把每个任务函数的返回值按顺序收集进数组并返回\n}\n',
+      reference: 'function createScheduler() {\n  var macros = [];   // 宏任务队列：setTimeout 这类「普通订单」\n  var micros = [];   // 微任务队列：Promise.then 这类「VIP 小抄」\n  var order = [];    // 按执行顺序收集任务返回值\n\n  function drainMicros() {              // 一次性清空当前全部微任务\n    while (micros.length > 0) {\n      order.push(micros.shift()());\n    }\n  }\n\n  return {\n    macro: function (task) { macros.push(task); },\n    micro: function (task) { micros.push(task); },\n    run: function () {\n      order = [];\n      drainMicros();                    // ① 同步脚本结束：先清空全部微任务\n      while (macros.length > 0) {       // ② 每轮只取一个宏任务\n        order.push(macros.shift()());\n        drainMicros();                  //    它结束后立刻清空微任务\n      }\n      return order;\n    }\n  };\n}',
+      asserts: [
+        "var __s = createScheduler(); __s.macro(function () { __s.micro(function () { return '宏1引出的微任务'; }); return '宏1'; }); __s.macro(function () { return '宏2'; }); __s.run().join('、') === '宏1、宏1引出的微任务、宏2'",
+        "var __s2 = createScheduler(); __s2.micro(function () { return '微1'; }); __s2.macro(function () { return '宏1'; }); __s2.micro(function () { return '微2'; }); __s2.run().join('、') === '微1、微2、宏1'",
+        "var __s3 = createScheduler(); __s3.macro(function () { return 'A'; }); __s3.macro(function () { return 'B'; }); __s3.run().join('-') === 'A-B'",
+        "createScheduler().run().length === 0"
+      ],
+      explain: '四条断言对应事件循环的四条铁律：第一条验证「宏任务执行中新排入的微任务，会在下一个宏任务之前被清空」——宏1 执行时临时加了一张小抄，它插在宏2 之前，这正是 Promise.then 的回调能抢在下一个 setTimeout 之前执行的原因；第二条验证「run 之前（相当于同步脚本阶段）排队的微任务，全部先于第一个宏任务」；第三条验证宏任务队列内部先进先出；第四条验证两个队列都空时返回空数组。真实浏览器里，同步脚本相当于第一个宏任务，之后每轮「取一个宏任务 → 清空微任务」，与本实现一一对应。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：单厨师餐厅模拟事件循环（纯 DOM 手写，无动画库） */
+(function () {
+  'use strict';
+
+  /* 菜单池：新订单 / 新小抄依次从池中取名，避免重名 */
+  var MACRO_MENU = ['炒饭', '烤鱼', '拌面', '炖汤', '炒面'];
+  var MICRO_MENU = ['加葱花', '多放醋', '免辣', '少盐'];
+
+  var chefEl = document.getElementById('el-chef');
+  var microChipsEl = document.getElementById('el-micro-chips');
+  var macroChipsEl = document.getElementById('el-macro-chips');
+  var consoleEl = document.getElementById('el-console');
+  var stepBtn = document.getElementById('el-step');
+  var autoBtn = document.getElementById('el-auto');
+  var resetBtn = document.getElementById('el-reset');
+  var addMacroBtn = document.getElementById('el-add-macro');
+  var addMicroBtn = document.getElementById('el-add-micro');
+
+  var current = null;    // 灶上正在做的任务（null 表示锅空）
+  var isSync = false;    // 灶上这道是否为「开业第一单：同步脚本」
+  var micros = [];       // 微任务队列（VIP 小抄）
+  var macros = [];       // 宏任务队列（订单墙）
+  var macroSeq = 0;      // 宏任务命名序号
+  var microSeq = 0;      // 微任务命名序号
+  var timer = null;      // 自动播放的定时器
+  var ended = false;     // 是否已打烊（全部任务执行完毕）
+
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* 渲染两条队列的「排队小票」 */
+  function renderQueues() {
+    microChipsEl.innerHTML = '';
+    macroChipsEl.innerHTML = '';
+    if (micros.length === 0) {
+      var e1 = document.createElement('span');
+      e1.className = 'el-empty';
+      e1.textContent = '（空）';
+      microChipsEl.appendChild(e1);
+    } else {
+      micros.forEach(function (name) {
+        var chip = document.createElement('span');
+        chip.className = 'el-chip';
+        chip.textContent = name;
+        microChipsEl.appendChild(chip);
+      });
+    }
+    if (macros.length === 0) {
+      var e2 = document.createElement('span');
+      e2.className = 'el-empty';
+      e2.textContent = '（空）';
+      macroChipsEl.appendChild(e2);
+    } else {
+      macros.forEach(function (name) {
+        var chip = document.createElement('span');
+        chip.className = 'el-chip';
+        chip.textContent = name;
+        macroChipsEl.appendChild(chip);
+      });
+    }
+  }
+
+  function renderChef() {
+    if (current) {
+      chefEl.textContent = '厨师：正在做「' + current + '」';
+      chefEl.classList.add('is-cooking');
+    } else {
+      chefEl.textContent = '厨师：闲着（锅空）';
+      chefEl.classList.remove('is-cooking');
+    }
+  }
+
+  /* 停止自动播放（不改变任务状态） */
+  function stopAuto() {
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+      autoBtn.disabled = false;
+    }
+  }
+
+  /* 单步：严格按照事件循环推进一小格 */
+  function step() {
+    if (ended) return;
+    stopAuto();
+    if (current) {
+      /* 做完手里这道菜 */
+      log((isSync ? '同步脚本' : '宏任务') + '「' + current + '」完成出锅', 'is-ok');
+      current = null;
+      isSync = false;
+      renderChef();
+      return;
+    }
+    if (micros.length > 0) {
+      /* 锅空了：微任务优先，且一次清一张（必须清空才轮到宏任务） */
+      var micro = micros.shift();
+      log('微任务插队：先处理 VIP 小抄「' + micro + '」——所有小抄清空前，订单墙一张都不取', 'is-ok');
+      renderQueues();
+      return;
+    }
+    if (macros.length > 0) {
+      /* 微任务清空了：从订单墙取下一张宏任务 */
+      var macro = macros.shift();
+      current = macro;
+      log('微任务已清空 → 取下一张订单（宏任务）：「' + macro + '」下锅', 'is-end');
+      renderQueues();
+      renderChef();
+      return;
+    }
+    /* 两个队列都空：打烊 */
+    ended = true;
+    stepBtn.disabled = true;
+    log('订单墙与小抄都空了 → 事件循环仍在空转等待，本轮任务全部执行完毕（打烊）', 'is-end');
+  }
+
+  function addMacro() {
+    if (ended) return;
+    stopAuto();
+    var name = '宏' + (macroSeq + 1) + ' ' + MACRO_MENU[macroSeq % MACRO_MENU.length];
+    macroSeq += 1;
+    macros.push(name);
+    log('服务员把新订单「' + name + '」贴上订单墙排队', 'is-muted');
+    renderQueues();
+  }
+
+  function addMicro() {
+    if (ended) return;
+    stopAuto();
+    var name = '微' + (microSeq + 1) + ' ' + MICRO_MENU[microSeq % MICRO_MENU.length];
+    microSeq += 1;
+    micros.push(name);
+    log('灶台边新增一张 VIP 小抄「' + name + '」——下一道菜出锅后立刻处理', 'is-muted');
+    renderQueues();
+  }
+
+  function reset() {
+    stopAuto();
+    current = '同步脚本：煮汤';  // 开业第一单：同步脚本
+    isSync = true;
+    micros = ['微1 加葱花'];
+    macros = ['宏1 炒饭'];
+    macroSeq = 1;
+    microSeq = 1;
+    ended = false;
+    stepBtn.disabled = false;
+    consoleEl.innerHTML = '';
+    log('新开一天：同步脚本「同步脚本：煮汤」已在灶上；小抄 1 张、订单 1 张排队。单步执行看看调度顺序…', 'is-muted');
+    renderQueues();
+    renderChef();
+  }
+
+  /* 自动播放：定时触发单步，直到打烊 */
+  function autoPlay() {
+    if (ended) return;
+    autoBtn.disabled = true;
+    timer = setInterval(function () {
+      step(); /* step 内部会在打烊时停止状态，这里负责兜底清理 */
+      if (ended) stopAuto();
+    }, 700);
+  }
+
+  stepBtn.addEventListener('click', step);
+  autoBtn.addEventListener('click', autoPlay);
+  resetBtn.addEventListener('click', reset);
+  addMacroBtn.addEventListener('click', addMacro);
+  addMicroBtn.addEventListener('click', addMicro);
+  reset();
+})();
+</script>
+</body>
+</html>

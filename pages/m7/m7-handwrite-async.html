@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>手写题·异步篇（Promise、并发控制、EventEmitter） · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ===== 本页动画专用样式：景区限流并发控制演示，纯手写 CSS，零外部库 ===== */
+.pk-board { display: flex; flex-direction: column; gap: 12px; margin: 12px 0; }
+.pk-row-title { font-size: 13px; font-weight: 700; color: #2b3a55; margin-bottom: 6px; }
+.pk-park { display: flex; gap: 10px; }
+.pk-slot {
+  flex: 0 0 132px; height: 60px; border: 2px dashed #b7c0d4; border-radius: 10px;
+  background: #fbfcfe; display: flex; align-items: center; justify-content: center;
+  font-size: 13px; color: #c2c9d6; transition: all .25s;
+}
+.pk-slot.is-full { border-style: solid; border-color: #0FB5A6; background: #e9f9f6; color: #0b7c72; font-weight: 700; }
+.pk-queue { display: flex; gap: 8px; flex-wrap: wrap; min-height: 34px; }
+.pk-person {
+  padding: 4px 12px; border-radius: 999px; background: #fff4e5; color: #b35f1e;
+  font-size: 12px; font-weight: 600;
+}
+.pk-person.is-entering { animation: pk-pop .35s ease; }
+@keyframes pk-pop { 0% { transform: scale(.6); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+.pk-stats { display: flex; gap: 18px; font-size: 13px; color: #2b3a55; flex-wrap: wrap; }
+.pk-stats b { color: #0b7c72; }
+.pk-controls { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
+</style>
+</head>
+<body data-page="m7-handwrite-async">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">知识点：手写题·异步篇（建议学习时长约 30 分钟）——简化版 Promise 的三态流转、并发控制的槽位调度、EventEmitter 的发布订阅四件套。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>本页前置依赖：<a href="../../pages/m1/m1-js-promise.html">Promise 与 async/await</a>——先会用取餐号牌（then/await），才谈得上亲手造一张号牌；
+      建议顺手复习<a href="../../pages/m1/m1-js-eventloop.html">事件循环与任务队列</a>，本页多处「为什么这样写」都藏在微任务时序里。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：分小标题推进 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、简化版 Promise：三态流转与 then 链</h3>
+    <p>手写 Promise 的骨架是<strong>状态机</strong>：只有 <code>pending / fulfilled / rejected</code> 三种状态，
+      且流转<strong>单向、单次、不可逆</strong>——pending 只能二选一走向 fulfilled 或 rejected，定型后任何 resolve/reject 调用都必须失效。
+      <code>then</code> 要做两件事：状态还是 pending 时，把回调<strong>存进队列</strong>等结果；已定型时<strong>安排异步执行</strong>（规范要求放进微任务，
+      用 <code>queueMicrotask</code> 模拟即可）；同时<strong>返回一个新 Promise</strong>，链式调用才成立。</p>
+    <pre><code>function MyPromise(executor) {
+  var self = this;
+  self.state = 'pending';    // 三态之一：pending → fulfilled / rejected，不可逆
+  self.value = undefined;
+  self.callbacks = [];       // pending 期间收拢的 then 回调
+  function resolve(v) {
+    if (self.state !== 'pending') return;   // 关键防御：只有第一次生效，之后一律忽略
+    self.state = 'fulfilled';
+    self.value = v;
+    self.callbacks.forEach(function (cb) { cb(v); }); // 真实规范：这里应放进微任务队列
+  }
+  executor(resolve, function (r) { /* reject 同理：状态改 rejected，同样只认第一次 */ });
+}</code></pre>
+    <p>为什么 resolve 里要判状态？因为 executor 里完全可能写出「先 resolve 再 reject」的代码——不设防线，状态会被来回改，号牌就变成了橡皮图章。
+      为什么 then 要异步执行？若同步调用回调，「先 then 后 resolve」和「先 resolve 后 then」两种时序的行为就会不一致，违背 Promise 的约定。</p>
+
+    <h3>二、并发控制：limit 个槽位的调度游戏</h3>
+    <p>并发控制（如 <code>limitConcurrency(tasks, limit)</code>）的核心只有两个变量：
+      <strong>next 指针</strong>（下一个该启动谁）和 <strong>running 计数</strong>（现在占着几个槽位）。调度规则一句话：
+      <strong>开局把 limit 个槽位填满；每当一个任务完成，立刻从队列补位启动下一个。</strong>常见两种写法：</p>
+    <ul>
+      <li><strong>递归 worker 版</strong>：雇佣 limit 个「工人」，每个工人循环取任务——有活就干、干完递归取下一个，队列取空即收工。代码短、直觉好。</li>
+      <li><strong>循环补位版</strong>：用 <code>while (running &lt; limit &amp;&amp; index &lt; total)</code> 启动，把「补位」写进完成回调。扩展性好——想加取消、重试、优先级，都在这个结构上改。</li>
+    </ul>
+    <p>两个必踩的坑：一，<code>limit</code> 要先和任务数取小、并拦住 0 和负数（Math.max/Math.min 处理），否则可能出现「槽位比任务多没事，槽位为 0 全卡死」；
+      二，补位逻辑必须写在<strong>完成回调</strong>里——写在启动循环里，循环一口气跑完就变成了「全部同时启动」，limit 形同虚设。Promise 场景里补位要放 <code>finally</code>，否则一个任务失败就卡死整个队列。</p>
+
+    <h3>三、手写 Promise.all / race：计数器思维</h3>
+    <p><code>all</code> 的骨架：结果数组按<strong>传入顺序</strong>（不是完成顺序）存放——每个任务用自己下标 <code>i</code> 锁定写入位置；
+      一个计数器统计已落定数量，等于总数才 resolve。<strong>任何一个失败立即整体 reject</strong>，其余结果不再等待；空数组直接 <code>resolve([])</code>；
+      非 Promise 值用 <code>Promise.resolve()</code> 包装。<code>race</code> 更简单：所有任务都往同一个 resolve/reject 上「抢跑」，第一个落定的说了算——无论成败。
+      选型口诀：一损俱损要全量成功用 all；无论成败做盘点用 allSettled；只关心第一响应（超时兜底）用 race。</p>
+
+    <h3>四、EventEmitter：发布订阅四件套</h3>
+    <p>一个对象存「事件名 → 监听器数组」就够了：<code>on</code> 是往数组 push；<code>off</code> 是 filter 掉指定函数（按引用比对）；
+      <code>emit</code> 是取出数组依次调用，并把第 1 个参数之后的实参透传给监听器；<code>once</code> 最容易翻车——订阅的是一个<strong>包装函数</strong>，
+      触发时先把自己从数组里移除，再执行原函数。注意解绑时比对的是包装函数本身：如果错把原函数拿去比对，永远解绑不掉，once 就退化成了 on。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 十一假期的山谷景区：闸机只发 2 张「同时在园证」</div>
+      <p>十一假期，山谷景区的环山步道很窄，实测同一时间只容得下 2 个旅行团——挤进去第 3 个团，山道就堵死（对应服务器被打满：内存飙升、响应变慢，甚至崩溃）。于是景区定了规矩：入口闸机手上只有 <strong>2 张「同时在园证」</strong>（这就是 limit）。</p>
+      <p>早上 8 点，A 团、B 团先后到达，递材料（调用任务）领证入园；C、D、E 团赶到时证都发出去了，只能<strong>在门口排队区等</strong>（pending 队列）。B 团逛完从出口出来那一刻，闸机员立刻喊：「下一位！」——C 团<strong>无缝补位入园</strong>，全程园内永远不超过 2 个团，也永远没有团被落下：先来后到，人人有份。</p>
+      <p>如果景区不做限流，让所有团一拥而入会怎样？山道堵死、导游找不到人、有人被挤下台阶——对应到代码里就是同时发起几千个请求：带宽打满、连接池耗尽、大量超时失败。所以并发控制的本质不是<strong>让任务变少</strong>，而是给「同时在跑」这件事<strong>上锁</strong>：完成的走得体面，等待的排得安心，吞吐量反而因为「不拥堵」而更高。下面这个演示，你就是闸机员。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：景区限流·并发控制闸机模拟（可点击推演，纯 DOM/CSS/JS，零外部库） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>你是景区闸机员，<strong>园内同一时刻最多 2 个团（limit = 2）</strong>。连点「下一团到达」观察排队，再点「一团游览结束」观察无缝补位：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">映射关系：园内槽位 = 正在运行的任务（同时最多 limit 个）；排队区 = 等待中的任务；「出园即补位」= 完成回调里启动下一个任务。</p>
+      <div class="pk-board">
+        <div>
+          <div class="pk-row-title">园区内（limit = 2，同时最多 2 团）</div>
+          <div class="pk-park" id="pk-park"></div>
+        </div>
+        <div>
+          <div class="pk-row-title">门口排队区</div>
+          <div class="pk-queue" id="pk-queue"></div>
+        </div>
+        <div class="pk-stats">
+          <span>当前园内：<b id="pk-in">0 / 2</b></span>
+          <span>累计入园：<b id="pk-entered">0</b> 团</span>
+          <span>峰值园内：<b id="pk-peak">0</b> 团（永远不该超过 2）</span>
+          <span>已出园：<b id="pk-left">0</b> 团</span>
+        </div>
+      </div>
+      <div class="anim-console" id="pk-console">
+        <div class="anim-line is-muted">连点「下一团到达」到第 3 团开始，就能看到排队；之后点「一团游览结束」看补位……</div>
+      </div>
+      <div class="pk-controls">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="pk-arrive">下一团到达</button>
+        <button type="button" class="fg-btn fg-btn--ok fg-btn--sm" id="pk-leave">一团游览结束</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="pk-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（全部为课程数据中的真实 path） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="../../pages/m1/m1-js-promise.html">Promise 与 async/await</a>——三态、then 链、all/race 的使用经验，是手写它们的前提。</p>
+    <p><strong>向后延伸</strong>：异步手写过关后，接着攻<a href="./m7-handwrite-dom.html">手写题·浏览器篇</a>（事件委托、发布订阅的浏览器侧落地与序列化）。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="../../pages/m1/m1-js-eventloop.html">事件循环与任务队列</a> —— then 回调为什么必须放进微任务、执行顺序题怎么推，全在这页。</li>
+      <li><a href="../../pages/m1/m1-js-scope.html">JS 类型、作用域与闭包</a> —— 并发控制里跨调用存活的 running 计数、EventEmitter 的监听器数组，都是闭包在兜底。</li>
+      <li><a href="../../pages/m4/m4-runtime.html">运行时优化：防抖、节流与计算缓存</a> —— 另一种「给高频异步上锁」的手段，和并发控制互补使用。</li>
+      <li><a href="../../pages/m6/m6-node.html">Node.js 运行时与事件循环</a> —— 服务器端的 I/O 天生高并发，limitConcurrency 是接口聚合、批量抓取的标配。</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：1 道选择 + 2 道代码题（含解析），mode:'main' -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>两道代码题请在作答区补全实现，「运行判题」会在本地沙箱里同步逐条跑断言：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：并发控制就是景区限流——闸机只发 limit 张「同时在园证」，一个团出来立刻放下一个团进去，园里永远不超员；Promise 是一张取餐号牌，餐好了叫你；EventEmitter 是个大喇叭，喊一嗓子（emit），订阅过频道的人都能听见。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前合上页面，把 limitConcurrency 的「开局填槽 + 完成补位」和 once 的「包装自删」各默写一遍并口述原因；1 天、3 天、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：2 个问法，答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：手写并发控制有哪些写法？递归版和循环版怎么取舍？</summary>
+      <ul>
+        <li>核心不变量先说清：running 计数永远 ≤ limit；任务完成一个就补位一个，队列不丢不重。</li>
+        <li>递归 worker 版：起 limit 个工人，每个工人「取任务 → 执行 → 完成后递归取下一个」，队列取空即结束。代码短、好讲。</li>
+        <li>循环补位版：while 填槽 + 完成回调里补位。结构上更好扩展——取消、重试、优先级、进度回调都能平滑加进去。</li>
+        <li>边界处理：limit 与任务数取小，并拦住 0/负数；Promise 任务用 finally 补位，防止一个失败卡死整条队列。</li>
+        <li>加分项：提到社区方案 p-limit / asyncPool 的思路，或说明「deep 递归不会栈溢出，因为补位发生在异步完成回调里，不占调用栈深度」。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：手写 Promise.all 要注意什么？和 allSettled 怎么选？</summary>
+      <ul>
+        <li>返回一个新 Promise；结果数组按传入顺序写入（每个任务用自己的下标 i 锁位），与完成顺序无关。</li>
+        <li>计数器统计已落定数量，count === total 时整体 resolve；任何一个 reject 立即整体 reject，不再等其余。</li>
+        <li>细节：非 Promise 值用 Promise.resolve() 包装；空数组直接 resolve([])；迭代用 for 循环处理数组即可。</li>
+        <li>allSettled：永不 reject，等全部落定后返回 { status, value / reason } 数组，适合批量任务的成败盘点。</li>
+        <li>加分项：说明 all 的「快速失败」是一把双刃剑——埋点上报这类「个别失败无所谓」的场景选 allSettled，否则一个失败就丢掉全部成功结果。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm7-handwrite-async'; // 与 body data-page、curriculum.js 中的 points[].id 一字不差
+
+  /* 预热题（mode:'warmup'） */
+  var WARMUP = [{
+    id: 'm7-handwrite-async-w1',
+    type: 'single',
+    stem: '预热：一个 Promise 从 pending 开始，下面哪种「状态流转」是合法的？',
+    options: [
+      'pending → fulfilled → pending（可以改回等待）',
+      'pending → fulfilled 或 pending → rejected，二选一且不可逆',
+      '一个 Promise 可以先 fulfilled 再 rejected',
+      'Promise 没有「状态」的概念'
+    ],
+    answer: [1],
+    explain: 'Promise 的状态流转是单向、单次的：从 pending 出发，要么到 fulfilled（成功），要么到 rejected（失败），一旦定型不可再变。这就是为什么手写简化版时要在 resolve/reject 里加「只有第一次生效」的防御。'
+  }];
+
+  /* 正式例题（mode:'main'）：1 道选择 + 2 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm7-handwrite-async-q1',
+      type: 'single',
+      stem: '页面要并发请求 5 个统计接口，希望「无论成败都等全部结束」，最后统一盘点哪些成功哪些失败。应该选？',
+      options: [
+        'Promise.all：全部成功才返回',
+        'Promise.allSettled：等全部落定，逐个给出 fulfilled / rejected',
+        'Promise.race：谁快用谁',
+        '改成 for 循环里 await，一个一个来'
+      ],
+      answer: [1],
+      explain: 'all 是「一损俱损」：任何一个失败就立即 reject，拿不到其余成功的结果，无法完成「成败盘点」。allSettled 永不 reject，等全部落定后返回 [{ status, value | reason }, ...]，天生为批量盘点设计。race 只关心第一个落定的（适合超时兜底）；for 循环 await 则放弃了并发，5 个接口变成串行等待，总耗时是相加而非取最大。'
+    },
+    {
+      id: 'm7-handwrite-async-q2',
+      type: 'code',
+      stem: '实现 limitConcurrency(tasks, limit)：并发控制调度器。任务模型：tasks 中每项是 function(done)，done() 被调用时视为该任务完成。要求：同一时刻「已启动且未完成」的任务数不超过 limit；某任务完成时，立即从队列补位启动下一个。判题用同步模型——done 由测试代码手动触发，全程同步、峰值可断言。',
+      stub: 'function limitConcurrency(tasks, limit) {\n  // 在此实现：并发控制调度器\n  // 提示 1：用变量记录「下一个要启动的任务下标」和「正在运行的数量」\n  // 提示 2：开局把 limit 个槽位填满；done 被调用时运行数减一并立刻补位\n}\n',
+      reference: 'function limitConcurrency(tasks, limit) {\n  var index = 0;    // 下一个待启动任务的下标\n  var running = 0;  // 已启动且未完成的任务数（占用的槽位数）\n  function launch() {\n    while (running < limit && index < tasks.length) { // 有空槽且还有任务才启动\n      running++;\n      (function (task) {\n        task(function done() {   // 任务完成：腾出槽位，立刻补位启动下一个\n          running--;\n          launch();\n        });\n      })(tasks[index++]);\n    }\n  }\n  launch(); // 开局：一次性把 limit 个槽位填满\n}',
+      asserts: [
+        '(function(){var active=0,peak=0,order=[],d=[];var ts=[];for(var i=0;i<5;i++)(function(id){ts.push(function(done){active++;if(active>peak){peak=active;}order.push(id);d.push(function(){active--;done();});});})(i);limitConcurrency(ts,2);var s1=(order.join()==="0,1");d[0]();var s2=(order.join()==="0,1,2");d[1]();d[2]();d[3]();d[4]();return s1&&s2&&peak===2&&order.join()==="0,1,2,3,4"&&active===0;})()',
+        '(function(){var active=0,peak=0,order=[],d=[];var ts=[];for(var i=0;i<3;i++)(function(id){ts.push(function(done){active++;if(active>peak){peak=active;}order.push(id);d.push(function(){active--;done();});});})(i);limitConcurrency(ts,1);var s1=(order.join()==="0");d[0]();d[1]();d[2]();return s1&&peak===1&&order.join()==="0,1,2"&&active===0;})()',
+        '(function(){var active=0,peak=0,order=[];var ts=[];for(var i=0;i<2;i++)(function(id){ts.push(function(done){active++;if(active>peak){peak=active;}order.push(id);});})(i);limitConcurrency(ts,5);return order.join()==="0,1"&&peak===2;})()'
+      ],
+      explain: '第 1 条是主验证：5 个任务、上限 2——开局只允许启动 0、1 号（order 前两位是 "0,1"），同时运行的峰值恰好是 2（peak===2，多一分是超限，少一分是漏启动）；手动让 0 号完成后，2 号必须立刻补位（order 变 "0,1,2"）；全部完成后运行数归零（active===0）。第 2 条验证 limit=1 时正确退化为串行：同一时刻永远只有 1 个在跑。第 3 条验证任务数少于 limit 时全部直接启动，不能因为「槽位多」而漏启动。为什么用 done 回调模型：真实并发控制里「任务完成」由 Promise 的 then/finally 通知，而判题沙箱是同步环境——手动触发 done 等价于把「异步完成信号」压缩成同步调用，峰值计数的行为与真实异步完全一致。两个高频错误：把补位写在启动循环里（变成一次性全启动，peak 直接超限）；用 for (i=0; i<limit; i++) 启动后没有在 done 里继续 launch（补位逻辑丢失，后面的任务永远没人启动）。'
+    },
+    {
+      id: 'm7-handwrite-async-q3',
+      type: 'code',
+      stem: '实现 EventEmitter 构造函数（用 new 调用）：支持 on(event, fn) 订阅、emit(event, ...args) 触发并把附加参数透传给监听器、once(event, fn) 注册「只触发一次」的监听器。',
+      stub: 'function EventEmitter() {\n  // 在此实现：发布订阅\n  // 提示 1：用一个对象存「事件名 → 监听器数组」\n  // 提示 2：once 用包装函数实现：触发时先把自己移除，再执行原函数\n}\n',
+      reference: 'function EventEmitter() {\n  this._events = {};                       // 事件名 → 监听器数组\n}\nEventEmitter.prototype.on = function (event, fn) {\n  (this._events[event] = this._events[event] || []).push(fn);\n  return this;\n};\nEventEmitter.prototype.emit = function (event) {\n  var args = Array.prototype.slice.call(arguments, 1);  // 附加参数透传\n  var list = (this._events[event] || []).slice();       // 拷贝！防止执行中 once 自删导致漏触发\n  for (var i = 0; i < list.length; i++) {\n    list[i].apply(null, args);\n  }\n};\nEventEmitter.prototype.once = function (event, fn) {\n  var self = this;\n  function wrap() {\n    fn.apply(null, arguments);\n    self._events[event] = (self._events[event] || []).filter(function (f) { return f !== wrap; });\n  }\n  this.on(event, wrap);                    // 订阅的是包装函数，解绑时也只认 wrap\n};',
+      asserts: [
+        '(function(){var e=new EventEmitter();var n=0;e.on("pay",function(){n++;});e.emit("pay");e.emit("pay");return n===2;})()',
+        '(function(){var e=new EventEmitter();var n=0;e.once("login",function(){n++;});e.emit("login");e.emit("login");e.emit("login");return n===1;})()',
+        '(function(){var e=new EventEmitter();var s="";e.once("go",function(){s+="B";});e.on("go",function(){s+="A";});e.emit("go");e.emit("go");return s==="BAA";})()',
+        '(function(){var e=new EventEmitter();var s="";e.on("msg",function(a,b){s+=a+b;});e.emit("msg","哈","喽");return s==="哈喽";})()'
+      ],
+      explain: '四条断言对应四个关键点：第 1 条验证 on/emit 的基本订阅——同一事件每次 emit 都要通知所有监听器；第 2 条是 once 的语义——只触发一次，之后再 emit 不再执行；第 3 条专治「once 自删导致漏触发」：once 先注册、on 后注册，第一次 emit 应按序触发 B、A（得 "BA"），第二次只剩 A（得 "BAA"）。如果 emit 直接遍历原数组、而 once 在执行中把自己从数组里删掉，A 所在的位置前移会被跳过，只能得到 "BA"——所以 emit 前必须 slice 拷贝一份再遍历；第 4 条验证 emit 的附加参数要完整透传给监听器（从第 1 个参数之后截取）。另一个高频 bug 在 once 内部：包装函数里错把原函数 fn 拿去解绑，而数组里存的是 wrap，比对永远不相等，once 就退化成了 on（第 2 条断言会失败）。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（会推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：景区限流·并发控制闸机模拟器（纯 DOM 手写，零外部库）。
+   你扮演闸机员：「下一团到达」= 新任务提交；「一团游览结束」= 任务完成触发补位。
+   全程可观察：峰值园内数永远不超过 limit=2，出园瞬间排队区头一个团无缝补位。 */
+(function () {
+  'use strict';
+  var LIMIT = 2;                          // 并发上限：园内同时最多 2 个团
+  var LETTERS = ['A', 'B', 'C', 'D', 'E', 'F']; // 今天会来的 6 个旅行团
+  var nextIdx = 0;                        // 下一个即将到达的团下标
+  var park = [];                          // 园内旅行团（同时最多 LIMIT 个）
+  var queue = [];                         // 门口排队区
+  var entered = 0;                        // 累计入园次数
+  var peak = 0;                           // 峰值同时园内数（并发峰值）
+  var left = 0;                           // 累计出园数
+
+  var parkEl = document.getElementById('pk-park');
+  var queueEl = document.getElementById('pk-queue');
+  var consoleEl = document.getElementById('pk-console');
+  var inEl = document.getElementById('pk-in');
+  var enteredEl = document.getElementById('pk-entered');
+  var peakEl = document.getElementById('pk-peak');
+  var leftEl = document.getElementById('pk-left');
+  var arriveBtn = document.getElementById('pk-arrive');
+  var leaveBtn = document.getElementById('pk-leave');
+  var resetBtn = document.getElementById('pk-reset');
+
+  /* 向控制台追加一行日志，并自动滚到底部 */
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* 渲染园区槽位与排队区，并刷新统计数字 */
+  function render() {
+    parkEl.innerHTML = '';
+    for (var i = 0; i < LIMIT; i++) {
+      var slot = document.createElement('div');
+      if (park[i]) {
+        slot.className = 'pk-slot is-full';
+        slot.textContent = park[i] + ' 团（游览中）';
+      } else {
+        slot.className = 'pk-slot';
+        slot.textContent = '空位';
+      }
+      parkEl.appendChild(slot);
+    }
+    queueEl.innerHTML = '';
+    for (var k = 0; k < queue.length; k++) {
+      var p = document.createElement('span');
+      p.className = 'pk-person' + (k === 0 ? ' is-entering' : ''); // 队首标记微动画
+      p.textContent = queue[k] + ' 团（排队第 ' + (k + 1) + ' 位）';
+      queueEl.appendChild(p);
+    }
+    inEl.textContent = park.length + ' / ' + LIMIT;
+    enteredEl.textContent = String(entered);
+    peakEl.textContent = String(peak);
+    leftEl.textContent = String(left);
+    arriveBtn.disabled = nextIdx >= LETTERS.length;   // 团都到齐后禁用到达按钮
+  }
+
+  /* 新团到达：有空位直接入园（立即执行），没空位进排队区（进入 pending 队列） */
+  function arrive() {
+    if (nextIdx >= LETTERS.length) return;
+    var v = LETTERS[nextIdx] + '';
+    nextIdx++;
+    if (park.length < LIMIT) {
+      park.push(v);
+      entered++;
+      if (park.length > peak) peak = park.length;
+      log(v + ' 团到达闸机 → 有「同时在园证」，直接入园（园内 ' + park.length + '/' + LIMIT + '）', 'is-ok');
+    } else {
+      queue.push(v);
+      log(v + ' 团到达闸机 → 证已发完，进入排队区等待（排队 ' + queue.length + ' 团）', 'is-muted');
+    }
+    render();
+  }
+
+  /* 一团结束：出园腾出槽位；若排队区有人，立刻补位入园（完成回调里补位启动下一个） */
+  function leave() {
+    if (!park.length) {
+      log('园内暂时没有旅行团，先点「下一团到达」吧', 'is-muted');
+      return;
+    }
+    var v = park.shift();
+    left++;
+    log(v + ' 团游览结束，出园归还「同时在园证」（累计出园 ' + left + ' 团）', 'is-end');
+    if (queue.length) {
+      var nv = queue.shift();
+      park.push(nv);
+      entered++;
+      if (park.length > peak) peak = park.length;
+      log('闸机立刻喊号：' + nv + ' 团无缝补位入园（园内 ' + park.length + '/' + LIMIT + '）——这就是「完成一个，补位一个」', 'is-ok');
+    } else {
+      log('排队区没有人，槽位先空着等下一团', 'is-muted');
+    }
+    render();
+  }
+
+  function reset() {
+    nextIdx = 0; park = []; queue = [];
+    entered = 0; peak = 0; left = 0;
+    consoleEl.innerHTML = '';
+    log('已重置：连点「下一团到达」，从第 3 团起会开始排队；再点「一团游览结束」看补位。', 'is-muted');
+    render();
+  }
+
+  arriveBtn.addEventListener('click', arrive);
+  leaveBtn.addEventListener('click', leave);
+  resetBtn.addEventListener('click', reset);
+  render();
+})();
+</script>
+</body>
+</html>

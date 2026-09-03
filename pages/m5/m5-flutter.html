@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>Flutter 自绘引擎 · 跨端开发</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ============================================================
+   本页动画专用样式：租现成家具（映射原生）vs 自带画具（自绘引擎）
+   纯手写 CSS，无任何外部依赖，仅本页使用
+   ============================================================ */
+.fl-anim { display: flex; gap: 12px; align-items: stretch; margin: 12px 0; flex-wrap: wrap; }
+.fl-panel {
+  flex: 1 1 220px; min-width: 210px;
+  border: 1px solid #d7dde8; border-radius: 10px;
+  padding: 10px 12px; background: #fafbfe;
+  display: flex; flex-direction: column;
+}
+.fl-panel--rent { border-color: #e3c98a; background: #fffaf0; }
+.fl-panel--paint { border-color: #9cc3f5; background: #f5f9ff; }
+.fl-panel-title { font-weight: 700; font-size: 13px; margin-bottom: 8px; }
+.fl-hint { font-size: 12px; color: #6b7280; margin-bottom: 8px; line-height: 1.6; }
+/* 舞台区：租来的控件 / 自己画的画布都放在这里 */
+.fl-stage { flex: 1 1 auto; min-height: 96px; margin-bottom: 8px;
+  border: 1px dashed #c8cfdd; border-radius: 8px; background: #fff; padding: 8px; }
+/* 租来的「现成家具」：随平台切换更换外观，模拟不同系统原生控件风格 */
+.fu-btn {
+  display: inline-block; margin: 4px 6px 4px 0; padding: 7px 16px;
+  color: #fff; font-size: 13px; font-weight: 600;
+  animation: fl-in 0.35s ease;
+}
+.fu-btn--ios { background: #0a84ff; border-radius: 999px; }        /* iOS 风格：全圆角胶囊 */
+.fu-btn--android { background: #2e7d32; border-radius: 4px; }      /* Android 风格：小圆角矩形 */
+@keyframes fl-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.92); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+/* 自绘画布：Flutter 的 Skia 就是这样一块「自己的画布」 */
+.fl-canvas { width: 100%; max-width: 320px; height: 72px; display: block;
+  border-radius: 6px; background: #ffffff; }
+.fl-platform { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+.fl-platform .fg-btn.is-active { border-color: #2f5bea; color: #2f5bea; font-weight: 700; }
+.fl-platform-label { font-size: 12px; color: #6b7280; }
+</style>
+</head>
+<body data-page="m5-flutter">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">RN 是「让原生控件替你画」，Flutter 干脆说：都不用了，我自己带画笔——所有像素都由自家引擎画出来。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>本页的前置知识：<a href="./m5-rn.html">React Native 原理</a> ——
+      RN 选择了「映射原生控件」这条路线，先弄清它是怎么画界面的，才能理解 Flutter 为什么反着来：
+      不借任何原生控件，自绘一切。两页对照着读，跨端渲染的两大哲学就齐了。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：讲解 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、两种渲染哲学：映射原生 vs 自己全画</h3>
+    <p>跨端方案绕不开一个问题：<strong>屏幕上的像素最终由谁画？</strong>RN 的答案是「平台的原生控件」——
+      JS 侧算好界面描述，交给 iOS / Android 的现成控件渲染，好处是质感与原生 App 一致，
+      代价是外观跟随平台默认风格、还要为「两个世界的沟通」付通信成本。
+      Flutter 给出第四条路：<strong>既不用 WebView，也不映射原生控件</strong>——它自带一整套渲染引擎，
+      把界面描述变成一条条<strong>绘制指令</strong>，直接画到屏幕上。控件长什么样完全由 Flutter 自己的组件库
+      （Material 与 Cupertino）说了算，所以同一份代码在两个平台上<strong>像素级一致</strong>。</p>
+
+    <h3>二、Skia：绘制指令直达 GPU</h3>
+    <p>Flutter 的渲染引擎基于 <strong>Skia</strong>（一个用 C++ 写的 2D 绘图库）。
+      每一帧的工作流大致是：Widget 描述界面 → 经布局与绘制阶段生成一串绘制指令
+      （画个圆角矩形、填充这个颜色、把这段文字放这里）→ 指令交给 GPU 光栅化上屏。
+      因为整条渲染管线都握在自己手里，Flutter 不受平台控件版本与默认样式的牵制，
+      动画可以做到稳定 60 帧（高刷设备上更高）。代价也要知道：<strong>引擎要打包进 App</strong>，
+      安装包有一个固定增量的底价；系统级能力（推送、无障碍等）需要通过平台通道额外对接。</p>
+
+    <h3>三、Dart 与 AOT / JIT 双模式</h3>
+    <p>Flutter 选了 Dart 作为开发语言，看中的正是它的双模式：
+      <strong>开发期用 JIT（即时编译）</strong>——代码改动后毫秒级生效，这就是「热重载」：
+      改完界面立刻在模拟器上看到效果，状态还能保留，调试体验极快；
+      <strong>发布期用 AOT（提前编译）</strong>——Dart 直接编译成目标平台的机器码，
+      运行时不做解释或再编译，性能接近原生。一种语言两头讨好：开发要快，发布要猛。</p>
+
+    <h3>四、三棵树：Widget / Element / RenderObject</h3>
+    <p>Flutter 里你写的是 Widget，但真正干活的还有两层，合称三棵树：</p>
+    <ul>
+      <li><strong>Widget（配置）</strong>：不可变的界面配置描述，相当于「这张按钮要蓝色、圆角 8」。
+        它非常轻，可以随状态变化频繁重建，重建不等于重画。</li>
+      <li><strong>Element（管家）</strong>：Widget 与渲染对象之间的中间层，持有生命周期与上下文。
+        新 Widget 来了，它先比一比（类型与 key 是否相同），相同就<strong>复用</strong>已有的渲染对象、
+        只更新配置——这是 Flutter 性能的关键护栏。</li>
+      <li><strong>RenderObject（工人）</strong>：真正负责布局计算、绘制与命中测试的重量级对象，
+        创建成本高，所以被 Element 层保护起来，能不重建就不重建。</li>
+    </ul>
+    <p>这套「轻配置 + 重对象 + 中间复用」的设计，和 Web 世界「虚拟 DOM + Diff 复用真实 DOM」是同一个思想：
+      便宜的东西随便重建，昂贵的东西靠比对来省。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比：连锁奶茶店的两种开法</div>
+      <p>假设同一份图纸的连锁奶茶店要在东京和巴黎各开一家。<strong>RN 的开法</strong>：
+        每座城市雇当地的施工队，建材就地采购。好处是成品贴合当地工艺习惯——
+        东京店的门把手、巴黎店的窗棂都是本地师傅最拿手的样式，客人一进门就觉得「很本地」；
+        但两地成品会有细微差异，而且图纸是总部出的，施工队看不懂的地方要打电话来回确认
+        （跨世界通信），沟通一多进度就慢。</p>
+      <p><strong>Flutter 的开法</strong>：总部直接拉一整集装箱施工队和全套建材过去
+        （自带渲染引擎打包进 App），到哪儿都按总部同一套工艺施工——
+        东京店和巴黎店的吧台弧度、灯带色温差上一度都一样，品牌视觉绝对统一。
+        代价是：集装箱运费不便宜（安装包有固定增量），而且当地水电要自己接
+        （系统推送、无障碍这类平台能力得通过专门的「接驳口」额外对接）。
+        两种开法没有绝对优劣，看你要「融入当地」还是「风格统一」。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：租现成家具（映射原生）vs 自带画具（自绘引擎），纯手写 CSS/JS + 原生 canvas -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>左边是「租家具」路线：要一个按钮，直接从当前平台的控件库里搬现成的，外观随平台变；
+      右边是「自带画具」路线：用 Skia 的绘制指令一笔一笔画按钮，指令不变，画出来的成品也不变。
+      切换平台试试，对比两条路线的差别：</p>
+    <div class="anim-stage">
+      <div class="fl-platform">
+        <span class="fl-platform-label">当前目标平台：</span>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm is-active" id="fl-p-ios">iOS</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="fl-p-android">Android</button>
+      </div>
+      <div class="fl-anim">
+        <div class="fl-panel fl-panel--rent">
+          <div class="fl-panel-title">路线一：映射原生控件（租现成家具）</div>
+          <div class="fl-hint">点击「要一个按钮」，从平台控件库直接搬一个现成的——外观由当前平台决定。</div>
+          <div class="fl-stage" id="fl-furniture"><span class="anim-line is-muted">（还没有控件，点下面按钮租一个）</span></div>
+          <div class="anim-controls">
+            <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="fl-rent">要一个按钮（租家具）</button>
+          </div>
+        </div>
+        <div class="fl-panel fl-panel--paint">
+          <div class="fl-panel-title">路线二：自绘引擎（自带全套画具）</div>
+          <div class="fl-hint">点击「单步绘制」，逐条执行 Skia 绘制指令，亲眼看着按钮被画出来。</div>
+          <div class="fl-stage">
+            <canvas id="fl-canvas" class="fl-canvas" width="320" height="72">当前浏览器不支持画布</canvas>
+          </div>
+          <div class="anim-console" id="fl-console">
+            <div class="anim-line is-muted">点击「单步绘制」，逐条执行绘制指令…</div>
+          </div>
+          <div class="anim-controls">
+            <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="fl-paint">单步绘制</button>
+            <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="fl-reset">重置</button>
+          </div>
+        </div>
+      </div>
+      <p class="fl-hint" id="fl-note-line">提示：切到另一个平台再各画一次——租来的按钮会换风格，自绘的按钮纹丝不动。</p>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（真实课程路径） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="./m5-rn.html">React Native 原理</a> ——
+      先懂「映射原生控件 + 跨世界通信」，才能体会 Flutter「自己全画」省掉了什么、又背上了什么。</p>
+    <p><strong>向后延伸</strong>：接下来看 <a href="./m5-hybrid.html">Hybrid 开发与 JSBridge</a>
+      （第三条路线：直接用 WebView 装 H5）；最后把所有方案放上天平做决策，见
+      <a href="./m5-choose.html">跨端方案选型</a>。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="../../pages/m3/m3-vdom.html">虚拟 DOM 与 Diff 算法</a> ——
+        Widget / Element / RenderObject 三棵树与「虚拟 DOM + Diff 复用真实 DOM」是同一思想的两次落地。</li>
+      <li><a href="../../pages/m2/m2-pipeline.html">浏览器渲染流水线</a> ——
+        浏览器同样把样式变成绘制指令再交给 GPU 合成，Flutter 只是把这条管线整个搬进了自己的引擎。</li>
+      <li><a href="./m5-mp-arch.html">小程序双线程架构</a> ——
+        同样面对「逻辑与渲染分离」，小程序用跨线程消息解决，Flutter 用同一进程内的三棵树解决。</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（mode:'main'） -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后把最佳成绩写入进度仓库（见页面底部内联脚本）：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：Flutter 不借手机系统现成的按钮和列表，
+      而是自己带了一整套「画笔」，把界面一笔一笔画出来——所以在任何手机上长相性能都一模一样，
+      代价是 App 里得随身背着这套画具。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前复述 1 次，1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：Flutter 与 RN 在渲染机制上的核心区别是什么？</summary>
+      <ul>
+        <li>RN：JS 写组件，框架算出界面描述后映射为平台原生控件渲染，控件质感与原生一致，但外观跟随平台默认风格。</li>
+        <li>Flutter：不使用平台控件，由自带渲染引擎（基于 Skia）把 Widget 描述转成绘制指令直接画到屏幕，双端像素级一致。</li>
+        <li>通信模型：RN（旧架构）依赖 JS 与原生之间的异步消息桥，高频通信有序列化瓶颈；Flutter 的界面树与渲染都在引擎内部完成，没有这条跨语言桥。</li>
+        <li>语言与运行：Dart 开发期 JIT 支持热重载，发布期 AOT 编译成机器码；RN 侧则是 JS 引擎执行 JS（新架构用 Hermes + JSI）。</li>
+        <li>加分项：能指出 Flutter 的代价——引擎打进安装包有固定增量，平台能力需要通过平台通道对接。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：Widget 是不可变的，界面岂不是要频繁重建整棵树？Flutter 怎么保证性能？</summary>
+      <ul>
+        <li>Widget 只是轻量的配置描述，重建 Widget 树很廉价，重建不等于重画。</li>
+        <li>Element 层持有生命周期，新 Widget 到来时按「类型 + key 是否相同」决定复用还是重建。</li>
+        <li>能复用时，旧的 RenderObject 被保留，只把新配置更新进去，昂贵的布局绘制不会重来。</li>
+        <li>RenderObject 负责布局、绘制与命中测试，创建成本高，因此被 Element 层保护。</li>
+        <li>加分项：类比「虚拟 DOM Diff 复用真实 DOM」，说明轻配置随便重建、重对象按需更新的通用设计。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* ============================================================
+ * 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评
+ * ============================================================ */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm5-flutter'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'） */
+  var WARMUP = [{
+    id: 'm5-flutter-warmup-1',
+    type: 'single',
+    stem: '预热：在 Flutter 应用里，按钮和文字最终由谁画到屏幕上？',
+    options: [
+      '对应平台的原生控件（iOS 的 UIButton、Android 的 Button）',
+      '手机自带的 WebView 负责渲染',
+      'Flutter 自带的渲染引擎（基于 Skia）直接下发绘制指令画出来'
+    ],
+    answer: [2],
+    explain: 'Flutter 既不用 WebView 也不映射原生控件，而是自带渲染引擎，把界面描述变成绘制指令直接上屏——「自绘」正是它与 RN 的分水岭。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm5-flutter-q1',
+      type: 'single',
+      stem: '同一份 Flutter 代码在 iOS 与 Android 上像素级一致，而 RN 应用在不同平台上会呈现细微的平台差异，根本原因是？',
+      options: [
+        'Flutter 会针对平台微调样式，所以故意做得一样',
+        'Flutter 不依赖平台控件，所有像素由自带引擎按同一套绘制指令画出；RN 映射平台控件，外观跟随平台默认风格',
+        'Flutter 禁用了系统提供的主题与控件能力之外的所有 API',
+        'RN 的组件只在部分平台上提供原生实现，其余靠 WebView 兜底'
+      ],
+      answer: [1],
+      explain: '渲染哲学决定结果：RN 的按钮就是平台按钮，平台默认长什么样它就长什么样，跨平台自然有差异；Flutter 的按钮是 Skia 按同一串绘制指令画出来的，指令相同、像素就相同。A 把因果说反，C 属于臆造的限制，D 对 RN 的描述不实——RN 没有 WebView 兜底渲染组件这回事。'
+    },
+    {
+      id: 'm5-flutter-q2',
+      type: 'multi',
+      stem: '关于 Widget / Element / RenderObject 三棵树的职责，下列说法正确的有？',
+      options: [
+        'Widget 是不可变的界面配置描述，可以随状态频繁重建，成本很低',
+        'Element 持有生命周期与上下文，负责比较新旧 Widget、尽量复用已有的 RenderObject',
+        'Widget 一变，整棵 RenderObject 树都会销毁重建，所以 Flutter 性能很差',
+        'RenderObject 负责真正的布局计算、绘制与命中测试'
+      ],
+      answer: [0, 1, 3],
+      explain: '三棵树的分工是「轻配置 + 管家 + 重工人」：Widget 随便重建（A 对），Element 用「类型 + key 相同则复用」的规则保住昂贵的 RenderObject（B 对），RenderObject 才是干活的那层（D 对）。C 说反了——恰恰因为有 Element 复用机制，Widget 频繁重建并不会导致渲染对象整树重建，这正是 Flutter 性能的护栏。'
+    },
+    {
+      id: 'm5-flutter-q3',
+      type: 'code',
+      stem: '手写简化版 Element 复用判断：Flutter 更新时会逐个比较新旧 Widget，类型（type）与 key 都相同才复用已有的渲染对象。实现函数 reconcile(oldWidgets, newWidgets)，两组 Widget 按位置一一对应，返回动作数组（长度与 newWidgets 相同）：可复用返回 { op: "reuse", index: i }，否则返回 { op: "recreate", index: i }。',
+      stub: 'function reconcile(oldWidgets, newWidgets) {\n  // oldWidgets / newWidgets：形如 [{ type: \'Text\', key: null }, ...] 的数组，按位置对应\n  // 规则：同一位置上 type 与 key 都相同 → { op: \'reuse\', index: i }\n  //       否则                        → { op: \'recreate\', index: i }\n  // 返回长度与 newWidgets 相同的动作数组\n}\n',
+      reference: 'function reconcile(oldWidgets, newWidgets) {\n  return (newWidgets || []).map(function (w, i) {\n    var old = (oldWidgets || [])[i];\n    var canReuse = !!old && old.type === w.type && old.key === w.key;\n    return canReuse ? { op: \'reuse\', index: i } : { op: \'recreate\', index: i };\n  });\n}',
+      asserts: [
+        'JSON.stringify(reconcile([{type:"Text",key:null},{type:"Text",key:null}],[{type:"Text",key:null},{type:"Image",key:null}])) === \'[{"op":"reuse","index":0},{"op":"recreate","index":1}\' + \']\'',
+        'reconcile([{type:"Box",key:"a"}],[{type:"Box",key:"b"}])[0].op === "recreate"',
+        'reconcile([{type:"Box",key:"a"}],[{type:"Box",key:"a"}])[0].op === "reuse"',
+        'reconcile([],[{type:"Text",key:null}]).length === 1 && reconcile([],[{type:"Text",key:null}])[0].op === "recreate"'
+      ],
+      explain: '为什么要手写这个判断？因为「Widget 重建很廉价、RenderObject 映射很昂贵」这句结论，靠的正是 Element 层的复用规则：类型与 key 都相同才复用，任何一个变了就得重建。Flutter 官方的更新逻辑用 runtimeType 与 key 做同样的比较，本函数是它的极简版。注意最后一个细节：旧列表为空时新 Widget 无对象可复用，必须判定为 recreate——对应真实场景里首次挂载，Element 树从零创建。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ============================================================
+ * ③ 动画演示：租现成家具（映射原生控件）vs 自带画具（自绘引擎）
+ * 左侧搬现成控件、右侧逐条执行 Skia 式绘制指令，平台切换可对比
+ * ============================================================ */
+(function () {
+  'use strict';
+  var platform = 'ios';   // 当前目标平台：'ios' | 'android'
+  var furniture = [];     // 已租来的控件（记录编号，切平台时重绘外观）
+  var paintIndex = 0;     // 已执行的绘制指令条数
+
+  var furnitureEl = document.getElementById('fl-furniture');
+  var canvas = document.getElementById('fl-canvas');
+  var ctx = canvas.getContext('2d');
+  var consoleEl = document.getElementById('fl-console');
+  var noteEl = document.getElementById('fl-note-line');
+  var rentBtn = document.getElementById('fl-rent');
+  var paintBtn = document.getElementById('fl-paint');
+  var resetBtn = document.getElementById('fl-reset');
+  var iosBtn = document.getElementById('fl-p-ios');
+  var androidBtn = document.getElementById('fl-p-android');
+
+  /* Skia 风格的绘制指令序列：每条指令带一句日志与一个真实落笔动作 */
+  var PAINT_STEPS = [
+    {
+      log: 'canvas.save() —— 保存画布状态，随后可整体恢复',
+      run: function () { ctx.save(); }
+    },
+    {
+      log: 'drawRRect(圆角矩形) —— 描出按钮轮廓（左 12, 上 12, 宽 296, 高 48）',
+      run: function () {
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#2f5bea';
+        roundRect(ctx, 12, 12, 296, 48, 14);
+        ctx.stroke();
+      }
+    },
+    {
+      log: 'paint.color = 品牌蓝 —— 用同一形状指令填充底色',
+      run: function () {
+        ctx.fillStyle = '#2f5bea';
+        roundRect(ctx, 12, 12, 296, 48, 14);
+        ctx.fill();
+      }
+    },
+    {
+      log: 'drawParagraph(「提交订单」) —— 把文字画在按钮中央',
+      run: function () {
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '700 16px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('提交订单', 160, 37);
+      }
+    },
+    {
+      log: 'canvas.restore() + 上屏 —— 本帧指令打包交给 GPU 合成显示',
+      run: function () { ctx.restore(); }
+    }
+  ];
+
+  /* 工具：画圆角矩形路径（模拟 Skia 的 drawRRect） */
+  function roundRect(c, x, y, w, h, r) {
+    c.beginPath();
+    c.moveTo(x + r, y);
+    c.arcTo(x + w, y, x + w, y + h, r);
+    c.arcTo(x + w, y + h, x, y + h, r);
+    c.arcTo(x, y + h, x, y, r);
+    c.arcTo(x, y, x + w, y, r);
+    c.closePath();
+  }
+
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* 左侧：按当前平台风格重绘所有租来的控件（切平台时外观整体更换） */
+  function renderFurniture() {
+    furnitureEl.innerHTML = '';
+    if (!furniture.length) {
+      furnitureEl.innerHTML = '<span class="anim-line is-muted">（还没有控件，点下面按钮租一个）</span>';
+      return;
+    }
+    furniture.forEach(function (no) {
+      var b = document.createElement('span');
+      b.className = 'fu-btn ' + (platform === 'ios' ? 'fu-btn--ios' : 'fu-btn--android');
+      b.textContent = '按钮 #' + no;
+      furnitureEl.appendChild(b);
+    });
+  }
+
+  /* 租家具：直接从平台控件库搬一个现成按钮 */
+  rentBtn.addEventListener('click', function () {
+    var empty = furnitureEl.querySelector('.anim-line');
+    if (empty) empty.remove();
+    furniture.push(furniture.length + 1);
+    renderFurniture();
+    log('【路线一】第 ' + furniture.length + ' 个按钮已就位：系统现成控件，' +
+      (platform === 'ios' ? 'iOS' : 'Android') + ' 风格由平台说了算', 'is-ok');
+  });
+
+  /* 单步绘制：一次只执行一条绘制指令，观察按钮如何被一笔笔画出来 */
+  paintBtn.addEventListener('click', function () {
+    if (paintIndex >= PAINT_STEPS.length) {
+      log('本帧已绘制完成，点击「重置」再画一次', 'is-end');
+      return;
+    }
+    var step = PAINT_STEPS[paintIndex];
+    step.run();
+    log('【Skia 第 ' + (paintIndex + 1) + ' 条】' + step.log, 'is-ok');
+    paintIndex += 1;
+    if (paintIndex === PAINT_STEPS.length) {
+      log('自绘按钮完成——无论 iOS 还是 Android，这套指令画出的像素一模一样', 'is-end');
+    }
+  });
+
+  /* 平台切换：租来的控件整体换风格；自绘的画布不受影响（顺便强调不变性） */
+  function setPlatform(next) {
+    platform = next;
+    iosBtn.classList.toggle('is-active', next === 'ios');
+    androidBtn.classList.toggle('is-active', next === 'android');
+    renderFurniture();
+    noteEl.textContent = next === 'ios'
+      ? '提示：现在目标是 iOS——租来的按钮是 iOS 风格；右侧自绘按钮不随平台变化。'
+      : '提示：现在目标是 Android——租来的按钮换成 Android 风格；Skia 指令一字未改，自绘按钮纹丝不动。';
+    log('目标平台切到 ' + (next === 'ios' ? 'iOS' : 'Android') + '：路线一的控件外观跟着变了，路线二的画布毫无波澜', 'is-muted');
+  }
+  iosBtn.addEventListener('click', function () { setPlatform('ios'); });
+  androidBtn.addEventListener('click', function () { setPlatform('android'); });
+
+  /* 重置：清空两侧舞台与日志 */
+  resetBtn.addEventListener('click', function () {
+    furniture = [];
+    paintIndex = 0;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    renderFurniture();
+    consoleEl.innerHTML = '';
+    log('已重置：两边都回到空舞台，可重新对比两条路线…', 'is-muted');
+  });
+
+  renderFurniture();
+})();
+</script>
+</body>
+</html>

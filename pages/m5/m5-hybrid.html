@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>Hybrid 开发与 JSBridge · 跨端开发</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ============================================================
+   本页动画专用样式：JSBridge 传单步演示（发消息 → 查注册表 → 回执）
+   纯手写 CSS，无任何外部依赖，仅本页使用
+   ============================================================ */
+.hy-anim { display: flex; gap: 12px; align-items: stretch; margin: 12px 0; flex-wrap: wrap; }
+.hy-panel {
+  flex: 1 1 180px; min-width: 170px;
+  border: 1px solid #d7dde8; border-radius: 10px;
+  padding: 10px 12px; background: #fafbfe;
+}
+.hy-panel--h5 { border-color: #9cc3f5; background: #f5f9ff; }
+.hy-panel--native { border-color: #a7d7b9; background: #f4fbf6; }
+.hy-panel-title { font-weight: 700; font-size: 13px; margin-bottom: 8px; }
+.hy-hint { font-size: 12px; color: #6b7280; line-height: 1.6; }
+.hy-channel {
+  flex: 1 1 200px; min-width: 190px; display: flex; flex-direction: column;
+  border: 1px dashed #b9c2d4; border-radius: 10px;
+  padding: 10px 8px; background: #fbfbf6;
+}
+.hy-channel-title { font-size: 12px; font-weight: 700; margin-bottom: 8px; text-align: center; }
+.hy-mode { display: flex; gap: 6px; justify-content: center; margin-bottom: 8px; flex-wrap: wrap; }
+.hy-mode .fg-btn.is-active { border-color: #2f5bea; color: #2f5bea; font-weight: 700; }
+/* 信箱：JS 侧发出的消息与原生回执的小胶囊 */
+.hy-mailbox { display: flex; flex-direction: column; gap: 6px; min-height: 34px; margin-bottom: 8px; }
+.hy-chip {
+  align-self: flex-start; max-width: 100%; padding: 3px 10px; border-radius: 999px;
+  background: #e3ecfd; color: #2f5bea; font-size: 12px;
+  animation: hy-in 0.3s ease; word-break: break-all;
+}
+.hy-chip--back { background: #ddf3e6; color: #1b7a45; }
+@keyframes hy-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.92); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+/* 原生世界的「注册表」：名字 → 处理人，命中时高亮 */
+.hy-row {
+  display: flex; justify-content: space-between; gap: 8px;
+  padding: 6px 8px; margin-bottom: 6px; border-radius: 6px;
+  border: 1px solid #d7dde8; background: #fff; font-size: 12px;
+  transition: background 0.25s ease, border-color 0.25s ease;
+}
+.hy-row code { color: #b3541e; font-weight: 700; }
+.hy-row.is-active { background: #fff3cd; border-color: #e3c98a; }
+.hy-row-desc { color: #6b7280; }
+</style>
+</head>
+<body data-page="m5-hybrid">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">原生壳里装一个浏览器，页面用 H5 写——开发快、发版灵活；而 JSBridge 就是网页与原生之间那只「对讲机」。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>本页的前置知识：<a href="./m5-mp-web.html">小程序与 Web 的差异</a> ——
+      小程序的渲染层本质上也是 WebView 思路的延伸；理解了「WebView 里能干什么、不能干什么」，
+      再看 Hybrid 如何用 JSBridge 把缺的原生能力补回来，就是水到渠成。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：讲解 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、Hybrid 架构：原生壳 + WebView</h3>
+    <p>Hybrid（混合）开发的结构一句话能说清：<strong>原生 App 当壳，里面放一个 WebView（内嵌浏览器），
+      业务页面用 H5 写</strong>。壳负责安装、启动、推送、支付这些必须原生的部分；
+      页面内容走 H5，改版不用重新发版上架，服务端发新版网页就生效。
+      这是历史上最成熟的跨端方案：客户端开发快、多端复用度高，
+      但性能受 WebView 上限约束，复杂动画与长列表的流畅度天然不如原生。</p>
+
+    <h3>二、JSBridge 的两条通道</h3>
+    <p>WebView 里的网页默认是个「笼中鸟」：JS 只能在页面里活动，碰不到相机、通讯录这些原生能力。
+      JSBridge 就是笼子上开的一扇受控的门，H5 调原生主要有两条通道：</p>
+    <ul>
+      <li><strong>URL Scheme 拦截</strong>：H5 发起一个约定格式的特殊请求（如改 iframe 的 src），
+        原生侧拦截这个请求、解析出要调的方法和参数。兼容性好、上手简单，
+        但消息要塞进一个 URL 字符串里，有长度限制，高频调用也容易排队堵车。</li>
+      <li><strong>注入 API</strong>：原生在 WebView 的 window 上挂一个约定名字的对象和方法
+        （Android 的 addJavascriptInterface、iOS WKWebView 的 scriptMessageHandler 都是这类），
+        H5 直接调用它，参数结构化传递，没有 URL 长度之忧，是现代方案的首选。</li>
+    </ul>
+
+    <h3>三、双向通信：回调 id 是怎么转起来的</h3>
+    <p>真实调用是<strong>异步</strong>的：H5 发出「读设备信息」的请求后不能卡住干等，原生处理完还要把结果送回来。
+      业界通行做法是<strong>两张表 + 一个编号</strong>：原生侧维护「注册表」——名字到处理函数的映射，
+      收到消息先查表，找到处理人就执行；H5 侧则维护「回调表」——发消息时生成一个回调 id，
+      把回调函数按 id 存起来，把 id 一起塞进消息体。原生干完活，凭这个 id 反向调用 H5 的回调，
+      结果就回到了发起调用的那行代码。此外原生也会主动通知 H5（推送、页面生命周期等），
+      走的是同一座桥，只是方向相反。</p>
+
+    <h3>四、离线包与热更新</h3>
+    <p>H5 页面第一次打开要联网拉资源，弱网时白屏很久。Hybrid 的经典优化是<strong>离线包</strong>：
+      把页面框架、JS、CSS 打成一个包，提前随 App 下发或后台静默更新，打开时直接从本地加载，
+      只在线请求真正的业务数据——首屏速度大幅提升。这也带来了<strong>热更新</strong>能力：
+      业务页面不走应用商店审核即可迭代，绕开发版周期。当然包的校验与更新流程必须有签名机制兜底，
+      否则等于给自己开了个后门。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比：景区观光小火车与车厢对讲机</div>
+      <p>把 App 想成一座景区，Hybrid 就是景区的<strong>观光小火车</strong>：车身、发动机、刹车都是景区自己的
+        （原生壳：安装、推送、支付这些硬能力必须原生），而车厢里今天坐一批游客、明天换一批，
+        谁上车谁下车景区说了不算——那就是 <strong>H5 内容</strong>，随时换、不用把整辆车送回厂重造（不用重新发版）。</p>
+      <p>车厢和驾驶室之间装了一台<strong>对讲机</strong>，这就是 JSBridge。乘客按下对讲机喊：
+        「车厢太热了，开个空调」——司机拿起频道表查了一眼：「空调」这个频道登记在他名下，
+        于是拧开开关照做（H5 发消息，原生查注册表找到处理人）。司机也会主动喊话：
+        「前方急弯，请坐稳」（原生事件通知 H5）。对讲机喊话要报一个「座位号」
+        （回调 id），司机处理完对着座位号回话，喊话的那位乘客才知道事情办完了。
+        最关键的是频道表必须严管：只登记景区自己人的频道、核对话筒是谁递过来的
+        （白名单与来源校验），否则任何一个游客都能对着对讲机喊「打开车门」——那就是安全事故了。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：JSBridge 传单步演示（JS 发消息 → 注册表查处理人 → 回执），按钮驱动纯手写 -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>左边是 H5 世界，右边是原生世界的「注册表」。先选通道，再发一条消息，
+      然后一步步推进，观察「查注册表 → 找处理人 → 凭回调 id 回执」的完整链路：</p>
+    <div class="anim-stage">
+      <div class="hy-anim">
+        <div class="hy-panel hy-panel--h5">
+          <div class="hy-panel-title">H5 世界（WebView 里的网页）</div>
+          <div class="hy-hint">发消息前，H5 会先把回调函数按「回调 id」存进回调表，再把 id 一起塞进消息体。</div>
+          <div class="hy-mailbox" id="hy-mailbox"><span class="anim-line is-muted">（信箱空）</span></div>
+        </div>
+        <div class="hy-channel">
+          <div class="hy-channel-title">JSBridge 通道</div>
+          <div class="hy-mode">
+            <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm is-active" id="hy-ch-scheme">URL Scheme 拦截</button>
+            <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="hy-ch-api">注入 API</button>
+          </div>
+          <div class="anim-console" id="hy-console">
+            <div class="anim-line is-muted">先发一条消息，再点「单步推进」观察链路…</div>
+          </div>
+        </div>
+        <div class="hy-panel hy-panel--native">
+          <div class="hy-panel-title">原生世界 · 注册表（名字 → 处理人）</div>
+          <div class="hy-row" id="hy-row-info"><code>getDeviceInfo</code><span class="hy-row-desc">处理人：系统信息员</span></div>
+          <div class="hy-row" id="hy-row-camera"><code>openCamera</code><span class="hy-row-desc">处理人：相机管理员</span></div>
+          <div class="hy-row" id="hy-row-share"><code>shareToWeChat</code><span class="hy-row-desc" id="hy-share-desc">（未注册 · 查无此人）</span></div>
+        </div>
+      </div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="hy-send-info">发送 getDeviceInfo</button>
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="hy-send-share">发送 shareToWeChat（未注册）</button>
+        <button type="button" class="fg-btn fg-btn--ok fg-btn--sm" id="hy-step">单步推进</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="hy-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（真实课程路径） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="./m5-mp-web.html">小程序与 Web 的差异</a> ——
+      先分清「WebView 里有什么、缺什么」，才知道 JSBridge 补的是哪些洞。</p>
+    <p><strong>向后延伸</strong>：三种跨端路线（WebView、映射原生、自绘）都见过之后，
+      到 <a href="./m5-choose.html">跨端方案选型</a> 学习如何按场景做取舍。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="./m5-rn.html">React Native 原理</a> ——
+        RN 的旧 Bridge 与 JSBridge 同为「跨世界传话」，对比两座桥的通信设计差异。</li>
+      <li><a href="../../pages/m2/m2-security.html">Web 安全：XSS、CSRF 与 CSP</a> ——
+        JSBridge 的白名单、来源校验与最小授权，和 Web 安全的防御思想一脉相承。</li>
+      <li><a href="../../pages/m2/m2-cache.html">浏览器缓存策略</a> ——
+        离线包本质是把「资源走本地」的缓存思想从浏览器搬到 App 里主动管理。</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（mode:'main'） -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后把最佳成绩写入进度仓库（见页面底部内联脚本）：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：Hybrid 就是原生 App 里装了个浏览器壳，页面用网页写、改起来快；
+      网页想要拍照、支付这些手机能力时，通过对讲机（JSBridge）喊一声原生，原生查表办完再喊回去。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前复述 1 次，1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：讲讲 JSBridge 的实现原理，H5 与原生如何双向通信？</summary>
+      <ul>
+        <li>两条通道：URL Scheme 拦截（H5 发特殊请求、原生拦截解析，简单但有长度与并发限制）；注入 API（原生往 window 挂对象，H5 直调，结构化参数，现代首选）。</li>
+        <li>H5 → 原生：消息体带方法名、参数、回调 id；原生按名字查「注册表」找到处理函数执行。</li>
+        <li>原生 → H5：执行完毕后凭回调 id 反查 H5 的「回调表」，调用对应回调把结果送回发起处。</li>
+        <li>原生主动通知（推送、生命周期等）走同一座桥、方向相反。</li>
+        <li>加分项：能对比两条通道的取舍，并指出离线包让 H5 首屏摆脱网络、实现绕开发版的热更新。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：JSBridge 有哪些安全风险？该如何防护？</summary>
+      <ul>
+        <li>核心风险：Bridge 等于把原生能力开门揖盗，任意网页拿到它就可能调相机、读文件、发起支付。</li>
+        <li>来源校验：只对白名单域名 / 校验过签名的页面开放 Bridge，第三方页面直接隔离。</li>
+        <li>最小授权：注册表按需暴露，敏感 API（支付、登录态）增加二次鉴权与用户确认。</li>
+        <li>参数与回执校验：对参数做校验防注入，回执内容避免携带超出所需的敏感数据。</li>
+        <li>加分项：提到离线包必须配签名校验，否则更新通道本身会成为被投毒的后门。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* ============================================================
+ * 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评
+ * ============================================================ */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm5-hybrid'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'） */
+  var WARMUP = [{
+    id: 'm5-hybrid-warmup-1',
+    type: 'single',
+    stem: '预热：一个典型 Hybrid App 里的业务页面，本质上是什么？',
+    options: [
+      '原生控件搭建的界面，与纯原生 App 无异',
+      '原生壳里 WebView 加载的 H5 页面',
+      '自绘引擎逐帧画出来的自绘界面'
+    ],
+    answer: [1],
+    explain: 'Hybrid 的「混合」就在于此：壳与系统能力是原生的，业务页面是 WebView 里跑的 H5——开发快、发版灵活，代价是性能受 WebView 上限约束。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm5-hybrid-q1',
+      type: 'single',
+      stem: '关于 H5 调用原生的两条通道（URL Scheme 拦截 / 注入 API），下列说法正确的是？',
+      options: [
+        'URL Scheme 拦截性能最好，因为消息直接走 GPU 渲染管线',
+        '注入 API 是原生把对象挂到 window 上供 JS 直接调用，参数结构化、没有 URL 长度限制',
+        'URL Scheme 拦截方式的参数可以无限长，适合传大文件',
+        '注入 API 要求 H5 把代码编译成原生语言后才能调用'
+      ],
+      answer: [1],
+      explain: '注入 API 的本质是原生往 WebView 的 window 上挂一个约定对象（Android 的 addJavascriptInterface、iOS 的 scriptMessageHandler 都属此类），H5 像调普通 JS 函数一样调用它，参数是结构化对象。URL Scheme 方式则要把消息塞进 URL 字符串里等原生拦截，天然受 URL 长度限制、高频调用还会排队——A、C 都把两条通道的特性说反了，D 属于臆造。'
+    },
+    {
+      id: 'm5-hybrid-q2',
+      type: 'multi',
+      stem: '关于 JSBridge 的安全设计，下列做法正确的有？',
+      options: [
+        '只对白名单域名（或校验过签名的页面）开放 Bridge 能力',
+        '支付、读取用户敏感信息等高危 API 应增加二次鉴权或用户确认',
+        '为了开发效率，应把全部原生能力无差别暴露给 WebView 里加载的任意页面',
+        '离线包的更新通道需要签名校验，防止更新内容被篡改'
+      ],
+      answer: [0, 1, 3],
+      explain: 'Bridge 是把「原生能力」开门给网页，安全原则就是 Web 安全那套的组合拳：最小授权（只暴露必需的）、来源可信（白名单与签名校验）、敏感操作加确认（A、B 正确），离线包作为「更新通道」同样必须防篡改（D 正确）。C 是典型反模式——WebView 里一旦加载了被注入恶意代码的页面，无差别的暴露等于把 App 的钥匙挂在了大门上。'
+    },
+    {
+      id: 'm5-hybrid-q3',
+      type: 'code',
+      stem: '手写迷你 JSBridge 的核心结构：实现工厂函数 createBridge()，返回共享同一张「注册表」的 register 与 send 两个方法。register(name, fn) 注册名为 name 的处理函数（重复注册以后者为准）；send(name, params) 按名字查注册表并执行 fn(params)、返回执行结果；查不到名字时返回 null（真实 JSBridge 会走错误回调，此处简化为 null）。注意：真实 JSBridge 的 send 是异步回执，这里为了可自动判题做成同步返回，但「注册表」这一核心结构完全一致。',
+      stub: 'function createBridge() {\n  // 返回 { register, send }，共享同一张注册表：\n  // register(name, fn)：注册名为 name 的处理函数；重复注册以后者为准\n  // send(name, params)：按名字查注册表并执行 fn(params)，返回执行结果\n  //   未注册的名字 → 返回 null\n}\n',
+      reference: 'function createBridge() {\n  var handlers = {};                 // 注册表：名字 → 处理函数\n  return {\n    register: function (name, fn) {\n      handlers[name] = fn;           // 重复注册：直接覆盖，以后者为准\n    },\n    send: function (name, params) {\n      var fn = handlers[name];\n      if (!fn) return null;          // 查无此人：真实框架在此走错误回调\n      return fn(params);             // 执行处理人并返回结果\n    }\n  };\n}',
+      asserts: [
+        'var b1 = createBridge(); b1.register("sum", function (p) { return p.a + p.b; }); b1.send("sum", { a: 2, b: 3 }) === 5',
+        'createBridge().send("nope", {}) === null',
+        'var b2 = createBridge(); b2.register("x", function () { return 1; }); b2.register("x", function () { return 2; }); b2.send("x") === 2',
+        'var b3 = createBridge(); b3.register("echo", function (p) { return p.msg; }); b3.register("len", function (p) { return p.msg.length; }); b3.send("echo", { msg: "hi" }) === "hi" && b3.send("len", { msg: "hi" }) === 2'
+      ],
+      explain: '为什么这个迷你版值得手写？因为 JSBridge 的灵魂就是这张「注册表」：原生侧启动时把各处理人按名字登记（register），收到 H5 消息后按名字派活（send），查无此人就走错误回执——动画演示里的链路与此一一对应。与真实实现的差异只有两点：真实的 send 走异步通道、结果凭回调 id 送回发起处，且处理人运行在原生线程而非 JS 里；但「注册表派发」的设计思想一模一样。另外注意重复注册用「覆盖」语义：这对应原生侧的版本升级——新处理人顶替旧处理人，注册表永远只有最新一份。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ============================================================
+ * ③ 动画演示：JSBridge 传单步演示
+ * H5 发消息（带回调 id）→ 原生查注册表找处理人 → 执行 → 凭回调 id 回执
+ * 支持两种通道切换（只影响入桥日志），未注册的消息会在查表时失败
+ * ============================================================ */
+(function () {
+  'use strict';
+  var channel = 'scheme';  // 'scheme' = URL Scheme 拦截 / 'api' = 注入 API
+  var seq = 0;             // 已发消息序号（同时用作回调 id 编号）
+  var phase = 'idle';      // idle → sent → dispatch → executed → done / failed
+  var msg = null;          // 当前在途消息 { no, api }
+  var activeRow = null;    // 注册表中被高亮的行
+
+  var mailboxEl = document.getElementById('hy-mailbox');
+  var consoleEl = document.getElementById('hy-console');
+  var schemeBtn = document.getElementById('hy-ch-scheme');
+  var apiBtn = document.getElementById('hy-ch-api');
+  var sendInfoBtn = document.getElementById('hy-send-info');
+  var sendShareBtn = document.getElementById('hy-send-share');
+  var stepBtn = document.getElementById('hy-step');
+  var resetBtn = document.getElementById('hy-reset');
+  var rowInfo = document.getElementById('hy-row-info');
+  var rowShare = document.getElementById('hy-row-share');
+
+  /* 注册表（演示数据）：名字 → 处理人与结果 */
+  var REGISTRY = {
+    getDeviceInfo: { row: rowInfo, worker: '系统信息员', result: '{ os: "Android", ver: 14 }' },
+    shareToWeChat: { row: rowShare, worker: null, result: null } // 未注册：查无此人
+  };
+
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* 信箱胶囊：普通消息 / 回执两种样式 */
+  function chip(text, isBack) {
+    var empty = mailboxEl.querySelector('.anim-line');
+    if (empty) empty.remove();
+    var c = document.createElement('span');
+    c.className = 'hy-chip' + (isBack ? ' hy-chip--back' : '');
+    c.textContent = text;
+    mailboxEl.appendChild(c);
+    mailboxEl.scrollTop = mailboxEl.scrollHeight;
+  }
+
+  function setActiveRow(row) {
+    if (activeRow) activeRow.classList.remove('is-active');
+    activeRow = row;
+    if (activeRow) activeRow.classList.add('is-active');
+  }
+
+  function setChannel(next) {
+    channel = next;
+    schemeBtn.classList.toggle('is-active', next === 'scheme');
+    apiBtn.classList.toggle('is-active', next === 'api');
+    log('已切换通道：' + (next === 'scheme' ? 'URL Scheme 拦截（消息塞进特殊请求等原生拦）' : '注入 API（直接调用 window 上注入的原生对象）'), 'is-muted');
+  }
+  schemeBtn.addEventListener('click', function () { setChannel('scheme'); });
+  apiBtn.addEventListener('click', function () { setChannel('api'); });
+
+  /* 发消息：H5 先存回调、再把「方法名 + 参数 + 回调 id」封装进消息体送过桥 */
+  function send(api) {
+    if (phase === 'sent' || phase === 'dispatch' || phase === 'executed') {
+      log('当前消息还在链路上，先点「单步推进」走完它', 'is-end');
+      return;
+    }
+    seq += 1;
+    msg = { no: seq, api: api };
+    phase = 'sent';
+    chip('消息 #' + seq + '：' + api + '（回调 id: cb_' + seq + '）', false);
+    var way = channel === 'scheme'
+      ? 'H5 借一个 iframe 发起特殊 Scheme 请求，被原生拦下——消息体 { api, params, cbId: cb_' + seq + ' } 入桥'
+      : 'H5 直接调用 window 注入的原生对象方法——消息体 { api, params, cbId: cb_' + seq + ' } 入桥';
+    log(way, 'is-ok');
+    log('H5 侧已把本次回调函数按 cb_' + seq + ' 存进回调表，干等回执期间页面不卡住');
+  }
+  sendInfoBtn.addEventListener('click', function () { send('getDeviceInfo'); });
+  sendShareBtn.addEventListener('click', function () { send('shareToWeChat'); });
+
+  /* 单步推进：一次只走一环，看清「查表 → 派活 → 回执」三段 */
+  stepBtn.addEventListener('click', function () {
+    if (phase === 'idle') {
+      log('还没有消息，先点上面的「发送…」按钮', 'is-muted');
+      return;
+    }
+    var entry = msg ? REGISTRY[msg.api] : null;
+
+    if (phase === 'sent') {
+      if (entry && entry.worker) {
+        setActiveRow(entry.row);
+        log('原生收到消息，查注册表：handlerMap["' + msg.api + '"] → 找到处理人「' + entry.worker + '」', 'is-ok');
+        phase = 'dispatch';
+      } else {
+        log('原生收到消息，查注册表：没有 "' + msg.api + '" 这个名字 → 查无此人', 'is-end');
+        log('原生只能回一条错误回执（真实框架会通过回调 id 通知 H5 调用失败）');
+        chip('错误回执：cb_' + msg.no + ' → api 未注册', true);
+        phase = 'failed';
+      }
+      return;
+    }
+
+    if (phase === 'dispatch') {
+      log('处理人「' + entry.worker + '」执行任务：读取设备信息…完成，结果 ' + entry.result);
+      phase = 'executed';
+      return;
+    }
+
+    if (phase === 'executed') {
+      log('原生凭 cb_' + msg.no + ' 反查 H5 的回调表，找到发起时的回调函数，带着结果执行回执', 'is-ok');
+      chip('回执 cb_' + msg.no + '：' + entry.result, true);
+      setActiveRow(null);
+      phase = 'done';
+      log('本条链路走完：一次调用 = 一次查表 + 一次凭 id 回执。可再发下一条', 'is-end');
+      return;
+    }
+
+    log('上一条已结束（' + (phase === 'failed' ? '失败' : '完成') + '），直接发下一条即可', 'is-muted');
+  });
+
+  /* 重置：清空信箱、日志与高亮 */
+  resetBtn.addEventListener('click', function () {
+    seq = 0;
+    msg = null;
+    phase = 'idle';
+    setActiveRow(null);
+    mailboxEl.innerHTML = '<span class="anim-line is-muted">（信箱空）</span>';
+    consoleEl.innerHTML = '';
+    log('已重置：桥两头恢复初始状态…', 'is-muted');
+  });
+})();
+</script>
+</body>
+</html>

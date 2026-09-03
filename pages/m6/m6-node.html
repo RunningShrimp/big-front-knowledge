@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>Node.js 运行时与事件循环 · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ===== 本页动画专用样式：洗衣店六工位模拟 Node 事件循环（纯手写 CSS） ===== */
+.nd-shop {
+  display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0;
+}
+.nd-station {
+  flex: 1 1 150px; min-width: 150px;
+  border: 2px solid #d5dbe7; border-radius: 10px; background: #fff;
+  padding: 8px 10px; transition: border-color .25s, background .25s, box-shadow .25s;
+}
+.nd-station.is-active {
+  border-color: #10B981; background: #ecfdf5;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, .15);
+}
+.nd-station-name { font-weight: 700; font-size: 13px; color: #2b3a55; }
+.nd-station-desc { font-size: 12px; color: #8a93a6; margin: 3px 0 6px; }
+.nd-chips { display: flex; gap: 5px; flex-wrap: wrap; min-height: 22px; }
+.nd-chip {
+  font-size: 11px; padding: 2px 8px; border-radius: 999px;
+  border: 1px solid #9db1f5; background: #eef2ff; color: #41506b;
+}
+.nd-empty { font-size: 11px; color: #b7bfcd; }
+.nd-now {
+  font-size: 13px; color: #41506b; margin: 8px 0; padding: 8px 12px;
+  border-radius: 8px; background: #f7f9fc; border: 1px dashed #d5dbe7;
+}
+.nd-now strong { color: #10B981; }
+</style>
+</head>
+<body data-page="m6-node">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">知识点：Node.js 运行时与事件循环（建议学习时长约 25 分钟）——V8 + libuv 的分层结构、事件循环六大阶段、与浏览器事件循环的差异。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>本页前置依赖：<a href="../m1/m1-js-eventloop.html">事件循环与任务队列</a>——先把浏览器里「同步 → 微任务 → 宏任务」的调度规则捋顺，再看 Node 给这套规则加装了「六个工位」。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：分小标题推进 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、Node 是什么：给 JS 装上「做后端的本事」</h3>
+    <p>浏览器里的 JS 没有读写文件、开端口监听的能力。Node 在 JS 引擎外面又包了几层，自下而上是：
+      <strong>操作系统</strong>（真正干 IO 的地方）→ <strong>libuv</strong>（C 语言库，提供事件循环、异步 IO 和线程池）→
+      <strong>C++ 绑定层</strong>（把 C 的能力翻译给 JS）→ <strong>内置模块</strong>（fs、http、path 等用 JS 包好的外壳）→
+      最上面才是<strong>你写的 JS 代码</strong>，由 V8 引擎执行。记住这个分层：V8 负责「算」，libuv 负责「等和搬」。</p>
+
+    <h3>二、异步非阻塞 IO：一个总管怎么同时接住一万个电话</h3>
+    <p>「阻塞式」就像点奶茶站在柜台前干等；「非阻塞」是下单拿号就走，做好了叫号。Node 发起 IO 后<strong>立即返回继续干活</strong>：
+      网络 IO 交给操作系统的多路复用机制（Linux 上是 epoll），文件 IO、DNS 解析交给 <strong>libuv 线程池</strong>（默认 4 个线程）。
+      IO 完成后，对应的回调函数被放进事件循环的相应阶段排队，等主线程来执行。所以 Node 的「单线程」只指 <strong>JS 执行的主线程只有一条</strong>，底下干活的手其实不少。</p>
+
+    <h3>三、事件循环六大阶段：libuv 的流水线</h3>
+    <p>Node 的事件循环不是一条简单的队列，而是<strong>六个工位轮着转</strong>，每轮顺序固定：</p>
+    <p><strong>① timers</strong>（执行到期的 setTimeout / setInterval 回调）→ <strong>② pending callbacks</strong>（执行上一轮遗留的系统级回调）→
+      <strong>③ idle / prepare</strong>（libuv 内部使用）→ <strong>④ poll</strong>（取回 I/O 结果并执行其回调；没活时可在此挂起等待新事件）→
+      <strong>⑤ check</strong>（执行 setImmediate 的回调）→ <strong>⑥ close callbacks</strong>（执行关闭回调，如 socket 的 close 事件）。
+      转完一圈再来一圈，程序不退出就永不停歇。</p>
+
+    <h3>四、与浏览器事件循环的差异</h3>
+    <p>浏览器是「取一个宏任务 → 清空全部微任务」的简单模型。Node 11 及以上版本已与浏览器对齐为<strong>每个宏任务执行完立刻清空微任务</strong>；
+      更老的版本则是在「阶段切换时」才统一清空，输出顺序题因此有新老之分。另外两个 Node 特有的规则：
+      <code>process.nextTick</code> 的回调优先级<strong>高于</strong> Promise 微任务（当前操作一结束就插队执行，堆太多会让 I/O 饿死）；
+      主模块顶层同时写 <code>setTimeout(fn,0)</code> 和 <code>setImmediate(fn)</code> 谁先执行<strong>不确定</strong>（受机器性能影响），
+      但在 I/O 回调<strong>内部</strong>这么写，setImmediate <strong>恒定先执行</strong>——因为 poll 阶段结束后必经 check 阶段。</p>
+
+    <h3>五、给零基础的三条实践提醒</h3>
+    <p>① 别在主线程写大段同步计算（如百万次循环加密），它会卡住整个事件循环，所有请求一起排队；② <code>process.nextTick</code> 别堆量，插队太狠会饿死真正的 I/O；
+      ③ <code>setTimeout(fn, 0)</code> 只表示「到 timers 阶段就执行」，不代表立刻执行。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 装修公司的前台总管「小诺」</div>
+      <p>小诺在一家装修公司当前台总管。她给自己立了条规矩：<strong>从不亲自拿扳手干活</strong>——她只做两件事，登记需求和转交调度。
+        客户电话一个接一个（并发请求），她每接一个就撕一张登记单贴到墙上，重活累活（读写文件、查资料）外包给施工队（libuv 线程池），
+        网络类的活（查物流）喊一声合作方（操作系统 epoll）帮忙盯着。施工队干完一单，小诺就按登记单给客户回个电话（执行回调）。</p>
+      <p>她处理回电有固定的巡检路线，每天沿六张桌子转圈：先处理「预约到点的回电」（timers），再补办昨天的遗留手续（pending），
+        顺路经过员工休息室（idle，不停留），然后到取件窗口发施工队交回来的成果（poll），再到加急窗口插一批「必须这轮处理」的特急件（check），
+        最后处理退单结账（close）。走完一圈再来一圈。正因为她从不在任何一通电话上干等，一个人也撑起了整家公司的调度——
+        这就是「单线程 + 异步非阻塞」。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：洗衣店六工位轮转，可添加任务 + 单步执行 + 自动播放（纯 DOM/CSS/JS） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>把 Node 事件循环开成一家洗衣店：六张工作台按固定顺序轮转。亲手加任务、单步执行，观察任务在哪个工位被处理：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">初始有三个任务排队：定时任务在 timers、IO 回调在 poll、加急任务在 check。点击「单步执行」看总管如何按 ①→⑥ 巡检
+        （简化模型：微任务与 process.nextTick 未单独建模，只在日志里提示时机）：</p>
+      <div class="nd-shop" id="nd-shop"></div>
+      <div class="nd-now">总管正在：<strong id="nd-now">…</strong></div>
+      <div class="anim-console" id="nd-console"></div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="nd-add-timer">+ 定时任务（进 timers）</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="nd-add-io">+ IO 回调（进 poll）</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="nd-add-immediate">+ 加急任务（进 check）</button>
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="nd-step">单步执行</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="nd-auto">自动播放</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="nd-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（全部为课程数据中的真实 path） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="../m1/m1-js-eventloop.html">事件循环与任务队列</a>——Node 的六阶段是浏览器「宏任务 + 微任务」模型的加强版，先懂简单版再上加强版。</p>
+    <p><strong>向后延伸</strong>：有了会跑事件的运行时，下一步就是用它<strong>监听端口、处理 HTTP 请求</strong>，见<a href="./m6-server.html">HTTP 服务：Express 与 Koa</a>。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="../m1/m1-js-promise.html">Promise 与 async/await</a> —— await 之后的代码被排进微任务；Node 11+ 里它会在每个宏任务后立刻执行</li>
+      <li><a href="../m4/m4-runtime.html">运行时优化：防抖、节流与计算缓存</a> —— 防抖节流的定时器正是 timers 阶段的常客，卡顿排查要懂事件循环才能定位</li>
+      <li><a href="../m5/m5-mp-arch.html">小程序双线程架构</a> —— 逻辑层同样是「单线程 + 队列调度」，跨线程传话与 Node 的回调排队思想相通</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（mode:'main'，判分写入进度仓库） -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后会把最佳成绩写入进度仓库，并推进复习计划：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：Node 像一位前台总管——自己从不动手干重活，只负责沿六张工作台轮着转接单调度（事件循环六大阶段），重活外包给施工队（libuv 线程池），所以一个人（单线程）也能同时招呼一屋子客人（高并发）。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前默写一遍六阶段顺序「timers → pending → idle → poll → check → close」并复述 setImmediate 的执行位置；1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：Node 与浏览器差异 + 单线程高并发，答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：Node 与浏览器的事件循环有什么区别？setImmediate 和 setTimeout 谁先执行？</summary>
+      <ul>
+        <li>浏览器：一套「宏任务队列 + 微任务」模型，取一个宏任务清一次微任务，页面渲染穿插在宏任务之间。</li>
+        <li>Node：由 libuv 驱动，分为 timers → pending → idle/prepare → poll → check → close 六个阶段循环。</li>
+        <li>微任务时机：Node 11+ 与浏览器对齐（每个宏任务后立刻清空微任务）；更老版本在阶段切换时统一清空。</li>
+        <li>Node 特有：process.nextTick 优先级高于 Promise 微任务；setImmediate 的回调在 check 阶段执行。</li>
+        <li>setTimeout vs setImmediate：主模块顶层顺序不确定（受机器性能影响）；在 I/O 回调内部 setImmediate 恒定先执行（poll 之后必经 check）。</li>
+        <li>加分项：说明 timers 阶段用最小堆管理到期时间、poll 阶段没有任务时会阻塞等待新 I/O 事件。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：Node 单线程为什么能扛高并发？什么场景会把它打挂？怎么解？</summary>
+      <ul>
+        <li>「单线程」仅指 JS 执行主线程：网络 IO 靠操作系统多路复用（epoll/kqueue）+ libuv 事件通知；文件 IO、DNS 走 libuv 线程池（默认 4 线程）。</li>
+        <li>扛并发的本质：不为每个请求养一个线程，而是「发起 IO 立即返回 + 完成后回调排队」，主线程永远在干活而不是干等。</li>
+        <li>弱点：同步 CPU 密集计算（大循环、加解密、图片处理）会阻塞事件循环，所有请求一起卡住。</li>
+        <li>解法：拆小计算分批执行、worker_threads 开工作线程、子进程，或把重计算下沉到独立计算服务。</li>
+        <li>加分项：提到用 perf_hooks 之类手段监控事件循环延迟，说明有线上排障意识。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm6-node'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'）：题目 id 以知识点 id 开头 */
+  var WARMUP = [{
+    id: 'm6-node-warmup-1',
+    type: 'single',
+    stem: '预热：Node 宣称「单线程」，下面哪个理解是对的？',
+    options: [
+      '整个 Node 进程从头到尾只有一个线程，libuv 也不会开线程池',
+      'JS 执行主线程只有一条，耗时 IO 交给系统机制与 libuv 线程池，完成后回调排队等主线程执行',
+      'Node 不支持并发，请求只能一个一个排队处理',
+      '多核机器上 Node 只能利用一个核，且无法改变'
+    ],
+    answer: [1],
+    explain: '「单线程」只指执行 JS 的主线程。文件 IO / DNS 由 libuv 线程池（默认 4 线程）完成，网络 IO 由操作系统多路复用机制通知，完成后回调进入事件循环排队。所以 Node 能高并发，也能用 cluster、worker_threads 等方式利用多核。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm6-node-q1',
+      type: 'single',
+      stem: 'Node（libuv）事件循环一轮的六阶段顺序，正确的是？',
+      options: [
+        'timers → check → poll → pending → close → idle',
+        'timers → pending callbacks → idle/prepare → poll → check → close callbacks',
+        'poll → timers → check → idle → close → pending',
+        'check → timers → poll → close → pending → idle'
+      ],
+      answer: [1],
+      explain: '固定顺序是：timers（到期定时器）→ pending（上轮遗留系统回调）→ idle/prepare（libuv 内部）→ poll（执行 I/O 回调，没活时在此等待）→ check（setImmediate）→ close（关闭回调）。记口诀「定遗内取急关」：定时器、遗留、内部、取 IO、加急、关闭。'
+    },
+    {
+      id: 'm6-node-q2',
+      type: 'single',
+      stem: '在一个文件读取完成回调（I/O 回调，运行于 poll 阶段）里同时写下 setTimeout(fn1, 0) 和 setImmediate(fn2)，谁先执行？',
+      options: [
+        'fn1 先，因为 setTimeout 写了 0 毫秒表示立即执行',
+        'fn2 先，poll 阶段结束后必经 check 阶段，setImmediate 的回调在那里执行',
+        '不确定，两者顺序永远随机',
+        '同时执行'
+      ],
+      answer: [1],
+      explain: 'I/O 回调运行在 poll 阶段；本轮 poll 结束后进入的是 check 阶段，setImmediate 的回调就在这里执行；而 setTimeout 的回调要等下一轮循环的 timers 阶段。所以 I/O 回调内部 setImmediate 恒定先于 setTimeout。注意：这句口诀只在「I/O 回调内部」成立，主模块顶层二者顺序不确定。'
+    },
+    {
+      id: 'm6-node-q3',
+      type: 'code',
+      stem: '实现阶段调度器 createPhaseLoop()：用三个数组模拟一轮事件循环的关键阶段。timer(fn) 把任务加入 timers 队列、io(fn) 加入 poll 队列、immediate(fn) 加入 check 队列（fn 是无参函数，返回一个描述字符串）；run() 按「timers → poll → check」顺序把各阶段任务全部执行完，并按执行顺序返回描述数组。',
+      stub: 'function createPhaseLoop() {\n  // 提示：\n  // 1. 准备三个队列：timers / poll / check（数组 + shift 即先进先出）\n  // 2. 写一个内部函数 drain(queue)：依次执行并收集返回值\n  // 3. run() 流程：依次清空 timers → poll → check 三个队列\n  // 4. 返回按执行顺序收集的描述数组\n}\n',
+      reference: 'function createPhaseLoop() {\n  var phases = { timers: [], poll: [], check: [] }; // 三个阶段各自的队列\n  var results = [];\n\n  function drain(name) {              // 把某一阶段队列清空（先进先出）\n    while (phases[name].length > 0) {\n      results.push(phases[name].shift()());\n    }\n  }\n\n  return {\n    timer: function (fn) { phases.timers.push(fn); },     // timers 阶段\n    io: function (fn) { phases.poll.push(fn); },          // poll 阶段\n    immediate: function (fn) { phases.check.push(fn); },  // check 阶段\n    run: function () {\n      results = [];\n      drain(\'timers\');   // ① 先执行到期的定时任务\n      drain(\'poll\');     // ② 再执行 I/O 完成回调\n      drain(\'check\');    // ③ 最后执行 setImmediate 加急任务\n      return results;\n    }\n  };\n}',
+      asserts: [
+        "var __l = createPhaseLoop(); __l.immediate(function () { return 'I'; }); __l.timer(function () { return 'T'; }); __l.io(function () { return 'O'; }); __l.run().join('') === 'TOI'",
+        "var __l2 = createPhaseLoop(); __l2.timer(function () { return 'T1'; }); __l2.io(function () { return 'O1'; }); __l2.timer(function () { return 'T2'; }); __l2.run().join('-') === 'T1-T2-O1'",
+        "createPhaseLoop().run().length === 0"
+      ],
+      explain: '三条断言对应阶段轮转的三个要点：第一条验证「入队顺序无关，执行顺序由阶段决定」——加急任务最早入队，却要等 timers、poll 都清空后才执行，这正是 check 阶段排在最后的体现；第二条验证同一阶段内先进先出（T1、T2 按入队顺序执行），且阶段之间严格串行；第三条验证三个队列都空时一轮跑完返回空数组。真实 Node 中一轮循环还会经过 pending、idle、close 阶段，且每执行完一个宏任务都会清空微任务（Node 11+），本模型做了简化。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：洗衣店六工位轮转模拟 Node 事件循环（纯 DOM 手写，无动画库） */
+(function () {
+  'use strict';
+
+  /* 六个工位定义：name 与真实阶段对应，label 是洗衣店里的叫法 */
+  var PHASES = [
+    { name: 'timers',  label: '① timers · 收衣登记', desc: '执行到期的 setTimeout / setInterval' },
+    { name: 'pending', label: '② pending · 补办手续', desc: '执行上一轮遗留的系统级回调' },
+    { name: 'idle',    label: '③ idle · 内部休息室', desc: 'libuv 内部使用，不安排任务' },
+    { name: 'poll',    label: '④ poll · 取衣窗口',   desc: '执行 I/O 完成回调；没活时在此等待' },
+    { name: 'check',   label: '⑤ check · 加急通道', desc: '执行 setImmediate 的回调' },
+    { name: 'close',   label: '⑥ close · 打包离店', desc: '执行关闭回调（如 socket close）' }
+  ];
+
+  var shopEl = document.getElementById('nd-shop');
+  var nowEl = document.getElementById('nd-now');
+  var consoleEl = document.getElementById('nd-console');
+  var stepBtn = document.getElementById('nd-step');
+  var autoBtn = document.getElementById('nd-auto');
+  var resetBtn = document.getElementById('nd-reset');
+  var addTimerBtn = document.getElementById('nd-add-timer');
+  var addIoBtn = document.getElementById('nd-add-io');
+  var addImdBtn = document.getElementById('nd-add-immediate');
+
+  var stations = [];       // 六个工位的 DOM 引用
+  var chipBoxes = [];      // 每个工位下方的任务贴纸容器
+  var queues = [];         // 六个阶段的任务队列
+  var cur = 0;             // 当前所在的阶段下标
+  var ended = false;       // 一圈转完且无任务 → 挂起等待
+  var timer = null;        // 自动播放定时器
+  var seq = { t: 1, o: 1, i: 1 }; // 三类任务的命名序号
+
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* 初始化：渲染六个工位卡片 */
+  function buildShop() {
+    shopEl.innerHTML = '';
+    stations = [];
+    chipBoxes = [];
+    PHASES.forEach(function (p, idx) {
+      var card = document.createElement('div');
+      card.className = 'nd-station';
+      var name = document.createElement('div');
+      name.className = 'nd-station-name';
+      name.textContent = p.label;
+      var desc = document.createElement('div');
+      desc.className = 'nd-station-desc';
+      desc.textContent = p.desc;
+      var chips = document.createElement('div');
+      chips.className = 'nd-chips';
+      card.appendChild(name);
+      card.appendChild(desc);
+      card.appendChild(chips);
+      shopEl.appendChild(card);
+      stations.push(card);
+      chipBoxes.push(chips);
+    });
+  }
+
+  /* 渲染每个工位下的任务贴纸 */
+  function renderQueues() {
+    queues.forEach(function (q, idx) {
+      chipBoxes[idx].innerHTML = '';
+      if (q.length === 0) {
+        var e = document.createElement('span');
+        e.className = 'nd-empty';
+        e.textContent = idx === 1 || idx === 2 || idx === 5 ? '（系统内部，无任务）' : '（空）';
+        chipBoxes[idx].appendChild(e);
+      } else {
+        q.forEach(function (name) {
+          var c = document.createElement('span');
+          c.className = 'nd-chip';
+          c.textContent = name;
+          chipBoxes[idx].appendChild(c);
+        });
+      }
+    });
+  }
+
+  /* 高亮当前工位 + 更新「总管正在」提示 */
+  function highlight() {
+    stations.forEach(function (s, idx) {
+      s.classList.toggle('is-active', idx === cur);
+    });
+    nowEl.textContent = PHASES[cur].label + ' —— ' + PHASES[cur].desc;
+  }
+
+  function allEmpty() {
+    return queues.every(function (q) { return q.length === 0; });
+  }
+
+  function stopAuto() {
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+      autoBtn.disabled = false;
+    }
+  }
+
+  /* 前进到下一阶段（六张桌子轮着转） */
+  function advance() {
+    cur = (cur + 1) % 6;
+    highlight();
+    if (cur === 0) {
+      if (allEmpty()) {
+        ended = true;
+        stepBtn.disabled = true;
+        log('六张桌子转完一圈且没有新任务 → libuv 在 poll 阶段挂起等待新事件（客人来了再干活）。演示结束。', 'is-end');
+        return;
+      }
+      log('—— 新的一轮事件循环开始（回到 timers）——', 'is-end');
+    }
+  }
+
+  /* 单步：当前工位有任务就执行一件，否则空手走过 */
+  function step() {
+    if (ended) return;
+    stopAuto();
+    var q = queues[cur];
+    if (q.length > 0) {
+      var task = q.shift();
+      log('在 ' + PHASES[cur].label + ' 执行任务「' + task + '」（每个任务执行完，Node 11+ 会先清空微任务再继续）', 'is-ok');
+      renderQueues();
+      advance();
+      return;
+    }
+    log(PHASES[cur].label + '：本轮没有任务，空手走过（' + PHASES[cur].desc + '）');
+    advance();
+  }
+
+  function addTask(kind) {
+    if (ended) return;
+    stopAuto();
+    var target = kind === 't' ? 0 : (kind === 'o' ? 3 : 4);
+    if (target === 1 || target === 2 || target === 5) return; // 系统内部阶段不接受外部任务
+    var name;
+    if (kind === 't') { name = '定时任务 T' + seq.t++ + '（setTimeout）'; }
+    else if (kind === 'o') { name = 'IO 回调 O' + seq.o++ + '（fs 读取完成）'; }
+    else { name = '加急任务 I' + seq.i++ + '（setImmediate）'; }
+    queues[target].push(name);
+    log('新任务入队：「' + name + '」 → 排在 ' + PHASES[target].label + ' 的队里，等总管转到这张桌子', 'is-muted');
+    renderQueues();
+  }
+
+  function reset() {
+    stopAuto();
+    queues = [[], [], [], [], [], []].map(function () { return []; });
+    queues[0] = ['定时任务 T0（setTimeout）'];
+    queues[3] = ['IO 回调 O0（fs 读取完成）'];
+    queues[4] = ['加急任务 I0（setImmediate）'];
+    seq = { t: 1, o: 1, i: 1 };
+    cur = 0;
+    ended = false;
+    stepBtn.disabled = false;
+    consoleEl.innerHTML = '';
+    log('洗衣店开门：三个任务已排进各自工位的队列。点击「单步执行」，看总管按 ①→⑥ 巡检时何时处理它们…', 'is-muted');
+    renderQueues();
+    highlight();
+  }
+
+  /* 自动播放：定时触发单步，直到挂起 */
+  function autoPlay() {
+    if (ended) return;
+    autoBtn.disabled = true;
+    timer = setInterval(function () {
+      step();
+      if (ended) stopAuto();
+    }, 800);
+  }
+
+  stepBtn.addEventListener('click', step);
+  autoBtn.addEventListener('click', autoPlay);
+  resetBtn.addEventListener('click', reset);
+  addTimerBtn.addEventListener('click', function () { addTask('t'); });
+  addIoBtn.addEventListener('click', function () { addTask('o'); });
+  addImdBtn.addEventListener('click', function () { addTask('i'); });
+  buildShop();
+  reset();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>前端监控与错误上报 · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ========== 本页动画专用样式：飞机黑匣子记录异常 + 批量上报演练 ========== */
+.mon-blackbox {
+  border: 1px solid #c6cede;
+  border-radius: 8px;
+  background: #1f2430;      /* 黑匣子的深色外壳 */
+  color: #dfe6f2;
+  padding: 10px;
+  margin: 10px 0;
+}
+.mon-blackbox-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #9aa3b8;
+  border-bottom: 1px dashed #3a4256;
+  padding-bottom: 6px;
+  margin-bottom: 6px;
+}
+.mon-count { font-weight: 700; color: #ffd166; }
+.mon-list { min-height: 46px; }
+.mon-record {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  padding: 4px 6px;
+  margin: 4px 0;
+  background: #2a3140;
+  border-radius: 4px;
+  animation: mon-in 0.3s ease;
+}
+@keyframes mon-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.mon-tag {
+  flex: none;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 999px;
+  color: #10131a;
+}
+.mon-tag--js { background: #ff8fa3; }
+.mon-tag--reject { background: #ffd166; }
+.mon-tag--res { background: #8ecae6; }
+.mon-msg { color: #dfe6f2; }
+.mon-pos { margin-left: auto; color: #9aa3b8; font-family: var(--fg-mono); }
+.mon-empty { color: #6b7488; font-size: 12px; padding: 8px 4px; }
+.mon-netrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  margin: 8px 0;
+}
+.mon-light {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #3fae7c;      /* 绿灯：网络正常 */
+  box-shadow: 0 0 6px #3fae7c;
+}
+.mon-light.is-off { background: #b3364f; box-shadow: 0 0 6px #b3364f; }
+</style>
+</head>
+<body data-page="m4-monitor">
+
+<!-- 壳层自动渲染区：site.js 检测到 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">用户在千里之外的手机上遇到报错，他不会告诉你——本页讲的是如何装好「监控摄像头」与「黑匣子」，在投诉到来之前先看见问题。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>建议先过一遍前置知识：<a href="./m4-cwv.html">Core Web Vitals 性能指标</a>——监控体系里「性能监控」这一支采集的就是这些指标；先知道要采集什么，再学怎么采集。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：讲解 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>为什么需要前端监控</h3>
+    <p>你在自己电脑上把页面测得滴水不漏，可线上用户的手机可能是三年前的旧机型、网络可能是地铁里的弱信号——这些环境你一个都测不到。更关键的是：<strong>用户遇到 bug 的默认动作是沉默离开</strong>，而不是找客服反馈。没有监控，你往往是最后一个知道产品出问题的人。监控解决的就是「先于投诉发现问题」。</p>
+
+    <h3>监控体系全景：三大类数据</h3>
+    <ul>
+      <li><strong>错误监控</strong>：JS 运行时错误、未被接住的 Promise 拒绝、资源加载失败、接口异常——本页重点。</li>
+      <li><strong>性能监控</strong>：加载速度、交互延迟、卡顿，采集的就是 <a href="./m4-cwv.html">Core Web Vitals</a> 那套指标，外加自研的长任务统计。</li>
+      <li><strong>行为埋点</strong>：用户点了什么按钮、走了哪条路径、在哪个页面停留——出了问题能还原「用户当时在干什么」。</li>
+    </ul>
+
+    <h3>JS 错误怎么采：两套钩子各管一摊</h3>
+    <p><code>window.onerror</code>（或 <code>window.addEventListener('error')</code>）负责<strong>同步运行时错误</strong>：比如读了 <code>undefined</code> 的属性，回调里能拿到错误信息、出错文件、行号列号。<code>window.addEventListener('unhandledrejection')</code> 负责另一摊：<strong>Promise 被拒绝却没有任何 <code>catch</code> 接住</strong>的情况——异步代码越来越多，这类错误占比很高，<code>onerror</code> 是收不到它的。</p>
+    <p>还有个容易漏的角落：<strong>资源加载失败</strong>（图片、脚本、样式表请求失败）触发的 <code>error</code> 事件<strong>不会冒泡</strong>，<code>window.onerror</code> 完全收不到。标准做法是在<strong>捕获阶段</strong>监听 <code>error</code> 事件，再判断事件目标是不是一个资源元素，从而和 JS 错误区分开。</p>
+
+    <h3>接口异常怎么采：别指望全局钩子</h3>
+    <p>接口报 500、超时，各自以不同方式抛出，全局钩子抓不全也不带业务上下文。所以业内做法是<strong>在封装好的请求层统一接住</strong>：不管底层用什么方式发请求，都过同一个包装函数，失败时记录请求地址、状态码、耗时、关键参数摘要，再交给上报队列。</p>
+
+    <h3>上报怎么发：通道与策略</h3>
+    <ul>
+      <li><strong>通道</strong>：早期用「动态创建图片、把数据拼进地址」打点；普通请求在页面卸载时会被浏览器取消；<code>navigator.sendBeacon</code> 专为「页面关闭前最后一搏」设计——即使页面正在卸载，浏览器也会尽力把数据送出去。</li>
+      <li><strong>批量合并</strong>：错误往往成片出现，一条一个请求会形成上报风暴。把短时间内的记录攒进队列，凑一批再发。</li>
+      <li><strong>失败重试</strong>：上报本身也可能失败，失败的数据要留在队列里择机重试，不能直接丢。</li>
+      <li><strong>采样与聚合</strong>：同一个错误一分钟刷一万条，只需留几条样本加一个次数；低危错误还可以按比例采样。</li>
+      <li><strong>自我兜底</strong>：上报代码自己绝不能再抛错，否则监控反而成为新的故障源。</li>
+    </ul>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 便利店的监控摄像头与飞机黑匣子</div>
+      <p>你楼下有家 24 小时便利店（线上产品）。店长不可能 24 小时盯着每个货架（开发者不可能盯着每个用户的屏幕），但他在天花板装了一排摄像头（监控 SDK）。摄像头从不拦着顾客走路，顾客也感觉不到它的存在（监控对用户无感、性能损耗极小）；某天夜里商品被整箱搬走（线上报错），店长第二天不用等顾客投诉，直接调录像回放——看清了时间、柜台、甚至对方从哪个门进来（错误发生的页面、文件行号、堆栈、用户环境）。没有摄像头，他只能等顾客主动说「昨天你家被偷了」，而大多数顾客的选择是再也不来。</p>
+      <p>而错误队列就像飞机上的<strong>黑匣子</strong>：飞机（页面）正常运行时，它安安静静只记录不出声；一旦出现异常，它把当时的关键参数原样存下来（错误类型、堆栈、环境快照）。飞机平安落地，记录就攒着，落地后统一交给地面分析（<strong>批量上报</strong>）；万一飞机失联（页面被关闭），黑匣子也要想办法把最后的数据送出去——这正是 <code>sendBeacon</code> 存在的意义。要是黑匣子自己天天冒烟短路（上报代码拖垮性能、自己报错），航空公司早就把它拆了——所以监控的第一戒律是：<strong>别打扰飞行</strong>。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：黑匣子记录三类错误 + 攒批上报（可点击、可断网重试） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>下面是一台「网页黑匣子」。点三个按钮模拟线上最常见的三类异常，观察记录如何进入黑匣子；再切到断网试试「上报失败留队重试」，最后体验 sendBeacon 的兜底上报。（全程纯本地模拟，不发出任何真实请求）</p>
+    <div class="anim-stage">
+      <p class="anim-caption">黑匣子 = 页面内存里的错误队列：错误先入队攒着，凑一批或页面即将关闭时再一次性上报。</p>
+      <div class="mon-blackbox">
+        <div class="mon-blackbox-head">
+          <span>✈ 黑匣子 · 错误队列（未上报记录）</span>
+          <span>待上报：<span class="mon-count" id="mon-count">0</span> 条</span>
+        </div>
+        <div class="mon-list" id="mon-list">
+          <div class="mon-empty">队列空空如也——页面运行正常，这是最好的状态。</div>
+        </div>
+      </div>
+      <div class="mon-netrow">
+        <span class="mon-light" id="mon-net-light"></span>
+        <span id="mon-net-text">网络状态：正常</span>
+      </div>
+      <div class="anim-console" id="mon-console">
+        <div class="anim-line is-muted">点击下方按钮注入异常，观察黑匣子如何记录…</div>
+      </div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="mon-err-js">模拟 JS 运行时错误</button>
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="mon-err-promise">模拟 Promise 未接住的拒绝</button>
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="mon-err-res">模拟图片加载失败</button>
+        <button type="button" class="fg-btn fg-btn--ok fg-btn--sm" id="mon-report">sendBeacon 兜底上报</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="mon-net">切换断网 / 联网</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="mon-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接 -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="./m4-cwv.html">Core Web Vitals 性能指标</a>——性能监控采集的对象就是这三大指标，先懂「测什么」再看「怎么采」。</p>
+    <p><strong>向后延伸</strong>：监控负责「发现问题」，接下来学<a href="./m4-error.html">错误处理与容错设计</a>负责「接住问题」——重试、降级、兜底，让单个故障不至于拖垮整个页面。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="../m1/m1-js-promise.html">Promise 与 async/await</a> —— 看不懂 Promise 的拒绝语义，就理解不了 unhandledrejection 为什么会出现</li>
+      <li><a href="../m1/m1-js-eventloop.html">事件循环与任务队列</a> —— 错误在哪一轮循环里抛出、全局钩子何时收到，都由事件循环决定</li>
+      <li><a href="./m4-runtime.html">运行时优化：防抖、节流与计算缓存</a> —— 上报的采样降频与批量合并，用的正是节流与攒批的思想</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（mode:'main'） -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后把最佳成绩写入进度仓库（见页面底部内联脚本）：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：前端监控就像在网页里装了一台不打扰顾客的监控摄像头和一个黑匣子——用户遇到报错时，页面悄悄把「哪里坏了、怎么坏的」记下来，攒一批寄回给开发人员，让问题在用户投诉之前先被发现。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前复述 1 次，1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：让你从零设计一个前端错误监控系统，你会怎么做？</summary>
+      <ul>
+        <li>采集层：window.onerror 抓同步错误、unhandledrejection 抓未接住的 Promise 拒绝、捕获阶段监听 error 事件抓资源失败、请求层统一 catch 抓接口异常，可补充白屏检测与接口耗时。</li>
+        <li>上报层：错误先入内存队列，批量合并上报；页面卸载前用 sendBeacon 兜底；失败留队重试；按错误指纹去重聚合、低危采样，上报代码自身要包一层兜底，避免监控拖垮页面。</li>
+        <li>数据层：后台按版本、机型、系统、地域聚合下钻；线上压缩代码用 source-map 还原成源码位置。</li>
+        <li>告警层：错误率 / 影响用户数超过阈值时通知负责人，区分「新版本引入」与「存量问题」。</li>
+        <li>加分项：提到监控要「无感」——上报量可控、不阻塞主线程、不在关键路径上做额外工作。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：window.onerror 能捕获所有 JS 错误吗？会漏掉哪些？</summary>
+      <ul>
+        <li>漏掉未接住的 Promise 拒绝：那归 unhandledrejection 管，两者是互补关系。</li>
+        <li>漏掉资源加载失败：img / script / link 的 error 事件不冒泡，不会走到 window.onerror，需要捕获阶段监听 error 并判断事件目标。</li>
+        <li>跨域脚本报 "Script error."：出于安全，页面拿不到别人域下脚本的具体报错，需给 script 标签加 crossorigin 属性且对方返回 CORS 响应头。</li>
+        <li>已被 try/catch 接住的错误不会再触发全局钩子；另外语法错误在解析阶段就失败，运行时钩子也收不到（构建期就能暴露）。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm4-monitor'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'） */
+  var WARMUP = [{
+    id: 'm4-monitor-warmup-1',
+    type: 'single',
+    stem: '预热：下面哪句话最能说明「为什么前端要自己做监控」？',
+    options: [
+      '用户遇到 bug 一般会第一时间反馈给客服',
+      '线上用户设备和网络千差万别，很多问题只有监控能先于投诉发现',
+      '有了监控就可以不用写自动化测试了',
+      '监控能让页面加载速度变得更快'
+    ],
+    answer: [1],
+    explain: '用户遇到问题的默认动作是沉默离开，很少主动反馈；监控的价值是在投诉之前先看见问题。它不能替代测试（那是另一道防线），也不会让页面变快。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm4-monitor-q1',
+      type: 'single',
+      stem: '关于 JS 错误采集，下面哪个说法是正确的？',
+      options: [
+        'window.onerror 能收到图片、脚本等资源加载失败的错误',
+        'Promise 被拒绝且没有任何 catch 接住时，会触发 unhandledrejection 事件',
+        'unhandledrejection 是 Node.js 独有的机制，浏览器里不存在',
+        '加上 window.onerror 之后，跨域第三方脚本的具体报错信息也能拿到'
+      ],
+      answer: [1],
+      explain: 'unhandledrejection 正是浏览器里「没人接住的 Promise 拒绝」的兜底钩子。A 错：资源加载失败的 error 事件不冒泡，onerror 收不到，需在捕获阶段监听并判断事件目标；C 错：它是标准的浏览器事件；D 错：跨域脚本出于安全只报「Script error.」，要拿详情需脚本带 crossorigin 属性且服务端返回 CORS 响应头。'
+    },
+    {
+      id: 'm4-monitor-q2',
+      type: 'multi',
+      stem: '设计错误上报策略时，下面哪些做法是合理的？',
+      options: [
+        '每发生一条错误立刻单独发一个请求，绝不缓存停留',
+        '批量合并：把短时间内的多条记录攒成一次请求发出，减少请求数',
+        '页面即将关闭时用 navigator.sendBeacon 发送，页面卸载后浏览器仍尽力送达',
+        '上报失败就把数据直接丢掉，避免队列堆积'
+      ],
+      answer: [1, 2],
+      explain: '错误常常成片出现，逐条上报会形成请求风暴、拖慢页面（A 错）；批量合并是标配；sendBeacon 专为「页面卸载前的最后一搏」设计（C 对）。上报失败应该留在队列里择机重试而不是丢弃（D 错）。此外还应做同错误去重聚合与低危采样，避免同一个故障瞬间产生上万条上报。'
+    },
+    {
+      id: 'm4-monitor-q3',
+      type: 'code',
+      stem: '实现 createBatchQueue(flush, maxSize)：一个「批量合并上报」队列。返回对象包含三个方法：add(item) 把记录放入缓冲区，攒够 maxSize 条时自动调用 flush(数组) 并清空缓冲区；flush() 手动立即上报当前缓冲区（为空时什么都不做）；size() 返回当前缓冲区条数。flush 只是「把数组交出去」的回调，由你负责调用。',
+      stub: 'function createBatchQueue(flush, maxSize) {\n  // flush：回调函数，收到一个数组（代表一次批量上报）\n  // maxSize：攒够几条自动上报\n  // 返回 { add, size, flush } 三个方法：\n  //   add(item)：入队；攒够 maxSize 条 → 自动 flush 并清空缓冲区\n  //   flush()：手动上报（缓冲区为空时不要调用 flush）\n  //   size()：返回当前缓冲区条数\n}\n',
+      reference: 'function createBatchQueue(flush, maxSize) {\n  var buf = [];                // 缓冲区：对应「黑匣子队列」\n  function send() {\n    flush(buf);                // 一次批量上报\n    buf = [];                  // 关键：上报后必须清空，防止旧数据重复上报\n  }\n  return {\n    add: function (item) {\n      buf.push(item);\n      if (buf.length >= maxSize) send(); // 攒够了就发一批\n    },\n    size: function () { return buf.length; },\n    flush: function () {\n      if (buf.length === 0) return;      // 空载荷没有上报的意义\n      send();\n    }\n  };\n}',
+      asserts: [
+        "(function(){ var out=[]; var q=createBatchQueue(function(a){ out=out.concat(a); }, 3); q.add('a'); q.add('b'); return q.size()===2 && out.length===0; })()",
+        '(function(){ var out=[]; var q=createBatchQueue(function(a){ out=out.concat(a); }, 2); q.add(1); q.add(2); q.add(3); return out.length===2 && out[0]===1 && q.size()===1; })()',
+        "(function(){ var out=[]; var q=createBatchQueue(function(a){ out=out.concat(a); }, 5); q.add('x'); q.flush(); q.flush(); return out.length===1 && q.size()===0; })()"
+      ],
+      explain: '这就是「批量合并上报」的最小模型：真实监控 SDK 里，flush 回调往往就是一次 sendBeacon 或请求。两个关键点——自动 flush 后必须清空缓冲区，否则下一批会带着旧数据重复上报（对应断言二里 add(3) 之后 size 为 1，说明前两条已发走且只发走了前两条）；手动 flush 在空队列时不应调用回调，发一个空载荷毫无意义（对应断言三：连续两次 flush 只产生一次上报）。再给 flush 失败的情况加「数据留队重试」，就得到一个能上线的上报器雏形。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库 */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：黑匣子记录异常 + 攒批 / 断网重试 / sendBeacon 兜底（纯 DOM 手写，全程无真实请求） */
+(function () {
+  'use strict';
+  var queue = [];   // 黑匣子：内存中的待上报错误队列
+  var netOn = true; // 网络状态（演示开关）
+  var failTimes = 0;// 上报失败次数
+
+  var consoleEl = document.getElementById('mon-console');
+  var listEl = document.getElementById('mon-list');
+  var countEl = document.getElementById('mon-count');
+  var netLight = document.getElementById('mon-net-light');
+  var netText = document.getElementById('mon-net-text');
+  var netBtn = document.getElementById('mon-net');
+  var reportBtn = document.getElementById('mon-report');
+  var resetBtn = document.getElementById('mon-reset');
+
+  /* 三类异常的样本数据：type 对应监控里的三个采集钩子 */
+  var SAMPLES = [
+    { key: 'js', tag: 'JS', cls: 'mon-tag--js', msg: 'TypeError: 读取 undefined 的属性 name', pos: 'order.js:128' },
+    { key: 'reject', tag: 'REJECT', cls: 'mon-tag--reject', msg: '未接住的 Promise 拒绝：接口 /cart/list 超时', pos: 'api.js:42' },
+    { key: 'res', tag: 'RES', cls: 'mon-tag--res', msg: '资源加载失败：banner.png 请求出错', pos: 'home.vue 模板' }
+  ];
+  var picks = { 'mon-err-js': 0, 'mon-err-promise': 1, 'mon-err-res': 2 };
+
+  /* 向控制台追加一行日志并自动滚到底 */
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* 渲染黑匣子里的错误记录列表 */
+  function renderQueue() {
+    countEl.textContent = String(queue.length);
+    listEl.innerHTML = '';
+    if (queue.length === 0) {
+      var empty = document.createElement('div');
+      empty.className = 'mon-empty';
+      empty.textContent = '队列空空如也——页面运行正常，这是最好的状态。';
+      listEl.appendChild(empty);
+      return;
+    }
+    queue.forEach(function (rec) {
+      var row = document.createElement('div');
+      row.className = 'mon-record';
+      var tag = document.createElement('span');
+      tag.className = 'mon-tag ' + rec.cls;
+      tag.textContent = rec.tag;
+      var msg = document.createElement('span');
+      msg.className = 'mon-msg';
+      msg.textContent = rec.msg;
+      var pos = document.createElement('span');
+      pos.className = 'mon-pos';
+      pos.textContent = rec.pos;
+      row.appendChild(tag);
+      row.appendChild(msg);
+      row.appendChild(pos);
+      listEl.appendChild(row);
+    });
+  }
+
+  /* 注入一条异常：模拟各采集钩子把错误写入队列 */
+  function inject(btnId) {
+    var s = SAMPLES[picks[btnId]];
+    queue.push(s);
+    renderQueue();
+    log('捕获 → ' + s.tag + '：' + s.msg + '（' + s.pos + '）——已写入黑匣子，先攒着');
+  }
+
+  /* 上报：网络正常则批量合并发出并清空队列；断网则失败留队（真实 SDK 会择机重试） */
+  function report() {
+    if (queue.length === 0) {
+      log('队列为空，没有需要上报的数据。', 'is-muted');
+      return;
+    }
+    if (netOn) {
+      /* 统计各类错误的条数，模拟「合并成一个载荷」 */
+      var c = { js: 0, reject: 0, res: 0 };
+      queue.forEach(function (r) { c[r.key] += 1; });
+      var parts = [];
+      if (c.js) parts.push('JS运行时×' + c.js);
+      if (c.reject) parts.push('Promise拒绝×' + c.reject);
+      if (c.res) parts.push('资源失败×' + c.res);
+      log('sendBeacon 上报成功：' + queue.length + ' 条记录合并为 1 个载荷——[' + parts.join(' | ') + ']，队列清空', 'is-ok');
+      queue = [];
+      renderQueue();
+    } else {
+      failTimes += 1;
+      log('上报失败：网络不可用。记录保留在黑匣子，网络恢复后重试（已失败 ' + failTimes + ' 次，数据不丢）', 'is-end');
+    }
+  }
+
+  /* 切换断网 / 联网，观察上报的两条路径 */
+  function toggleNet() {
+    netOn = !netOn;
+    netLight.classList.toggle('is-off', !netOn);
+    netText.textContent = netOn ? '网络状态：正常' : '网络状态：已断网（弱网 / 电梯 / 地铁）';
+    log(netOn ? '网络恢复：积压的记录可以择机重试上报了' : '已切换为断网状态：此时上报会失败，但数据要留住', 'is-muted');
+  }
+
+  function reset() {
+    queue = [];
+    failTimes = 0;
+    if (!netOn) toggleNet(); // 恢复为联网状态
+    renderQueue();
+    consoleEl.innerHTML = '';
+    log('已重置。点击按钮重新注入异常…', 'is-muted');
+  }
+
+  Object.keys(picks).forEach(function (id) {
+    document.getElementById(id).addEventListener('click', function () { inject(id); });
+  });
+  reportBtn.addEventListener('click', report);
+  netBtn.addEventListener('click', toggleNet);
+  resetBtn.addEventListener('click', reset);
+  renderQueue();
+})();
+</script>
+</body>
+</html>

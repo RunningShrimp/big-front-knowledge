@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>小程序双线程架构 · 跨端开发</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ============================================================
+   本页动画专用样式：「前厅（渲染层）— 传菜口（Native）— 后厨（逻辑层）」
+   纯手写 CSS，无任何外部依赖，仅本页使用
+   ============================================================ */
+.mp-anim { display: flex; gap: 12px; align-items: stretch; margin: 12px 0; flex-wrap: wrap; }
+.mp-room {
+  flex: 1 1 200px; min-width: 180px;
+  border: 1px solid #d7dde8; border-radius: 10px;
+  padding: 10px 12px; background: #fafbfe;
+}
+.mp-room--logic { border-color: #f0b37e; background: #fffaf3; }
+.mp-room--render { border-color: #9cc3f5; background: #f5f9ff; }
+.mp-room-title { font-weight: 700; font-size: 13px; margin-bottom: 6px; }
+.mp-room-body { font-size: 13px; line-height: 1.7; color: #4a5568; }
+.mp-bridge {
+  flex: 0 0 150px; display: flex; flex-direction: column;
+  border: 1px dashed #b9c2d4; border-radius: 10px;
+  padding: 10px 8px; background: #fbfbf6; text-align: center;
+}
+.mp-bridge-title { font-size: 12px; font-weight: 700; margin-bottom: 8px; }
+.mp-bridge-slot { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 56px; }
+.mp-packet {
+  display: inline-block; padding: 4px 10px; border-radius: 999px;
+  background: #2f5bea; color: #fff; font-size: 12px; opacity: 0;
+}
+/* 数据包出现时播放一次「穿过传菜口」的入场动画 */
+.mp-packet.is-show { animation: mp-fly 0.9s ease forwards; }
+@keyframes mp-fly {
+  0% { opacity: 0; transform: translateY(12px) scale(0.8); }
+  25% { opacity: 1; transform: translateY(0) scale(1.06); }
+  80% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0.85; transform: translateY(-6px); }
+}
+.mp-stat { font-size: 13px; margin: 6px 0; color: #4a5568; }
+</style>
+</head>
+<body data-page="m5-mp-arch">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">小程序为什么不长得像普通网页？答案藏在它的「双线程」骨架里——本页拆开这台机器给你看。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>本页有两个前置知识，建议先过一遍：</p>
+    <ul>
+      <li><a href="../../pages/m3/m3-vdom.html">虚拟 DOM 与 Diff</a> —— 渲染层拿到数据后，如何最小代价更新视图，思路同源。</li>
+      <li><a href="../../pages/m1/m1-js-eventloop.html">事件循环</a> —— 逻辑层的 JS 就是以「事件驱动 + 队列」的方式跑起来的。</li>
+    </ul>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：讲解 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、先回忆：普通网页是「单世界」的</h3>
+    <p>在浏览器里，HTML、CSS、JS 活在同一个世界：JS 拿得到 <code>document</code>，能随时增删改查页面上的任何节点，
+      改完浏览器立刻重排重绘。这个「随手可改」很方便，但也意味着——<strong>页面长什么样，可以被 JS 随心所欲地控制</strong>。</p>
+
+    <h3>二、小程序拆成了两个世界</h3>
+    <p>小程序把这件事拆成了两半：<strong>渲染层</strong>负责把界面画出来（每个页面一个 WebView）；
+      <strong>逻辑层</strong>负责跑你写的 JS（所有页面共用一个独立的 JS 引擎线程）。
+      关键在于：逻辑层里<strong>没有 <code>window</code>、没有 <code>document</code>，拿不到任何 DOM 节点</strong>。
+      你想让界面变，只有一个正规通道——调用 <code>setData</code>，把「什么数据变了」告诉渲染层，由它去更新视图。</p>
+
+    <h3>三、为什么要这样隔离：安全与管控的取舍</h3>
+    <p>既然拿不到 DOM，JS 就没法跳出框架乱改页面，也无法嗅探、篡改平台不希望它碰的东西。
+      平台由此获得了<strong>统一管控能力</strong>：所有界面变更都走规定通道，体验可控、审核可查、安全可控。
+      代价是：<strong>每次界面更新都要跨线程通信</strong>，比浏览器里直接改 DOM 多了一道「寄快递」的流程。
+      这是一道典型的工程取舍——用一点通信开销，换整个生态的管控与稳定。</p>
+
+    <h3>四、两个世界怎么说话：setData 与 Native 中转</h3>
+    <p>渲染层和逻辑层互相看不见对方，中间站着的裁判是<strong>原生层（Native）</strong>。
+      流程是这样转的：用户在渲染层点了按钮 → 事件被打包，经 Native 层送到逻辑层 → 逻辑层执行你的回调、调用
+      <code>setData</code> → 变更数据经 Native 层<strong>序列化</strong>后送回渲染层 → 渲染层应用数据、更新视图。
+      注意两条结论：<strong>通信是异步的</strong>（发出 setData 后渲染层不会立刻变），以及<strong>能传过去的只有可序列化的数据</strong>（函数、DOM 节点这类东西根本过不去）。</p>
+
+    <h3>五、频繁 setData 为什么是性能大坑</h3>
+    <p>因为<strong>每一次 setData 都是一次跨线程通信</strong>：打包、序列化、过桥、反序列化，一步都省不了。
+      在一个滚动列表里每帧调用一次 setData，等于每帧都寄一次「全程快递」，快递费（通信与序列化开销）会把帧预算吃光，于是掉帧、卡顿。
+      对应的优化手段也就顺理成章：合并多次 setData 为一次、只传变化的数据（按路径更新）、对高频操作节流、
+      不要在页面已进入后台时还继续 setData、别把与渲染无关的大对象塞进 data。</p>
+
+    <h3>六、WXML / WXSS：长得像 HTML / CSS，但不是一回事</h3>
+    <p>渲染层写的不是 <code>&lt;div&gt;</code>，而是 <code>&lt;view&gt;</code>、<code>&lt;text&gt;</code>、<code>&lt;image&gt;</code> 这些框架统一封装的组件；
+      样式文件是 WXSS，提供了 <code>rpx</code> 这种按屏幕宽度自适应的单位，选择器支持范围也比 CSS 更窄。
+      模板里的 <code>wx:if</code>、<code>wx:for</code> 更像 Vue 的指令风格，而不是标准 HTML。
+      可以把它们理解为：<strong>专门为「组件化 + 数据驱动」重新设计的一套界面描述语言</strong>，只是借用了 HTML/CSS 的皮。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比：一家只有传菜口的火锅店</div>
+      <p>想象一家规矩很特别的火锅店。<strong>前厅</strong>（渲染层）只负责一件事：把端出来的菜摆好、给客人看，
+        并收集客人点的单；<strong>后厨</strong>（逻辑层）闷头炒菜，但后厨没有窗户，看不到客人，也看不到前厅的桌面。
+        前厅和后厨之间<strong>只有一条窄窄的传菜口</strong>（Native 中转）。
+        客人点单，单子从传菜口递进后厨；后厨做好一道菜，也得从传菜口递出来，前厅才能摆上桌——
+        菜在传菜口排队的这段时间，客人桌上就是空的，这就是「异步」。</p>
+      <p>店规也很严：后厨递出来的只能是<strong>包装好的食材包</strong>（可序列化的数据），活鱼活虾带锅带灶（函数、DOM 节点）一律不许过口。
+        经理（平台）还在传菜口派了安检员，每样出去的东西都要过检——这正是平台能统一管控页面、保障体验的原因。
+        最后是成本问题：客人连点十次「加菜」，服务员要是十次单独跑传菜口，口子就被堵死了；
+        聪明的做法是把十份改动<strong>打包成一箱</strong>，一次递过去。单传得太勤，菜都凉了。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：双线程传菜口单步执行（纯手写 CSS/JS，可单步、可对比合并策略） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>下面把「前厅点单 — 传菜口 — 后厨出餐」搬到了页面上。单步走完一轮 setData，
+      亲自看到<strong>逻辑层数据已变、渲染层还没变</strong>的中间态：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">逻辑层每调用一次 setData，数据包都要穿过传菜口；点击「单步执行」逐阶段观察：</p>
+      <pre><code>Page({
+  data: { count: 0 },
+  add() {
+    this.setData({ count: this.data.count + 1 })  // 每次都要过一次传菜口
+  }
+})</code></pre>
+      <div class="mp-anim">
+        <div class="mp-room mp-room--logic">
+          <div class="mp-room-title">后厨 · 逻辑层（JS 引擎）</div>
+          <div class="mp-room-body" id="mp-logic-state">data.count = 0</div>
+        </div>
+        <div class="mp-bridge">
+          <div class="mp-bridge-title">传菜口（Native 中转）</div>
+          <div class="mp-bridge-slot" id="mp-bridge-slot"><span class="anim-line is-muted">空闲</span></div>
+        </div>
+        <div class="mp-room mp-room--render">
+          <div class="mp-room-title">前厅 · 渲染层（WebView）</div>
+          <div class="mp-room-body" id="mp-render-state">视图显示 count = 0</div>
+        </div>
+      </div>
+      <div class="anim-console" id="mp-console">
+        <div class="anim-line is-muted">点击「单步执行」开始，观察一轮完整通信…</div>
+      </div>
+      <p class="mp-stat" id="mp-bridge-stat">数据包已过传菜口：0 次</p>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="mp-step">单步执行</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="mp-burst">连点 3 次（不合并）</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="mp-merge">合并成 1 次大单</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="mp-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（真实课程路径） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：建议先学「虚拟 DOM 与 Diff」（渲染层拿到数据后如何最小化更新视图）
+      与「事件循环」（逻辑层 JS 的事件驱动执行模型），本页的通信模型建立在这两者之上。</p>
+    <p><strong>向后延伸</strong>：理解双线程后，下一步是看它与普通 Web 的具体差异（<a href="./m5-mp-web.html">小程序与 Web 的差异</a>），
+      以及另一类「原生壳 + WebView」方案里桥通信的样子（<a href="./m5-hybrid.html">Hybrid 开发与 JSBridge</a>）。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="../../pages/m1/m1-js-eventloop.html">事件循环</a> —— 逻辑层里 tap 回调、定时器、Promise 全靠事件循环调度。</li>
+      <li><a href="../../pages/m3/m3-vdom.html">虚拟 DOM 与 Diff</a> —— 「先算差异、再最小更新」与 setData 优化是同一个思想。</li>
+      <li><a href="./m5-hybrid.html">Hybrid 开发与 JSBridge</a> —— 同样要跨 JS 与原生通信，对比两种桥的设计。</li>
+      <li><a href="../../pages/m2/m2-reflow.html">渲染流水线与重排重绘</a> —— 浏览器里改 DOM 的成本，帮助理解通信成本之外的第二重开销。</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（mode:'main'） -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后把最佳成绩写入进度仓库（见页面底部内联脚本）：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：小程序把你写的代码和用户看到的界面关进两个房间，中间只留一个传菜口——
+      代码想改界面，必须把「什么变了」打包从传菜口递过去，安全好管，但递得太勤页面就卡。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前复述 1 次，1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：小程序为什么采用双线程架构？</summary>
+      <ul>
+        <li>管控与安全：逻辑层拿不到 DOM/BOM，界面变更只能走 setData 正规通道，平台可统一管控体验、支撑审核体系。</li>
+        <li>渲染与逻辑解耦：渲染层每个页面一个 WebView，逻辑层单线程跑全部 JS，页面间互不干扰、方便回收。</li>
+        <li>避免互相阻塞：Web 里长任务 JS 与渲染抢同一线程会卡界面；双线程下逻辑计算不直接阻塞渲染线程。</li>
+        <li>代价要答出来：跨线程通信是异步且有序列化成本，因此催生了 setData 系列性能优化话题。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：setData 有哪些优化手段？为什么？</summary>
+      <ul>
+        <li>合并调用：多次 setData 合并为一次，因为每次调用都是一次完整的跨线程序列化通信。</li>
+        <li>只传变化数据：按路径更新（如更新列表某一项）而不是整棵 data 全量下发，减少序列化体积。</li>
+        <li>高频操作节流：滚动、输入等高频事件里避免每帧 setData，通信开销会直接吃掉帧预算导致掉帧。</li>
+        <li>数据瘦身：与渲染无关的纯计算数据不放 data；页面进入后台后停止 setData。</li>
+        <li>加分项：能指出「思想与虚拟 DOM Diff 同源——先算最小变更，再最小传输」。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* ============================================================
+ * 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评
+ * ============================================================ */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm5-mp-arch'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'） */
+  var WARMUP = [{
+    id: 'm5-mp-arch-warmup-1',
+    type: 'single',
+    stem: '预热：在小程序里，你写的 JavaScript 代码运行在哪里？',
+    options: [
+      '渲染层的 WebView 里',
+      '逻辑层独立的 JavaScript 引擎线程里',
+      '直接运行在手机操作系统内核里'
+    ],
+    answer: [1],
+    explain: '渲染层只负责画界面（WebView），JS 统一跑在逻辑层独立的引擎线程里，两者通过 Native 层中转通信。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm5-mp-arch-q1',
+      type: 'single',
+      stem: '关于小程序双线程之间的通信，下面哪个说法是正确的？',
+      options: [
+        '逻辑层可以直接读取渲染层 WebView 里的 DOM 节点',
+        'setData 的数据经 Native 层中转，序列化后传给渲染层，通信是异步的',
+        '渲染层与逻辑层共享同一块内存，数据无需序列化'
+      ],
+      answer: [1],
+      explain: '逻辑层没有 document，拿不到任何 DOM 节点，A 错。两个线程并不共享内存，数据必须经过序列化跨线程传输，且通信异步——发出 setData 后渲染层不会同步完成更新，所以 C 错、B 对。'
+    },
+    {
+      id: 'm5-mp-arch-q2',
+      type: 'multi',
+      stem: '以下哪些做法能真正降低 setData 带来的跨线程通信开销？',
+      options: [
+        '把连续多次 setData 合并成一次调用',
+        '只传发生变化的数据，而不是整棵 data 全量下发',
+        '每次都把整个 data 对象原样传过去，图省事',
+        '把与界面无关的大量纯计算结果也塞进 data'
+      ],
+      answer: [0, 1],
+      explain: '每次 setData 都触发一次打包、序列化、过桥、反序列化的完整流程，合并调用与只传增量都在直接削减这条流水线的次数与体积，A、B 对。全量下发会放大序列化体积，C 错；与渲染无关的数据放 data 只会增加通信负担、不带来任何视图收益，D 错。'
+    },
+    {
+      id: 'm5-mp-arch-q3',
+      type: 'code',
+      stem: '手写迷你 setData diff：实现函数 diffData(prev, next)，比较前后两棵数据树，返回发生变化的路径数组（如 ["user.name"]）。规则：两边都是普通对象时逐键下钻、路径用点号连接；其他类型（含数组、null）视为叶子整体比较；next 中新增的键整条路径记为变化；值相同则不输出。',
+      stub: 'function diffData(prev, next) {\n  // 返回：路径字符串数组，例如 ["user.name", "list"]\n  // 提示：\n  // 1. 两边都是普通对象（非数组、非 null）→ 逐键下钻\n  // 2. 其他类型视为叶子，整体比较是否相等\n  // 3. next 新增的键 → 整条路径记为变化\n  // 4. 数组与数组的相等可用 JSON.stringify 比较\n}\n',
+      reference: 'function diffData(prev, next) {\n  var paths = [];\n  function isObj(v) {\n    return v !== null && typeof v === "object" && !Array.isArray(v);\n  }\n  function eq(a, b) {\n    if (Array.isArray(a) && Array.isArray(b)) {\n      return JSON.stringify(a) === JSON.stringify(b);\n    }\n    return a === b;\n  }\n  function walk(p, n, path) {\n    if (isObj(p) && isObj(n)) {\n      Object.keys(n).forEach(function (k) {\n        var sub = path ? path + "." + k : k;\n        if (!(k in p)) {\n          paths.push(sub);      // 新增键：整条路径记为变化\n        } else {\n          walk(p[k], n[k], sub);\n        }\n      });\n    } else if (!eq(p, n)) {\n      paths.push(path);          // 叶子值不同（含类型改变）：记录路径\n    }\n  }\n  walk(prev, next, "");\n  return paths;\n}',
+      asserts: [
+        'JSON.stringify(diffData({a:1},{a:2})) === \'["a"]\'',
+        'JSON.stringify(diffData({user:{name:"a",age:1}},{user:{name:"b",age:1}})) === \'["user.name"]\'',
+        'diffData({a:1},{a:1}).length === 0 && diffData({list:[1,2]},{list:[1,2]}).length === 0',
+        'JSON.stringify(diffData({list:[1,2]},{list:[1,2,3]})) === \'["list"]\''
+      ],
+      explain: '为什么要有这道 diff？因为逻辑层与渲染层分处两个线程，setData 传什么就得序列化传输什么，把整棵 data 全量下发，长列表页面的通信成本会非常高。优化思路与虚拟 DOM Diff 同源：先在逻辑层比较出哪些路径变了，只把最小变更过传菜口。实现要点：只有两边都是普通对象才继续下钻，数组与 null 等一律当叶子整体比较（数组相等用 JSON 字符串比较，避免引用比较永远不相等的坑）；新增键直接记整条路径，因为渲染层只需要那个子树本身。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ============================================================
+ * ③ 动画演示：双线程「前厅—传菜口—后厨」单步执行器
+ * 纯 DOM 手写，无动画库；支持单步、连发对比、合并对比
+ * ============================================================ */
+(function () {
+  'use strict';
+  var logicCount = 0;   // 后厨手里的数：逻辑层 data.count
+  var viewCount = 0;    // 前厅展示的数：渲染层当前视图
+  var bridgeCount = 0;  // 数据包过传菜口的累计次数
+  var phase = 0;        // 一轮通信共 5 个阶段（0~4 循环）
+
+  var consoleEl = document.getElementById('mp-console');
+  var logicEl = document.getElementById('mp-logic-state');
+  var renderEl = document.getElementById('mp-render-state');
+  var slotEl = document.getElementById('mp-bridge-slot');
+  var statEl = document.getElementById('mp-bridge-stat');
+  var stepBtn = document.getElementById('mp-step');
+  var burstBtn = document.getElementById('mp-burst');
+  var mergeBtn = document.getElementById('mp-merge');
+  var resetBtn = document.getElementById('mp-reset');
+
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight; // 控制台自动滚到底部
+  }
+
+  /* 刷新两个房间与计数器：重点展示「逻辑层已改、渲染层未变」的中间态 */
+  function renderRooms() {
+    var diverge = logicCount !== viewCount;
+    logicEl.textContent = 'data.count = ' + logicCount + (diverge ? '（已改，还没端出去）' : '');
+    renderEl.textContent = '视图显示 count = ' + viewCount + (diverge ? '（数据还在路上…）' : '（与逻辑层一致）');
+    statEl.textContent = '数据包已过传菜口：' + bridgeCount + ' 次';
+  }
+
+  /* 在传菜口放一个数据包并播放穿过动画 */
+  function showPacket(text) {
+    slotEl.innerHTML = '';
+    var p = document.createElement('span');
+    p.className = 'mp-packet is-show';
+    p.textContent = text;
+    slotEl.appendChild(p);
+  }
+
+  /* 单步执行：一次只推进一个阶段，便于观察异步通信的中间态 */
+  function step() {
+    if (phase === 0) {
+      log('【1/5】用户在前厅点击「+1」按钮，tap 事件在渲染层被捕获');
+    } else if (phase === 1) {
+      showPacket('事件：tap');
+      bridgeCount += 1;
+      log('【2/5】tap 事件打包过传菜口 → 送往后厨（异步，前厅不等待）', 'is-ok');
+    } else if (phase === 2) {
+      logicCount += 1; // 逻辑层数据先变，注意此时渲染层还没变
+      log('【3/5】后厨执行 setData({ count: ' + logicCount + ' })：逻辑层数据先行变化');
+    } else if (phase === 3) {
+      showPacket('{count: ' + logicCount + '}');
+      bridgeCount += 1;
+      log('【4/5】变更数据打包过传菜口 → 送去前厅（又要跨一次线程）', 'is-ok');
+    } else {
+      viewCount = logicCount; // 渲染层此刻才应用数据
+      log('【5/5】前厅重新摆盘：视图更新为 count = ' + viewCount + '，一轮通信结束', 'is-end');
+    }
+    phase = (phase + 1) % 5;
+    renderRooms();
+  }
+
+  /* 对比实验：不合并（每次改动单独过桥） vs 合并（打包成一个大单） */
+  function burst(times, merged) {
+    if (merged) {
+      logicCount += times;
+      bridgeCount += 1;
+      viewCount = logicCount;
+      showPacket('{count: ' + logicCount + '}');
+      log('合并模式：' + times + ' 次改动打包成 1 个数据包过传菜口 → 前厅一次更新到 ' + logicCount, 'is-ok');
+      log('结论：通信次数从 ' + times + ' 次降到 1 次，这就是「合并 setData」的收益', 'is-end');
+    } else {
+      for (var i = 0; i < times; i++) {
+        logicCount += 1;
+        bridgeCount += 1;
+        viewCount = logicCount;
+        log('不合并：第 ' + (i + 1) + ' 个数据包 {count: ' + logicCount + '} 单独占用一次传菜口');
+      }
+      showPacket('{count: ' + logicCount + '}');
+      log(times + ' 次 setData = ' + times + ' 次跨线程序列化通信，传菜口被反复占用', 'is-end');
+    }
+    renderRooms();
+  }
+
+  function reset() {
+    logicCount = 0;
+    viewCount = 0;
+    bridgeCount = 0;
+    phase = 0;
+    consoleEl.innerHTML = '';
+    slotEl.innerHTML = '<span class="anim-line is-muted">空闲</span>';
+    log('已重置：count = 0，点击「单步执行」重新开始…', 'is-muted');
+    renderRooms();
+  }
+
+  stepBtn.addEventListener('click', step);
+  burstBtn.addEventListener('click', function () { burst(3, false); });
+  mergeBtn.addEventListener('click', function () { burst(3, true); });
+  resetBtn.addEventListener('click', reset);
+  renderRooms();
+})();
+</script>
+</body>
+</html>

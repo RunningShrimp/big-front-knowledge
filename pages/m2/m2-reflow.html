@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>重排、重绘与合成层 · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ===== 本页动画专用样式：代价对比（重排/重绘/合成）+ 强制同步布局演示 ===== */
+.rf-chain { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 12px 0; }
+.rf-node {
+  padding: 8px 14px; border-radius: 8px; border: 2px solid #d5dbe7; background: #f7f9fc;
+  font-size: 13px; font-weight: 600; color: #41506b;
+  transition: border-color .3s, background .3s, color .3s, box-shadow .3s;
+}
+.rf-node.is-start { border-style: dashed; }
+.rf-node.is-lit {
+  border-color: #F59E0B; background: #fdf6e3; color: #8a6414;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, .14);
+}
+.rf-arrow { color: #9aa5ba; font-weight: 700; }
+.rf-btns { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 10px; }
+.rf-cost { font-size: 13px; color: #41506b; margin: 6px 0; min-height: 20px; }
+.rf-cells { display: inline-flex; gap: 3px; vertical-align: middle; margin-left: 6px; }
+.rf-cell { width: 15px; height: 15px; border-radius: 3px; background: #e3e8f1; transition: background .25s; }
+.rf-cell.is-on { background: #F59E0B; }
+.rf-sub { font-size: 13px; font-weight: 700; color: #41506b; margin: 14px 0 6px; border-left: 3px solid #F59E0B; padding-left: 8px; }
+.rf-layout-count { font-size: 13px; color: #8a6414; font-weight: 700; }
+</style>
+</head>
+<body data-page="m2-reflow">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">知识点：重排、重绘与合成层（建议学习时长约 25 分钟）——页面改动到底惊动了流水线哪几站，代价排序与优化清单。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>本页前置依赖：<a href="./m2-pipeline.html">浏览器渲染流水线</a>——先弄清「解析 → 渲染树 → 布局 → 绘制 → 合成」五站各做什么，才能理解一次改动为什么会让其中几站「回头重跑」。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：分小标题推进 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、流水线跑完不等于一劳永逸</h3>
+    <p>上一页的流水线（解析 → 渲染树 → 布局 → 绘制 → 合成）把页面画上了屏幕，但页面不是静态照片：JS 随时在改样式、改结构。每次改动，浏览器都要判断「流水线要从哪一站重新跑」——<strong>跑的站越多，越卡</strong>。这页就把「改动 → 代价」这张对应表讲清楚。</p>
+
+    <h3>二、重排（Reflow / Layout）：几何变了，从头量起</h3>
+    <p>改动<strong>影响布局几何</strong>的属性——宽高（<code>width/height</code>）、位置（<code>top/left</code>）、内外边距（<code>margin/padding</code>）、字号（<code>fontSize</code>）、甚至增删节点、读写布局信息——都会触发<strong>重排</strong>：渲染树作废重来，从<strong>布局站</strong>起重新算几何，然后<strong>绘制、合成也全部重跑</strong>。更麻烦的是重排会「连坐」：一个元素的几何变了，它后面兄弟节点、甚至整个文档流都要重新计算，所以它是三者中最贵的。</p>
+
+    <h3>三、重绘（Repaint）：只换颜色，不用重量</h3>
+    <p>改动<strong>只影响外观、不影响几何</strong>的属性——文字颜色（<code>color</code>）、背景色（<code>backgroundColor</code>）、边框颜色、阴影（<code>boxShadow</code>）、<code>visibility</code>——触发<strong>重绘</strong>：几何没变，布局站不用重跑，但从<strong>绘制站</strong>起重跑（重新生成像素），合成站也要走一遍。比重排便宜，但依然消耗主线程。</p>
+
+    <h3>四、仅合成（Composite）：GPU 直接换图层，最快</h3>
+    <p><code>transform</code> 和 <code>opacity</code> 是特殊两位：它们<strong>不参与文档流布局</strong>——transform 像把已画好的图层整体挪动/缩放/旋转，opacity 像调图层透明度，都不改变「元素占多大地方」。于是浏览器只需在<strong>合成站</strong>把新图层重新叠一下，由 GPU 完成，<strong>跳过布局和绘制</strong>，主线程几乎不被占用——这就是「动画优先用 transform 而不是 top/left」的根本原因：top/left 每帧重排，transform 每帧只合成。</p>
+
+    <h3>五、强制同步布局：读写交错为什么慢</h3>
+    <p>浏览器本想把多次样式改动<strong>攒成一批</strong>，到下一帧才统一布局（批处理）。但如果代码<strong>刚写完样式就立刻读布局信息</strong>（<code>offsetWidth</code>、<code>getComputedStyle</code> 等），浏览器为了给你正确的值，<strong>被迫立刻同步执行一次布局</strong>——攒批计划被打破。循环里「写一次、读一次」重复 N 次，就触发 N 次强制布局，这就是性能事故里高频出现的<strong>布局抖动（Layout Thrashing）</strong>。解法是<strong>读写分离</strong>：把所有「读」集中到前面，把所有「写」集中到后面。</p>
+
+    <h3>六、优化清单与 will-change 的两面性</h3>
+    <p>减少重排重绘的常用手段：
+      ① <strong>批量改样式</strong>：多次修改合并成一次（切换一个 class，或用 <code>cssText</code> 一次写全）；
+      ② <strong>读写分离</strong>：先批量读布局，再批量写样式，避免循环内交错；
+      ③ <strong>动画用 transform/opacity</strong>：让每帧只走合成站；
+      ④ <strong>对「脱离文档流」的元素做频繁改动</strong>：<code>position: fixed/absolute</code> 的元素重排连坐范围小；
+      ⑤ 必要时用 <code>will-change: transform</code> <strong>提前提示</strong>浏览器「这个元素要做动画」，让它提前创建独立合成层。
+      但 will-change 是双刃剑：<strong>每个合成层都要占额外内存</strong>，给全站元素都加会让层数爆炸，合成器负担和内存压力反而拖慢页面——正确用法是只在确有动画的少数元素上、动画前加、动画后移除。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 老王家的三种「改主意」</div>
+      <p>老王家装修完住了半年，想调整一下。第一次他说「<strong>客厅太小，把隔墙砸了改户型</strong>」——工头哭了：量尺员要重新量（布局），油漆工要重刷被砸的墙面（绘制），家具要重新摆、全屋重新拍照（合成），连着客厅的走廊、餐厅都得跟着重排——这是<strong>重排</strong>，最伤筋动骨。
+        第二次他说「<strong>墙的米白色看腻了，全屋刷成浅灰</strong>」——尺寸一点没变，量尺员不用来，但油漆工得把墙面重新刷一遍（绘制），最后还是得重新拍个交付照（合成）——这是<strong>重绘</strong>，中等工作量。
+        第三次他说「<strong>就把客厅那张挂画换成另一张</strong>」——装修队根本不用进场，他自己踩着凳子把新海报往旧位置一贴，三秒搞定——这是<strong>仅合成</strong>：画面变了，但没动任何「结构」。
+        至于<strong>强制同步布局</strong>，就像量尺员刚收拾好工具，老王又喊「等等，我现在就要知道沙发到墙多远」——量尺员被迫一次又一次返场重测；而聪明的做法是：把所有问题一次问完，再一起动手改。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：.anim-stage 内的纯手写可交互动画（点击对比代价 + 读写分离对比） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>对老王家的「三种改主意」做代价对比：点击不同改动，看流水线哪些工位被迫亮灯重跑、代价条涨几格：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">改动 → 布局 → 绘制 → 合成：哪种改动会让哪些工位亮灯？点一点就知道：</p>
+      <div class="rf-chain" id="rf-chain">
+        <span class="rf-node is-start">一次改动</span>
+        <span class="rf-arrow">→</span>
+        <span class="rf-node">布局 Layout</span>
+        <span class="rf-arrow">→</span>
+        <span class="rf-node">绘制 Paint</span>
+        <span class="rf-arrow">→</span>
+        <span class="rf-node">合成 Composite</span>
+      </div>
+      <div class="rf-btns">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" data-kind="reflow">砸墙改户型（改 width）</button>
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" data-kind="repaint">全屋刷漆（改 color）</button>
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" data-kind="composite">换张海报（改 transform）</button>
+      </div>
+      <p class="rf-cost">本次代价：<span id="rf-cost-text">点击上方按钮开始对比</span><span class="rf-cells" id="rf-cells"></span></p>
+      <div class="anim-console" id="rf-console">
+        <div class="anim-line is-muted">三个按钮分别对应重排 / 重绘 / 仅合成，点击后观察亮灯的工位数量……</div>
+      </div>
+
+      <p class="rf-sub">进阶对比：强制同步布局（布局抖动）</p>
+      <p class="anim-caption">同样写 5 条样式 + 读 1 次宽度，「边读边写」和「先写后读」差在哪？点击两种写法对比布局次数：</p>
+      <div class="rf-btns">
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="rf-mixed">写法一：循环里边读边写 ×5</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="rf-batched">写法二：先批量写、最后读 1 次</button>
+      </div>
+      <div class="anim-console" id="rf-console2">
+        <div class="anim-line is-muted">两种写法功能一样，布局计算次数却大不相同……</div>
+      </div>
+      <p class="rf-cost">浏览器布局计算次数：<span class="rf-layout-count" id="rf-layout-count">0 次</span></p>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接 -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="./m2-pipeline.html">浏览器渲染流水线</a>——重排/重绘/合成的定义，就是「流水线从哪一站重跑」；没学五站顺序，本页的代价排序就背不牢。</p>
+    <p><strong>向后延伸</strong>：重排的直接可观测后果是页面「跳动」——<a href="../m4/m4-cwv.html">Core Web Vitals 性能指标</a>里的 CLS（累积布局偏移）专门量化它；性能优化主线则继续通向<a href="../m4/m4-load.html">首屏与资源加载优化</a>。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="../m1/m1-css-bfc-anim.html">CSS 进阶：BFC、层叠上下文与动画</a> —— transform 动画的性能优势、层叠上下文与合成层的对应关系。</li>
+      <li><a href="../m3/m3-vdom.html">虚拟 DOM 与 Diff 算法</a> —— 框架先在内存里算出最小改动清单，再一次应用到真实 DOM：本质就是「批量写」的框架级实践。</li>
+      <li><a href="../m4/m4-cwv.html">Core Web Vitals 性能指标</a> —— 重排连坐让内容位移，就是 CLS 指标抓的「餐桌被突然挪走」。</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（mode:'main'，判分写入进度仓库） -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后会把最佳成绩写入进度仓库，并推进复习计划：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：改网页的代价分三档——改尺寸位置像砸墙改户型，量尺寸、刷墙、摆家具全部重来（重排，最贵）；改颜色像重新刷漆，不用重量尺寸但要重新涂（重绘）；换图片透明度像贴一张新海报，直接贴上就完事（仅合成，最快）。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前默写「代价排序：改几何属性 &gt; 改颜色 &gt; 仅做合成」，并说出为什么循环里读 offsetWidth 会拖慢页面；1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：经典问法，答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：如何减少重排与重绘？说说常用手段。</summary>
+      <ul>
+        <li>先亮代价排序：改几何属性（width/top/margin…）触发重排（布局起全跑）&gt; 改颜色类（color/background…）触发重绘（绘制起重跑）&gt; transform/opacity 仅合成（GPU 换图层，跳过布局绘制）。</li>
+        <li>批量改样式：多次修改合并为一次（切换 class / cssText），减少触发次数。</li>
+        <li>读写分离：避免在循环里「写样式 → 读 offsetWidth」交错，把读集中在前、写集中在后，避免强制同步布局（布局抖动）。</li>
+        <li>动画用 transform/opacity 替代 top/left/width；频繁改动的元素用 position: absolute/fixed 脱离文档流，缩小重排连坐范围。</li>
+        <li>需要时对将做动画的元素加 will-change: transform，提示浏览器提前建独立合成层。</li>
+        <li>加分项：提到「改 display:none 再改回来」只触发两次重排而非中间每步一次；或提到 DocumentFragment 批量插节点。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：will-change 的原理是什么？为什么不能滥用？</summary>
+      <ul>
+        <li>原理：will-change: transform 等属性是给浏览器的「预告」——告诉合成器这个元素即将变化，浏览器会提前把它提升为<strong>独立合成层</strong>，动画开始时无需临时建层，避免第一帧掉帧。</li>
+        <li>收益：元素有了独立图层后，transform/opacity 的每帧变化只在合成器（GPU）完成，跳过布局与绘制，主线程不被占用。</li>
+        <li>滥用风险：每个合成层都要消耗额外内存（图层位图）；层数过多会让合成器管理负担加重、内存占用飙升，低端设备反而更卡。</li>
+        <li>正确用法：只给确有频繁动画的少数元素加；动画结束后移除（如用 transitionend 后清掉），不要「全站无脑加」。</li>
+        <li>加分项：指出某些属性本身也会隐式提升合成层（如 3D transform），效果等同隐式 will-change。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 + 代价对比动画 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm2-reflow'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'）：题目 id 以知识点 id 开头 */
+  var WARMUP = [{
+    id: 'm2-reflow-warmup-1',
+    type: 'single',
+    stem: '预热：把一个盒子的 width 从 100px 改成 200px，渲染流水线必须从哪一站重新开始？',
+    options: [
+      '合成站：GPU 直接换个图层就行',
+      '绘制站：重新画一遍像素即可',
+      '布局站：重新算几何，之后绘制、合成全部重跑',
+      '什么都不用做，浏览器会自动忽略'
+    ],
+    answer: [2],
+    explain: 'width 是几何属性：盒子占的地方变了，布局站必须重新计算（还会连坐后面的兄弟节点），随后绘制、合成也全部重跑——这就是「重排」，三种改动里最贵的一档。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm2-reflow-q1',
+      type: 'single',
+      stem: '以下四种改动中，浏览器开销最小的是哪个？',
+      options: [
+        '修改元素的 width',
+        '修改元素的 backgroundColor',
+        '修改元素的 transform',
+        '往页面里插入一个新节点'
+      ],
+      answer: [2],
+      explain: '排序口诀「改几何 &gt; 改颜色 &gt; 仅合成」：width 和插节点都是重排（布局站起全部重跑，插节点还连坐整个文档流，最重）；backgroundColor 是重绘（绘制站起重跑）；transform 不参与文档流布局，只在合成站由 GPU 换图层，跳过布局和绘制，主线程几乎不被占用——所以最快。这也是「动画优先用 transform 而不是 top/left」的原因。'
+    },
+    {
+      id: 'm2-reflow-q2',
+      type: 'multi',
+      stem: '下列哪些做法有助于减少重排？（多选，全部选对才得分）',
+      options: [
+        '把多次样式修改合并成一次（如切换一个 class）',
+        '读写分离：把读布局信息的操作集中放在批量写样式之前',
+        '频繁动画的元素用 transform 代替 top/left 实现位移',
+        '给页面上所有元素都加上 will-change，层数越多性能一定越好'
+      ],
+      answer: [0, 1, 2],
+      explain: 'D 是典型的滥用：will-change 会把元素提升为独立合成层，每层都要占一块内存位图；全站都加会让层数爆炸，合成器管理负担与内存压力反而拖慢页面。正确做法是只给确有频繁动画的少数元素、在动画前加、动画结束后移除。A 合并写减少触发次数；B 避免循环内「写后立刻读」打破浏览器攒批计划而触发强制同步布局；C 让每帧只走合成站。'
+    },
+    {
+      id: 'm2-reflow-q3',
+      type: 'code',
+      stem: '实现 changeKind(prop)：判断修改某个 CSS 属性会触发哪一档流水线工作（重排 / 重绘 / 仅合成）。',
+      stub: '/* 判断修改某个 CSS 属性会触发哪一档流水线工作：\n' +
+            ' * changeKind(\'width\')     → \'reflow\'    重排：几何变了，从布局站全部重跑\n' +
+            ' * changeKind(\'color\')     → \'repaint\'   重绘：只换外观，从绘制站重跑\n' +
+            ' * changeKind(\'transform\') → \'composite\' 仅合成：GPU 直接换图层\n' +
+            ' * 提示：分三组判断；transform / opacity 这一类不参与布局的属性归入 composite\n' +
+            ' */\n' +
+            'function changeKind(prop) {\n  // 在此实现\n}\n',
+      reference: 'function changeKind(prop) {\n  var reflowProps = [\'width\', \'height\', \'top\', \'left\', \'margin\', \'padding\', \'fontSize\', \'display\'];\n  var repaintProps = [\'color\', \'backgroundColor\', \'visibility\', \'borderColor\', \'boxShadow\'];\n  if (reflowProps.indexOf(prop) > -1) return \'reflow\';\n  if (repaintProps.indexOf(prop) > -1) return \'repaint\';\n  return \'composite\'; // transform / opacity 等不参与布局的属性仅走合成\n}',
+      asserts: [
+        "changeKind('width') === 'reflow'",
+        "changeKind('color') === 'repaint'",
+        "changeKind('transform') === 'composite'",
+        "changeKind('opacity') === 'composite'"
+      ],
+      explain: '判断标准只有一条：这个属性改的是「几何」还是「外观」，或者干脆「不参与布局」。width/height/top/margin/fontSize 决定盒子占多大地方——几何变，重排；color/backgroundColor/boxShadow 只改像素颜色、尺寸不变——外观变，重绘；transform/opacity 根本不进文档流计算，浏览器只在合成站用 GPU 换图层——仅合成。把这三组常用属性各记五六个，面试里绝大多数「改 X 会触发什么」的题都能秒答。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（会推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示一：三种改动的代价对比（纯 DOM 手写，点击触发） */
+(function () {
+  'use strict';
+  /* 三种改动的数据：lit=要点亮的工位索引（链上 0 起点 / 1 布局 / 2 绘制 / 3 合成），cost=代价格数 */
+  var KINDS = {
+    reflow: {
+      lit: [1, 2, 3], cost: 3,
+      text: '重排 Reflow · 3 格（最贵）',
+      log: '改 width：几何变了 → 布局站重新量尺寸，绘制、合成全部重跑；后面的兄弟节点还会被「连坐」重算。'
+    },
+    repaint: {
+      lit: [2, 3], cost: 2,
+      text: '重绘 Repaint · 2 格（中等）',
+      log: '改 color：几何没变 → 布局站免跑；但像素要重新画（绘制），合成也要走一遍。'
+    },
+    composite: {
+      lit: [3], cost: 1,
+      text: '仅合成 Composite · 1 格（最快）',
+      log: '改 transform：不参与文档流布局 → 布局、绘制全跳过；GPU 在合成站直接把新图层贴上去，主线程几乎不受影响。'
+    }
+  };
+  var nodes = document.querySelectorAll('#rf-chain .rf-node');
+  var cellsEl = document.getElementById('rf-cells');
+  var costText = document.getElementById('rf-cost-text');
+  var consoleEl = document.getElementById('rf-console');
+  var btns = document.querySelectorAll('.rf-btns [data-kind]');
+
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* 生成 3 个代价格（只生成一次，点亮时改 class） */
+  for (var i = 0; i < 3; i++) {
+    var cell = document.createElement('span');
+    cell.className = 'rf-cell';
+    cellsEl.appendChild(cell);
+  }
+
+  btns.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var kind = KINDS[btn.getAttribute('data-kind')];
+      /* 先灭灯再点亮，保证重复点击有「重跑」的视觉反馈 */
+      nodes.forEach(function (n) { n.classList.remove('is-lit'); });
+      kind.lit.forEach(function (idx) { nodes[idx].classList.add('is-lit'); });
+      /* 代价条逐格点亮 */
+      var cells = cellsEl.children;
+      for (var k = 0; k < cells.length; k++) {
+        cells[k].classList.toggle('is-on', k < kind.cost);
+      }
+      costText.textContent = kind.text;
+      log(kind.log, 'is-ok');
+    });
+  });
+})();
+
+/* ③ 动画演示二：强制同步布局（布局抖动）对比器（纯 DOM 手写，点击触发） */
+(function () {
+  'use strict';
+  var countEl = document.getElementById('rf-layout-count');
+  var consoleEl = document.getElementById('rf-console2');
+  var mixedBtn = document.getElementById('rf-mixed');
+  var batchedBtn = document.getElementById('rf-batched');
+  var layoutCount = 0; // 浏览器布局计算次数（演示用计数）
+
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+  function resetRun(label) {
+    layoutCount = 0;
+    countEl.textContent = '0 次';
+    log('—— ' + label + ' ——', 'is-muted');
+  }
+  function syncCount() {
+    countEl.textContent = layoutCount + ' 次';
+  }
+
+  /* 写法一：循环里「写一次样式、立刻读一次宽度」——每次读都打破攒批，强制浏览器同步布局 */
+  mixedBtn.addEventListener('click', function () {
+    resetRun('写法一：边读边写 ×5');
+    for (var i = 0; i < 5; i++) {
+      log('第 ' + (i + 1) + ' 轮：写入新样式… 紧接着读 offsetWidth → 浏览器被迫立刻同步布局（攒批计划作废）', 'is-end');
+      layoutCount += 1;
+      syncCount();
+    }
+    log('结果：5 次布局计算。布局是流水线里最贵的站之一，循环越长卡得越狠——这就是「布局抖动」。', 'is-end');
+  });
+
+  /* 写法二：先把 5 条样式全写完（攒成一批），最后只读 1 次——布局只算一次 */
+  batchedBtn.addEventListener('click', function () {
+    resetRun('写法二：先批量写、最后读 1 次');
+    for (var i = 0; i < 5; i++) {
+      log('第 ' + (i + 1) + ' 轮：只写样式，不读布局 → 浏览器把改动先攒着，暂不计算', 'is-ok');
+    }
+    layoutCount += 1;
+    syncCount();
+    log('最后读一次 offsetWidth → 攒下的改动一次性布局，共 1 次布局计算。', 'is-ok');
+    log('结果：1 次布局计算。同样的功能，「读写分离」把最贵的工序从 5 次压到 1 次。', 'is-end');
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>错误处理与容错设计 · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ========== 本页动画专用样式：航班备降预案（重试 / 降级 / 功能开关单步演练） ========== */
+.err-board {
+  border: 1px solid #c6cede;
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+  margin: 10px 0;
+}
+.err-rows { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 13px; margin: 6px 0; }
+.err-rows span b { font-family: var(--fg-mono); }
+.err-status--flying { color: #8a6d1a; font-weight: 700; }
+.err-status--bad { color: #b3364f; font-weight: 700; }
+.err-status--ok { color: #1e7a52; font-weight: 700; }
+.err-sky {
+  text-align: center;
+  font-size: 24px;
+  padding: 8px 0;
+  min-height: 44px;
+}
+.err-plane { display: inline-block; transition: transform 0.5s ease, opacity 0.4s ease; }
+.err-plane.is-flying { transform: translateX(70px); }
+.err-plane.is-crash { filter: grayscale(1); opacity: 0.5; }
+.err-plane.is-diverted { transform: translateX(40px); }
+.err-core-light {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #c6cede;       /* 未开始：灰 */
+  vertical-align: -1px;
+  margin-right: 4px;
+}
+.err-core-light.is-ok { background: #3fae7c; box-shadow: 0 0 6px #3fae7c; }
+.err-core-light.is-bad { background: #b3364f; box-shadow: 0 0 6px #b3364f; }
+.err-flag-off { color: #b3364f; font-weight: 700; }
+</style>
+</head>
+<body data-page="m4-error">
+
+<!-- 壳层自动渲染区：site.js 检测到 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">监控让你「看见」错误（上一页），本页教你「接住」错误：同样的接口故障，有的页面整页白屏，有的页面核心功能照常——差别就在容错与降级设计。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>建议先过一遍前置知识：<a href="./m4-monitor.html">前端监控与错误上报</a>——容错的前提是先能看见错误：监控负责「发现与记录」，本页负责「接住并给出路」。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：讲解 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>先分清两种错误：该接住的与该修的</h3>
+    <p><strong>可预期错误</strong>：网络会断、接口会超时、用户会输错——这些事情发生是「正常营业的一部分」，代码必须接住它并给用户一条出路。<strong>程序缺陷</strong>：变量名拼错、边界条件算反——这些不该发生，发现了要修；用 try/catch 把它吞掉装作没看见，只会让 bug 藏得更深、更晚爆炸。一句话原则：<strong>可预期错误做容错，程序缺陷做修复并交给监控上报</strong>。判断不准时的自问：这个错误下次还会「合情合理地」发生吗？会，就是前者。</p>
+
+    <h3>同步错误的接法：try/catch 的能力边界</h3>
+    <p>try/catch 只能接住<strong>它亲眼看着执行</strong>的同步代码。最经典的坑：把 <code>setTimeout</code> 的回调写进 try 块——回调真正执行时，try 块早就跑完了，回调里抛的错它根本接不住，最后飞到全局。事件回调同理。</p>
+
+    <h3>异步错误的接法：从 .catch 到全局兜底</h3>
+    <p>Promise 时代的错误会沿着链路传递，链尾挂一个 <code>.catch</code> 就能接住前面任何一环的失败；async/await 本质是 Promise 的语法糖，<code>await</code> 一个被拒绝的 Promise 会把拒绝「抛」进当前 async 函数，所以<strong>写在 async 函数里的 try/catch 反而能接住异步错误</strong>——这是它和普通函数最大的区别之一。最后一道防线是全局钩子（<code>window.onerror</code> 与 <code>unhandledrejection</code>，见<a href="./m4-monitor.html">监控页</a>），但全局兜底主要用来<strong>上报</strong>，很难帮某个具体功能恢复，所以别把它当主力。</p>
+
+    <h3>边界与兜底：让崩溃只砸坏一小块</h3>
+    <p>React 的 ErrorBoundary（错误边界）给了很好的示范：在组件树的关键位置挂上「安全网」，<strong>某个子组件崩溃时只有那一块显示兜底 UI，页面其余部分照常工作</strong>——而不是一个角落的 bug 让整页白屏。请求层同样有标配三件套：<strong>超时控制</strong>（不能干等一个永远不回来的响应）；<strong>失败重试</strong>（但只重试幂等操作——查询重试无害，「下单」「扣款」这种非幂等请求盲目重试可能造成重复提交）；<strong>递增间隔</strong>（第一次等 1 秒、第二次等 2 秒，避免把刚缓过来的服务又打挂）。</p>
+
+    <h3>降级与功能开关：坏了也要有「退而求其次」</h3>
+    <ul>
+      <li><strong>默认值 / 兜底数据</strong>：个性化推荐挂了，就展示写死的运营位——内容差点，位置不能空。</li>
+      <li><strong>缓存旧数据</strong>：新数据拿不到就先给上次的旧数据，并明确标注「更新失败，展示的是 X 日数据」——诚实比假装正常好。</li>
+      <li><strong>骨架屏</strong>：加载慢时先给结构占位，让用户知道「在努力」而不是「死了」。</li>
+      <li><strong>功能开关（Feature Flag）</strong>：给非核心功能装一个远程开关，出问题一键关闭，不必等一个发版周期。前提是设计阶段就想清楚：<strong>哪些是核心（用户来的目的），哪些是非核心（锦上添花）</strong>。</li>
+    </ul>
+    <p>给任何页面做容错设计，先回答三个问题：<strong>这里最可能怎么坏？坏了用户会看到什么？坏的时候核心功能还剩多少？</strong>三个答案都有了，容错才算设计过，而不是出事后现补。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 银行停电的那十分钟</div>
+      <p>你下午去银行办业务（用户使用产品），办到一半市电突然断了（依赖的下游服务挂了）。但你发现大厅并没有陷入黑暗：柜台上方的<strong>应急灯亮着</strong>（降级：核心功能保住）；柜员不慌不忙翻开纸质登记本继续受理（备用方案：兜底数据 / 降级流程）；叫号机停了，大堂经理改用口头喊号（交互降级，体验打折但业务不断）。你出门时，保安递给你一张卡片：「今日系统检修，部分业务请改日光临」（<strong>兜底提示</strong>：明确告知好过让用户对着黑屏瞎猜）。</p>
+      <p>而你以前去过另一家小网点，同样停电，整栋楼瞬间漆黑，所有人被请出门在外干等（没有容错：一个依赖挂掉，整页白屏）。同一场事故，两种结局。更耐人寻味的是成本：那台备用发电机一年也用不上几次，平时纯属「浪费钱」（容错代码平时毫无存在感），但它的价值只在断电那一刻兑现（线上出事时才见效）——而且银行每季度都要<strong>演练</strong>一次切换（降级逻辑不演练，真出事时它自己可能就是坏的）。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：航班备降预案——重试 / 降级 / 功能开关单步演练 -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>把「请求拿数据」想象成一架航班：目的地机场 = 接口，雷暴 = 接口故障，备降 = 降级，客舱娱乐 = 非核心功能。先试「不设防模式」感受全局崩溃，再走一遍有预案的完整流程：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">建议顺序：先点「不设防模式」看崩溃，再「重置」后点「带预案起飞」，依次体验重试、降级与功能开关。</p>
+      <div class="err-board">
+        <div class="err-rows">
+          <span>航班状态：<b id="err-status">待起飞</b></span>
+          <span>重试余量：<b id="err-retry-left">—</b></span>
+          <span>降级方案：<b id="err-fallback-text">未启用</b></span>
+          <span>娱乐模块：<b id="err-flag-text">开启</b>（非核心）</span>
+          <span><span class="err-core-light" id="err-light"></span>核心体验：<b id="err-core-text">未开始</b></span>
+        </div>
+        <div class="err-sky"><span class="err-plane" id="err-plane">✈</span></div>
+      </div>
+      <div class="anim-console" id="err-console">
+        <div class="anim-line is-muted">一次请求 = 一趟航班；接口故障 = 目的地雷暴。点下方按钮开始演练…</div>
+      </div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--bad fg-btn--sm" id="err-crash">不设防模式：直接起飞</button>
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="err-guarded">带预案起飞（try/catch + 重试余量 2）</button>
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="err-retry" disabled>重试</button>
+        <button type="button" class="fg-btn fg-btn--ok fg-btn--sm" id="err-divert" disabled>启用降级：改飞备降机场</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="err-flag">切换娱乐功能开关</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="err-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接 -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="./m4-monitor.html">前端监控与错误上报</a>——全局兜底钩子抓到的错误要靠监控送出去；「发现」与「接住」是同一套体系的上下游。</p>
+    <p><strong>向后延伸</strong>：容错逻辑（重试、降级、兜底）平时不被触发、最容易被改坏，恰恰最值得用<a href="./m4-test.html">单元测试与 E2E 测试</a>保护——降级预案也要「定期演练」。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="../m1/m1-js-promise.html">Promise 与 async/await</a> —— 为什么 async 函数里的 try/catch 能接住异步错误，根基在这页</li>
+      <li><a href="../m2/m2-http.html">HTTP/1.1、HTTP/2 与 HTTP/3</a> —— 什么样的状态码值得重试、什么是幂等方法，重试策略的地基</li>
+      <li><a href="../m3/m3-react.html">React 核心与 Hooks</a> —— ErrorBoundary 是 React 组件模型里的「局部安全网」</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（mode:'main'） -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后把最佳成绩写入进度仓库（见页面底部内联脚本）：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：容错设计就像银行的备用发电机和航班备降预案——外面的电（依赖服务）停了，大厅的灯（核心功能）依然亮着；实在飞不到目的地，就备降改道（降级）让乘客安全落地，最差也挂出告示「稍后再试」，而不是整栋楼（整个页面）陷入黑暗。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前复述 1 次，1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：让你为一个关键页面（比如收银台）设计容错与降级方案，你会怎么做？</summary>
+      <ul>
+        <li>依赖分级：先明确核心链路（浏览商品、下单、支付）与非核心（推荐、分享、客服浮窗），容错资源优先保核心。</li>
+        <li>请求层三件套：超时控制；只对幂等查询自动重试并采用递增间隔，下单类非幂等操作改为明确的「提交状态确认」，防止重复扣款。</li>
+        <li>降级预案：支付通道异常时切换备用通道或给出明确的稍后再试引导；推荐挂了回退静态运营位；旧数据 + 明确标注好过空白。</li>
+        <li>功能开关：非核心模块接入 Feature Flag，线上异常可一键关闭，不等发版。</li>
+        <li>配套监控与演练：所有降级触发都要上报告警（呼应前端监控页），预案要定期演练验证真的可用。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：try/catch 能捕获哪些错误、不能捕获哪些？</summary>
+      <ul>
+        <li>能捕获：try 块内同步执行的运行时错误；async 函数内 await 抛出的 Promise 拒绝（因为 await 会把拒绝转成同步样式的抛出）。</li>
+        <li>不能捕获：setTimeout / 事件回调等异步回调里抛的错——回调执行时 try 块早已结束，错误会飞到全局。</li>
+        <li>不能捕获：未被 .catch 接住的 Promise 拒绝（除非用 await 等待它）；这类错误归 unhandledrejection 全局钩子管。</li>
+        <li>不能捕获：语法错误——代码在解析阶段就失败，根本执行不到 try 块，只能在构建期暴露。</li>
+        <li>加分项：指出「全局钩子主要用来上报，难以恢复具体功能」；以及吞掉程序缺陷式错误（catch 后什么都不做）是反模式。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm4-error'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'） */
+  var WARMUP = [{
+    id: 'm4-error-warmup-1',
+    type: 'single',
+    stem: '预热：接口突然全部 500，下面哪种用户体验最好？',
+    options: [
+      '整页白屏卡死，刷新也没有反应',
+      '页面主体照常展示缓存旧数据，角标提示「更新失败，稍后自动重试」',
+      '弹出技术报错堆栈，让用户截图反馈',
+      '直接跳到错误页，让用户自己重新进入'
+    ],
+    answer: [1],
+    explain: '容错的思路是「核心功能不断、坏掉的部分诚实告知」：旧数据加明确提示，用户依然能完成主要任务。白屏（没有兜底）、报堆栈（把技术问题甩给用户）、强制跳错误页（把局部故障放大成全局失败）都是反例。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm4-error-q1',
+      type: 'single',
+      stem: '下面哪种错误，写在抛错处附近的 try/catch 接不住？',
+      options: [
+        '函数里使用了一个未定义的变量（同步执行时抛出）',
+        'JSON.parse 解析了一段非法字符串（同步执行时抛出）',
+        'setTimeout 的回调函数里抛出的错误',
+        'async 函数里 await 一个被拒绝的 Promise，且 await 写在 try 块中'
+      ],
+      answer: [2],
+      explain: 'try/catch 只能接住它「亲眼看着执行」的同步代码。setTimeout 的回调要等计时结束才进任务队列执行，那时 try 块早已运行完毕，回调里抛的错只能飞到全局（可被 window.onerror 兜底）。A、B 是同步错误，接得住；D 正是 async/await 的能力——await 会把 Promise 拒绝转成当前函数内的抛出，try 块接得住。'
+    },
+    {
+      id: 'm4-error-q2',
+      type: 'multi',
+      stem: '关于容错与降级设计，下面哪些做法是正确的？',
+      options: [
+        '用 try/catch 把所有错误统统吞掉，让界面看起来永远「正常」',
+        '自动重试只用于幂等操作；下单、扣款这类非幂等请求要格外谨慎，防止重复提交',
+        'React ErrorBoundary 的思路是让子组件的崩溃只影响局部子树，页面其余部分照常工作',
+        '非核心功能接入功能开关（Feature Flag），线上出问题可一键关闭，不必等发版'
+      ],
+      answer: [1, 2, 3],
+      explain: 'A 是最危险的 antipattern：吞掉「程序缺陷」类错误会让 bug 藏得更深，正确做法是可预期错误做容错、程序缺陷做修复并上报监控。B 对：幂等性是重试的前提，盲目重试非幂等请求可能重复扣款。C 对：局部安全网把爆炸半径限制在一小块。D 对：Feature Flag 是「快速止损不等发版」的标准手段。'
+    },
+    {
+      id: 'm4-error-q3',
+      type: 'code',
+      stem: '手写带最大尝试次数的 retry(task, maxTimes)：task 是一个可能抛错的函数。逻辑：依次尝试调用 task，某次成功（不抛错）就立刻返回它的返回值；若 maxTimes 次全部失败，把「最后一次的错误」抛出去，交给上层决定下一步（重试不该吞掉失败）。',
+      stub: 'function retry(task, maxTimes) {\n  // task：一个可能抛错的函数（用同步函数模拟一次请求）\n  // maxTimes：最多尝试几次\n  // 某次成功 → 返回该次结果；全部失败 → 抛出最后一次的错误\n}\n',
+      reference: 'function retry(task, maxTimes) {\n  var lastErr;\n  for (var i = 0; i < maxTimes; i++) {\n    try {\n      return task();          // 成功：立刻把结果交出去，不再多试\n    } catch (e) {\n      lastErr = e;            // 失败：记住错误，进入下一次尝试\n    }\n  }\n  throw lastErr;              // 次数用尽：把最后的错误抛给上层处理\n}',
+      asserts: [
+        'retry(function(){ return 42; }, 3) === 42',
+        "(function(){ var n = 0; var r = retry(function(){ n++; if (n < 3) throw new Error('fail'); return n; }, 5); return r === 3 && n === 3; })()",
+        "(function(){ var calls = 0, caught = false; try { retry(function(){ calls++; throw new Error('boom'); }, 2); } catch (e) { caught = String(e.message).indexOf('boom') !== -1; } return caught && calls === 2; })()"
+      ],
+      explain: '这是请求层重试的最小模型（用同步函数模拟「一次请求」；真实场景里 task 返回 Promise，配合 await 写在 async 函数里）。三个断言各考一件事：其一，第一次就成功时不能多调用（成功即返回）；其二，第三次才成功时前两次的失败不能让函数提前放弃，且成功后立刻停止（共调用 3 次）；其三，次数用尽后必须把最后的错误抛给上层——重试耗尽不等于失败可以消失，调用方还要有降级预案接手。生产级实现还会加「递增间隔」避免打挂刚恢复的服务，并且只对幂等请求自动重试。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库 */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：航班备降预案——重试 / 降级 / 功能开关单步演练（纯 DOM 手写，无动画库） */
+(function () {
+  'use strict';
+  var retriesLeft = 0;      // 重试余量
+  var phase = 'idle';       // idle | flying | storm | diverted | crashed
+  var flagOn = true;        // 娱乐模块（非核心功能）开关
+
+  var consoleEl = document.getElementById('err-console');
+  var statusEl = document.getElementById('err-status');
+  var retryLeftEl = document.getElementById('err-retry-left');
+  var fallbackEl = document.getElementById('err-fallback-text');
+  var flagTextEl = document.getElementById('err-flag-text');
+  var lightEl = document.getElementById('err-light');
+  var coreTextEl = document.getElementById('err-core-text');
+  var planeEl = document.getElementById('err-plane');
+  var retryBtn = document.getElementById('err-retry');
+  var divertBtn = document.getElementById('err-divert');
+  var flagBtn = document.getElementById('err-flag');
+  var crashBtn = document.getElementById('err-crash');
+  var guardedBtn = document.getElementById('err-guarded');
+  var resetBtn = document.getElementById('err-reset');
+
+  /* 向控制台追加一行日志并自动滚到底 */
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* 同步整块状态板 */
+  function paint() {
+    retryLeftEl.textContent = (phase === 'storm' || phase === 'flying') ? String(retriesLeft) : '—';
+    retryBtn.disabled = !(phase === 'storm' && retriesLeft > 0);
+    retryBtn.textContent = '重试' + (phase === 'storm' ? '（余量 ' + retriesLeft + '）' : '');
+    divertBtn.disabled = phase !== 'storm';
+    statusEl.className =
+      (phase === 'crashed') ? 'err-status--bad' :
+      (phase === 'diverted') ? 'err-status--ok' :
+      (phase === 'flying' || phase === 'storm') ? 'err-status--flying' : '';
+    statusEl.textContent =
+      (phase === 'idle') ? '待起飞' :
+      (phase === 'flying') ? '飞行中（请求已发出）' :
+      (phase === 'storm') ? '遭遇雷暴：请求失败，已接住，等待预案指令' :
+      (phase === 'diverted') ? '已备降：降级生效，行程继续' :
+      '已坠毁：全局崩溃';
+    fallbackEl.textContent = (phase === 'diverted') ? '已启用（改飞备降机场，使用缓存行程）' : '未启用';
+    flagTextEl.textContent = flagOn ? '开启' : '关闭';
+    flagTextEl.className = flagOn ? '' : 'err-flag-off';
+    planeEl.className = 'err-plane' +
+      (phase === 'flying' || phase === 'storm' ? ' is-flying' : '') +
+      (phase === 'crashed' ? ' is-crash' : '') +
+      (phase === 'diverted' ? ' is-diverted' : '');
+    planeEl.textContent = (phase === 'diverted') ? '🛬' : '✈';
+    lightEl.className = 'err-core-light' +
+      (phase === 'diverted' ? ' is-ok' : '') +
+      (phase === 'crashed' ? ' is-bad' : '');
+    coreTextEl.textContent =
+      (phase === 'diverted') ? '正常（用户拿到了可用结果）' :
+      (phase === 'crashed') ? '崩溃（整页白屏，用户流失）' :
+      (phase === 'idle') ? '未开始' : '进行中';
+  }
+
+  /* 不设防模式：没有 try/catch，一个接口故障拖垮整页 */
+  crashBtn.addEventListener('click', function () {
+    if (phase !== 'idle') return;
+    phase = 'flying';
+    paint();
+    log('起飞：请求发出（代码里没有任何预案）…', 'is-muted');
+    log('遭遇雷暴：接口 500！没有 try/catch，错误一路飞到全局', 'is-end');
+    phase = 'crashed';
+    planeEl.textContent = '💥';
+    paint();
+    log('全局崩溃：整页白屏，用户无处可去——一次局部故障放大成了全局事故', 'is-end');
+  });
+
+  /* 带预案起飞：错误被接住，进入「等待预案指令」状态 */
+  guardedBtn.addEventListener('click', function () {
+    if (phase !== 'idle') return;
+    phase = 'flying';
+    retriesLeft = 2;
+    paint();
+    log('起飞：请求发出，代码里备好了预案（try/catch + 重试余量 2）', 'is-muted');
+    log('遭遇雷暴：接口 500！但错误被 try/catch 接住，页面没有崩溃', 'is-ok');
+    phase = 'storm';
+    paint();
+    log('现在可以选择预案：「重试」再闯一次，或直接「启用降级」改飞备降机场', 'is-ok');
+  });
+
+  /* 重试：脚本化演示「重试不是万能，但要控制次数」 */
+  retryBtn.addEventListener('click', function () {
+    if (phase !== 'storm' || retriesLeft <= 0) return;
+    retriesLeft -= 1;
+    paint();
+    if (retriesLeft > 0) {
+      log('第 1 次重试：雷暴未散，仍然失败（重试要控制次数并使用递增间隔，避免打挂刚恢复的服务）', 'is-end');
+    } else {
+      log('第 2 次重试：依旧失败，余量归零——预案进入最后手段：降级', 'is-end');
+    }
+  });
+
+  /* 启用降级：备降预案生效，核心目标达成 */
+  divertBtn.addEventListener('click', function () {
+    if (phase !== 'storm') return;
+    phase = 'diverted';
+    paint();
+    log('启用降级：改飞备降机场，使用缓存行程数据——乘客安全落地，行程继续，只是晚点 40 分钟', 'is-ok');
+    log('对比不设防模式：同样的雷暴，有预案的航班结局是「晚点」而不是「坠机」', 'is-end');
+    log('生产里这一步对应：返回兜底默认值 / 缓存旧数据并明确标注，核心功能照常可用', 'is-muted');
+  });
+
+  /* 功能开关：非核心模块随时可下线省资源 */
+  flagBtn.addEventListener('click', function () {
+    flagOn = !flagOn;
+    paint();
+    log(flagOn
+      ? '娱乐模块（非核心）已恢复：资源充裕时再锦上添花'
+      : '功能开关生效：娱乐模块（非核心）一键下线，省出的资源保障核心系统；乘客的出行目标不受影响',
+      flagOn ? 'is-muted' : 'is-ok');
+  });
+
+  function reset() {
+    phase = 'idle';
+    retriesLeft = 0;
+    flagOn = true;
+    paint();
+    consoleEl.innerHTML = '';
+    log('已重置：航班回到登机口。先试「不设防模式」，再体验完整预案…', 'is-muted');
+  }
+
+  resetBtn.addEventListener('click', reset);
+  paint();
+})();
+</script>
+</body>
+</html>

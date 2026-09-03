@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>前端侧系统设计 · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ===== 本页动画专用样式：外卖需求拆解器，纯手写 CSS，无任何外部库 ===== */
+.dsn-rail {
+  display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 12px 0;
+}
+.dsn-chip {
+  padding: 5px 12px; border-radius: 999px; font-size: 12px; font-weight: 700;
+  border: 2px solid #d5dbe7; background: #fff; color: #8a93a6;
+  transition: border-color .3s, background .3s, color .3s;
+}
+.dsn-chip.is-on { border-color: #4C6FFF; background: #eef2ff; color: #3450d6; }
+.dsn-chip.is-done { border-color: #10B981; background: #ecfdf5; color: #0f8f66; }
+.dsn-rail-sep { color: #c2c9d6; font-weight: 700; }
+.dsn-demand {
+  border: 2px dashed #e0813d; border-radius: 10px; background: #fff8f1;
+  padding: 12px; margin: 10px 0; transition: opacity .4s, border-color .4s;
+}
+.dsn-demand.is-done { border-color: #10B981; background: #ecfdf5; }
+.dsn-demand-title { font-weight: 700; font-size: 13px; color: #b35f1e; }
+.dsn-demand.is-done .dsn-demand-title { color: #0f8f66; }
+.dsn-demand-text { font-size: 12px; color: #6b7280; margin-top: 4px; line-height: 1.6; }
+.dsn-slots { display: flex; gap: 10px; flex-wrap: wrap; margin: 10px 0; }
+.dsn-module {
+  flex: 1 1 180px; min-width: 180px;
+  border: 2px solid #d5dbe7; border-radius: 10px; background: #fff;
+  padding: 10px; min-height: 110px; cursor: pointer;
+  opacity: .35; transform: translateY(8px);
+  transition: opacity .4s, transform .4s, border-color .25s, box-shadow .25s;
+}
+.dsn-module.is-shown { opacity: 1; transform: translateY(0); border-color: #4C6FFF; }
+.dsn-module.is-shown:hover { box-shadow: 0 4px 12px rgba(76, 111, 255, .18); }
+.dsn-module-name { font-weight: 700; font-size: 13px; color: #2b3a55; margin-bottom: 4px; }
+.dsn-module-duty { font-size: 12px; color: #6b7280; line-height: 1.6; }
+.dsn-module-trade {
+  display: none; margin-top: 6px; padding: 6px 8px; border-radius: 6px;
+  background: #f5f7ff; font-size: 12px; color: #3450d6; line-height: 1.6;
+}
+.dsn-module.is-traded .dsn-module-trade { display: block; }
+.dsn-controls { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+</style>
+</head>
+<body data-page="m7-design">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">知识点：前端侧系统设计（建议学习时长约 30 分钟）——答题框架四步走、经典题型演练、性能/容错/扩展性/体验四个维度、主动暴露权衡。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>本页前置依赖：<a href="./m7-project.html">项目拆解与亮点提炼</a>——先会讲「做过的事」，再来设计「没做过的事」，两者用的是同一套拆解思维；
+      以及<a href="../../pages/m6/m6-rest.html">RESTful API 设计</a>——模块拆完要靠接口契约互相说话，先懂接口再谈系统。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：分小标题推进 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、什么是「前端侧系统设计」题：考的不是标准答案</h3>
+    <p>「设计一个无限滚动列表」「设计一个大文件上传」「设计一个前端监控平台」——这类题没有唯一正确答案，
+      因为它考的是<strong>思考过程</strong>：你能不能像工程师一样，面对模糊需求先澄清、再拆解、再选型、最后说清代价。
+      面试官在观察三件事：你有没有<strong>结构</strong>（不是想到哪说到哪）、你有没有<strong>权衡意识</strong>（知道每个选择的代价）、你有没有<strong>边界感</strong>（前端侧管什么、后端侧管什么）。
+      所以最怕的回答是直接报菜名：「用虚拟列表、用分片上传、用 WebSocket」——方案全对也可能挂，因为面试官不知道你为什么这么选。</p>
+
+    <h3>二、答题框架：澄清需求 → 拆解模块 → 技术选型 → 细节与权衡</h3>
+    <p>四步框架是这类题的万能骨架，以「设计一个无限滚动列表」为例走一遍：</p>
+    <ul>
+      <li><strong>澄清需求</strong>：先反问再动手——数据量多大（1 千条还是 100 万条）？一页多少条？要不要搜索过滤？移动端还是桌面端？数据量不同，答案完全不同。</li>
+      <li><strong>拆解模块</strong>：把大问题切成小问题——数据层（分页请求、缓存已加载数据）、渲染层（可视区计算、DOM 回收）、交互层（滚动监听、加载提示、错误重试）。</li>
+      <li><strong>技术选型</strong>：每个模块给方案——滚动监听用 IntersectionObserver 而不是 scroll 事件（避免频繁触发重排）；渲染用虚拟列表只保留可视区的 DOM。</li>
+      <li><strong>细节与权衡</strong>：主动说代价——虚拟列表滚动快但搜索定位难（要额外做锚点跳转）；触底加载省流量但首屏后等待变长（可预取下一页折中）。</li>
+    </ul>
+
+    <h3>三、经典题型热身：三道高频题的「前端侧要点」</h3>
+    <ul>
+      <li><strong>无限滚动列表</strong>：只渲染可视区附近 DOM（虚拟列表）；触底按页请求而非全量拉取；用 IntersectionObserver 监听底部哨兵元素；滚动位置恢复、加载失败重试、去重。</li>
+      <li><strong>大文件分片上传</strong>：用 File.slice 把文件切成固定大小的块；逐块或并发上传（注意并发数限制）；记录已传分片支持断点续传；最后通知服务端合并；上传前算 hash 做秒传判断。</li>
+      <li><strong>短链接服务</strong>：前端侧重在跳转页的体验（Loading 态、失败兜底）；生成侧是后端发号器/哈希问题——但要能说清「302 临时跳转利于统计点击，301 会被浏览器缓存」这种取舍。</li>
+    </ul>
+
+    <h3>四、四个关键维度：性能、容错、扩展性、用户体验</h3>
+    <p>拆完模块容易漏细节，拿四个维度当<strong>检查清单</strong>逐个过：</p>
+    <ul>
+      <li><strong>性能</strong>：首屏多快？交互卡不卡？（懒加载、虚拟列表、防抖节流、请求合并）</li>
+      <li><strong>容错</strong>：网络挂了怎么办？接口 5xx 怎么办？（重试 + 退避、本地兜底数据、失败提示与手动重试入口）</li>
+      <li><strong>扩展性</strong>：数据量翻 10 倍还撑得住吗？要加新功能好不好加？（模块边界清晰、配置驱动、预留分页/过滤参数）</li>
+      <li><strong>用户体验</strong>：加载中有反馈吗？失败了用户能自救吗？（骨架屏、进度条、空态/错误态设计）</li>
+    </ul>
+
+    <h3>五、主动暴露权衡：说「为什么不用另一个」更加分</h3>
+    <p>每给一个方案，加一句「为什么不选另一个」，是这类题的最强得分动作。
+      例如：「订单状态刷新我用 3 秒轮询而不是长连接，因为外卖场景 3 秒延迟可接受，而长连接的服务端成本和断线重连复杂度高；
+      如果是大促峰值再切换长连接。」——这一段话同时展示了：你知道两种方案、知道各自代价、能按场景做决策。
+      面试官对「知道自己方案缺点」的候选人信任度，远高于「觉得自己方案完美」的候选人。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 装修量房：为什么设计师先聊生活再报价</div>
+      <p>小两口装修，遇到两种设计师。第一种上来就报价：「全屋套餐 18 万，柜子多做准没错。」——听着专业，但一套话术卖给所有客户。
+        第二种设计师先在屋里转了一圈，问了一串问题：「平时几口人住？在家办公吗？做饭多不多？孩子的玩具一般堆哪？」（<strong>澄清需求</strong>）。</p>
+      <p>问完，他在图纸上把家分成几个区：收纳区、办公角、烹饪动线（<strong>拆解模块</strong>），每个区给出选材：「书房用浅色烤漆板，反光好显得亮，但怕磕碰——你们没小孩的宠物抓挠问题不大；厨房台面用石英石，贵一点但抗油污，因为你们一周做五次饭」（<strong>技术选型 + 理由</strong>）。最后补一句：「客厅我没建议做开放格，好看但积灰，你们看着是懒得打扫的类型」（<strong>主动暴露权衡</strong>）。</p>
+      <p>小两口当场签了第二位。房子是同一个，差距在<strong>流程</strong>：先问再拆、拆完选材、每个选择说得出理由、还主动告诉你「为什么不选另一种」。系统设计题考的就是这套流程——面试官是小两口，你是那个设计师。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：把「用户点外卖」这块完整需求，按答题框架逐步拆成三个模块（可单步执行 + 点击模块复习权衡，纯 DOM/CSS/JS） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>「用户点外卖」是一个没法直接开工的完整需求。点「下一步」，跟着答题框架四步走，看它如何被拆成下单 / 支付 / 配送三个模块，每步控制台都会解释：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">答题框架轨道会高亮当前步骤；拆到「技术选型」时，每个模块会补上权衡说明（可点击模块卡复习）。</p>
+      <div class="dsn-rail" id="dsn-rail">
+        <span class="dsn-chip" data-chip="0">1 澄清需求</span><span class="dsn-rail-sep">→</span>
+        <span class="dsn-chip" data-chip="1">2 拆解模块</span><span class="dsn-rail-sep">→</span>
+        <span class="dsn-chip" data-chip="2">3 技术选型</span><span class="dsn-rail-sep">→</span>
+        <span class="dsn-chip" data-chip="3">4 细节与权衡</span>
+      </div>
+      <div class="dsn-demand" id="dsn-demand">
+        <div class="dsn-demand-title" id="dsn-demand-title">完整需求（拆解前）：用户用手机点一份外卖</div>
+        <div class="dsn-demand-text" id="dsn-demand-text">一整块需求没法直接开工——太大、太多未知、改一处动全身。</div>
+      </div>
+      <div class="dsn-slots">
+        <div class="dsn-module" id="dsn-mod-0"><div class="dsn-module-name">下单模块</div><div class="dsn-module-duty"></div><div class="dsn-module-trade"></div></div>
+        <div class="dsn-module" id="dsn-mod-1"><div class="dsn-module-name">支付模块</div><div class="dsn-module-duty"></div><div class="dsn-module-trade"></div></div>
+        <div class="dsn-module" id="dsn-mod-2"><div class="dsn-module-name">配送模块</div><div class="dsn-module-duty"></div><div class="dsn-module-trade"></div></div>
+      </div>
+      <div class="anim-console" id="dsn-console">
+        <div class="anim-line is-muted">点击「下一步」开始，跟着框架走一遍……</div>
+      </div>
+      <div class="dsn-controls">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="dsn-step">下一步</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="dsn-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（全部为课程数据中的真实 path） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="./m7-project.html">项目拆解与亮点提炼</a>——设计题的「权衡」讲法，就来自项目亮点的讲法；
+      <a href="../../pages/m6/m6-rest.html">RESTful API 设计</a>——模块之间靠接口契约解耦，先懂 URL 表资源，再谈系统边界。</p>
+    <p><strong>向后延伸</strong>：设计要落地就绕不开手写核心代码，下一站是<a href="./m7-handwrite-basic.html">手写题·JS 基础篇</a>；
+      最后在<a href="./m7-soft.html">面试沟通与反问技巧</a>里，把设计表达升级为临场沟通。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="../../pages/m3/m3-component.html">组件设计原则</a> —— 「拆解模块」思维在更小尺度上的练习场：组件拆分就是微型系统设计。</li>
+      <li><a href="../../pages/m2/m2-cache.html">浏览器缓存策略</a> —— 无限滚动、大文件上传（秒传）都依赖缓存思路，设计题的常用武器库。</li>
+      <li><a href="../../pages/m4/m4-error.html">错误处理与容错设计</a> —— 四维度里的「容错」在这里展开：重试、降级、兜底。</li>
+      <li><a href="../../pages/m4/m4-monitor.html">前端监控与错误上报</a> —— 「设计一个前端监控平台」这道高频题的完整知识底座。</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（含解析），mode:'main' -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后把最佳成绩写入进度仓库（见页面底部内联脚本）：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：系统设计题就像装修沟通——先问家里几口人、什么生活习惯（澄清需求），再画房间分区图（拆解模块），每样材料都说得出为什么选它、为什么不选另一种（选型与权衡），而不是上来就报套餐价。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前对镜把「无限滚动列表」按四步框架完整口述一遍；1 天、3 天、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：2 个问法，答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：「设计一个无限滚动列表」——回答骨架是什么？</summary>
+      <ul>
+        <li>澄清需求：数据量级（决定要不要虚拟列表）、单页条数、是否需要搜索/定位、目标设备。</li>
+        <li>拆解模块：数据层（分页 + 已加载缓存 + 去重）、渲染层（虚拟列表、DOM 回收）、交互层（滚动监听、Loading/错误态）。</li>
+        <li>技术选型：IntersectionObserver 监听底部哨兵（而非 scroll 事件高频触发）；触底请求下一页，可预取一页折中等待。</li>
+        <li>细节与权衡：虚拟列表滚动快但「搜索跳转到第 N 条」变难（需估算高度 + 锚点补偿）；下拉刷新与触底加载的状态互斥处理。</li>
+        <li>加分项：主动给出量化口径——「只渲染可视区 ±5 条，10 万条数据 DOM 数量稳定在几十个」。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：「设计一个前端监控平台，要考虑什么？」</summary>
+      <ul>
+        <li>先澄清：监控什么（JS 错误/接口成功率/性能指标/用户行为）、接入方规模、实时性要求。</li>
+        <li>采集端：SDK 捕获 window.onerror、unhandledrejection、资源与接口耗时；注意 SDK 自身要小、不能拖慢业务。</li>
+        <li>上报策略：批量合并上报省请求、失败重试 + 本地暂存、采样率控制成本、sendBeacon 保证页面卸载时不丢。</li>
+        <li>服务端与展示侧要点到为止（聚合、告警阈值、看板），并说明「前端侧我深入，后端侧给边界」——这是边界感。</li>
+        <li>权衡示范：全量上报 vs 采样上报的取舍（成本与覆盖率），错误聚合去重避免告警风暴。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm7-design'; // 与 body data-page、curriculum.js 中的 points[].id 一字不差
+
+  /* 预热题（mode:'warmup'） */
+  var WARMUP = [{
+    id: 'm7-design-w1',
+    type: 'single',
+    stem: '预热：面试官抛来「设计一个无限滚动列表」，第一步应该做什么？',
+    options: [
+      '直接说「用虚拟列表组件」，展示技术储备',
+      '先澄清：数据量多大、一页多少条、要不要搜索定位',
+      '先把前后端接口都设计完再说',
+      '说这题太简单了，不值得设计'
+    ],
+    answer: [1],
+    explain: '数据量决定答案：1 千条直接分页就够，100 万条才必须虚拟列表。不澄清需求就给方案，等于装修不量房就报价——框架第一步永远是「澄清需求」。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm7-design-q1',
+      type: 'single',
+      stem: '前端侧系统设计题的标准答题框架顺序是？',
+      options: [
+        '澄清需求 → 拆解模块 → 技术选型 → 细节与权衡',
+        '技术选型 → 写代码 → 澄清需求 → 拆解模块',
+        '直接给出终极方案 → 证明自己很强 → 结束',
+        '拆解模块 → 澄清需求 → 细节 → 反问面试官'
+      ],
+      answer: [0],
+      explain: '顺序就是认知顺序：不知道数据量级（澄清）就拆不出合理模块（拆解），模块边界不清就谈不上选型依据（选型），最后每个选型都要能说出代价（权衡）。跳步的直接代价是：方案和需求对不上，面试官一句「如果数据量是 10 倍呢」就把方案问塌了。'
+    },
+    {
+      id: 'm7-design-q2',
+      type: 'multi',
+      stem: '设计「10 万条商品的无限滚动列表」，前端侧应该考虑哪些点？',
+      options: [
+        '只渲染可视区附近的 DOM（虚拟列表）',
+        '触底时按页请求，而不是一次性拉全量数据',
+        '用 IntersectionObserver 监听底部哨兵元素',
+        '把 10 万条数据一次性渲染成 DOM，反正浏览器扛得住'
+      ],
+      answer: [0, 1, 2],
+      explain: '10 万个 DOM 节点的创建、布局与内存开销足以让页面卡死——渲染量必须与可视区挂钩（虚拟列表），数据量必须与用户浏览进度挂钩（分页触底），监听方式要用 IntersectionObserver 而非高频触发的 scroll 事件。三个选择合起来是一个原则：让每一份开销只服务「用户此刻看得见的部分」。'
+    },
+    {
+      id: 'm7-design-q3',
+      type: 'code',
+      stem: '无限滚动每次触底要请求「第 page 页、每页 size 条」。实现 paginate(list, page, size)：页码从 1 开始，返回对应的切片数组；越界（该页没有数据）时返回空数组 []。',
+      stub: 'function paginate(list, page, size) {\n  // 在此实现：返回第 page 页（页码从 1 开始）、每页 size 条的切片\n  // 提示：起始下标 = (page - 1) * size；slice 越界会自动截断\n}\n',
+      reference: 'function paginate(list, page, size) {\n  var start = (page - 1) * size;\n  return list.slice(start, start + size); // slice 越界自动截断，自然得到 []\n}',
+      asserts: [
+        "JSON.stringify(paginate([1,2,3,4,5], 1, 2)) === '[1,2]'",
+        "JSON.stringify(paginate([1,2,3,4,5], 3, 2)) === '[5]'",
+        "JSON.stringify(paginate([1,2,3], 9, 2)) === '[]'"
+      ],
+      explain: '为什么触底要「按页取」而不是全量拉：网络传输和前端内存都只该服务当前视图，这就是分页的意义。实现上两个关键点：一是页码到下标的换算 (page - 1) * size——第 1 页从 0 开始，第 3 页从 4 开始（每页 2 条时）；二是利用 slice 的天然容错：起始下标超过数组长度时 slice 返回空数组，不需要手写 if 判断越界——「了解 API 的边界行为」能让你少写防御代码，这也是设计题「细节与权衡」精神在编码里的体现。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（会推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：外卖需求拆解器（纯 DOM 手写，无动画库）。
+   「下一步」沿答题框架推进：先澄清需求，再逐个拆出三个模块，然后给每个模块补权衡说明，
+   最后总结「主动暴露权衡」。已拆出的模块卡可点击，复习该模块的权衡点。 */
+(function () {
+  'use strict';
+
+  /* 三个模块的数据：duty 是模块职责，trade 是技术选型阶段的权衡说明 */
+  var MODULES = [
+    {
+      duty: '选菜、购物车、提交订单',
+      trade: '选型权衡：购物车存 localStorage，减请求还抗断网；库存为 0 的菜直接置灰，从交互上防超卖。'
+    },
+    {
+      duty: '唤起收银台、等待支付结果',
+      trade: '选型权衡：支付中按钮置灰防重复支付；支付结果用「轮询 + 后端回调」双保险，谁先到信谁。'
+    },
+    {
+      duty: '订单状态与骑手位置的实时展示',
+      trade: '选型权衡：日常用 3 秒轮询（简单、成本低），大促峰值切长连接（实时但贵）——按场景切换就是权衡。'
+    }
+  ];
+
+  /* 推进步骤脚本：chip=高亮的框架步骤；module=要拆出的模块下标（-1 表示本步不拆模块）；
+     trade=是否给已拆模块补权衡说明；demand=需求框的状态文本 */
+  var PHASES = [
+    {
+      chip: 0, module: -1, trade: false,
+      demandTitle: '第 1 步 · 澄清需求：先问再拆',
+      demandText: '已澄清：C 端用户、午高峰每分钟几千单、支付失败要可重试。这些答案决定了后面所有选型的口径。',
+      log: '第 1 步 · 澄清需求：别急着画图！先反问——给谁用？峰值多大？失败了怎么办？需求澄清之前给出的任何方案，都是猜的。', cls: 'is-ok'
+    },
+    {
+      chip: 1, module: 0, trade: false,
+      demandTitle: '第 2 步 · 拆解模块：拆出 下单',
+      demandText: '整块需求正在被切开……',
+      log: '第 2 步 · 拆解模块：先拆「下单模块」——选菜、购物车、提交订单。模块化的好处：边界清晰、可以分开设计、一个模块挂了不连坐。', cls: 'is-ok'
+    },
+    {
+      chip: 1, module: 1, trade: false,
+      demandTitle: '第 2 步 · 拆解模块：拆出 支付',
+      demandText: '下单、支付已拆出，还剩配送……',
+      log: '第 2 步 · 拆解模块：再拆「支付模块」——唤起收银台、等待支付结果。钱相关的逻辑单独成模块，方便统一加防重与对账。', cls: 'is-ok'
+    },
+    {
+      chip: 1, module: 2, trade: false,
+      demandTitle: '第 2 步 · 拆解完成：下单 / 支付 / 配送',
+      demandText: '整块需求已拆完：三个模块各有独立输入输出，可以分开设计、分开扛风险。',
+      log: '第 2 步 · 拆解模块：最后拆「配送模块」——订单状态与骑手位置的实时展示。到这里，一整块需求变成了三个可独立下手的小问题。', cls: 'is-ok'
+    },
+    {
+      chip: 2, module: -1, trade: true,
+      demandTitle: '第 3 步 · 技术选型：每个模块给出实现方式',
+      demandText: '三个模块各自选型完毕（见卡片上的权衡说明）。',
+      log: '第 3 步 · 技术选型：给每个模块选实现方式，并标注权衡——购物车存本地、支付防重复、配送轮询。注意每个选择都带着理由。', cls: 'is-ok'
+    },
+    {
+      chip: 3, module: -1, trade: false,
+      demandTitle: '第 4 步 · 细节与权衡：说清「为什么不用另一个」',
+      demandText: '拆解完成。面试时按这四步讲，结构分就稳了。',
+      log: '第 4 步 · 细节与权衡：最后主动暴露权衡——「轮询简单但有延迟，长连接实时但成本高，所以日常轮询、峰值切换」。说出「为什么不用另一个方案」，比方案本身更加分。', cls: 'is-end'
+    }
+  ];
+
+  var phaseIndex = 0;                       // 当前进度
+  var chips = document.querySelectorAll('#dsn-rail .dsn-chip');
+  var mods = [];
+  for (var m = 0; m < 3; m++) mods.push(document.getElementById('dsn-mod-' + m));
+  var demandEl = document.getElementById('dsn-demand');
+  var demandTitleEl = document.getElementById('dsn-demand-title');
+  var demandTextEl = document.getElementById('dsn-demand-text');
+  var consoleEl = document.getElementById('dsn-console');
+  var stepBtn = document.getElementById('dsn-step');
+  var resetBtn = document.getElementById('dsn-reset');
+
+  /* 向控制台追加一行日志 */
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* 渲染框架轨道：当前步骤高亮，走过的步骤打绿勾底色 */
+  function renderRail(chip) {
+    chips.forEach(function (chipEl, i) {
+      chipEl.classList.toggle('is-on', i === chip);
+      chipEl.classList.toggle('is-done', i < chip);
+    });
+  }
+
+  /* 推进一步 */
+  function step() {
+    if (phaseIndex >= PHASES.length) return;
+    var p = PHASES[phaseIndex];
+    renderRail(p.chip);
+
+    /* 更新需求框状态 */
+    demandTitleEl.textContent = p.demandTitle;
+    demandTextEl.textContent = p.demandText;
+    if (phaseIndex >= 3) demandEl.classList.add('is-done'); // 拆解完成后需求框变绿
+
+    /* 拆出模块卡（带浮现动画） */
+    if (p.module >= 0) {
+      var mod = mods[p.module];
+      mod.querySelector('.dsn-module-duty').textContent = MODULES[p.module].duty;
+      mod.classList.add('is-shown');
+    }
+
+    /* 技术选型阶段：给所有已拆模块补上权衡说明 */
+    if (p.trade) {
+      mods.forEach(function (modEl, i) {
+        modEl.querySelector('.dsn-module-trade').textContent = MODULES[i].trade;
+        modEl.classList.add('is-traded');
+      });
+    }
+
+    log(p.log, p.cls);
+    phaseIndex += 1;
+
+    if (phaseIndex >= PHASES.length) {
+      log('演示结束：点击任意模块卡可复习它的权衡说明。把这套四步流程背下来，任何设计题都能开口。', 'is-muted');
+      stepBtn.disabled = true;
+    }
+  }
+
+  /* 点击模块卡：重讲该模块的权衡（复习用） */
+  function onModClick(i) {
+    if (!mods[i].classList.contains('is-shown')) return;
+    log('复习【' + mods[i].querySelector('.dsn-module-name').textContent + '】' + MODULES[i].trade, 'is-muted');
+  }
+
+  function reset() {
+    phaseIndex = 0;
+    stepBtn.disabled = false;
+    renderRail(-1);
+    demandEl.classList.remove('is-done');
+    demandTitleEl.textContent = '完整需求（拆解前）：用户用手机点一份外卖';
+    demandTextEl.textContent = '一整块需求没法直接开工——太大、太多未知、改一处动全身。';
+    mods.forEach(function (modEl) {
+      modEl.classList.remove('is-shown', 'is-traded');
+      modEl.querySelector('.dsn-module-duty').textContent = '';
+      modEl.querySelector('.dsn-module-trade').textContent = '';
+    });
+    consoleEl.innerHTML = '';
+    log('已重置：点击「下一步」重新走一遍框架……', 'is-muted');
+  }
+
+  mods.forEach(function (modEl, i) {
+    modEl.addEventListener('click', function () { onModClick(i); });
+  });
+  stepBtn.addEventListener('click', step);
+  resetBtn.addEventListener('click', reset);
+})();
+</script>
+</body>
+</html>

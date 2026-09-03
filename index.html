@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>学习地图 · 前端领航员</title>
+<link rel="stylesheet" href="assets/css/site.css">
+</head>
+<body>
+<!-- 本页为学习地图（站点首页），头部由本页自绘；壳层自动初始化仅针对 body[data-page] 的知识点页 -->
+<header class="fg-header">
+  <div class="fg-crumb">
+    <strong class="fg-site-title">前端领航员</strong>
+    <span class="fg-crumb-sep">/</span>
+    <span>大前端全栈成长地图</span>
+  </div>
+  <div class="fg-header-nav">
+    <a class="fg-btn fg-btn--ghost fg-btn--sm" href="wrongbook.html">错题本
+      <span class="fg-badge fg-badge--bad fg-badge--sm" id="wrong-count">0</span>
+    </a>
+    <span id="sound-slot"></span>
+  </div>
+</header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">51 个知识点 · 按 7 个模块推进 · 内置错题重测与遗忘曲线复习提醒；全部数据保存在本机浏览器。</p>
+
+  <!-- 课程数据缺失提示（curriculum.js 由数据脚本生成，暂缺时给出友好文案） -->
+  <div id="fg-notice" class="fg-notice" hidden></div>
+
+  <!-- 顶部总进度条 -->
+  <section class="fg-card fg-progress-card">
+    <div class="fg-progress-head">
+      <span>总进度</span>
+      <span id="progress-text">已学 0 / 0</span>
+    </div>
+    <div class="fg-progress fg-progress--lg">
+      <i id="progress-bar" class="fg-progress-bar"></i>
+    </div>
+  </section>
+
+  <!-- 7 个模块分区（含知识点卡片） -->
+  <div id="fg-modules"></div>
+
+  <!-- 模块依赖 SVG 小图（手绘坐标，节点可点击滚动到对应模块锚点） -->
+  <section class="fg-card" id="depmap-card">
+    <h2>模块依赖鸟瞰</h2>
+    <p class="fg-muted">连线的两端存在先后依赖：建议先学前置、再学后置。点击节点可跳到对应模块分区。</p>
+    <div class="fg-depmap" id="fg-depmap"></div>
+  </section>
+
+  <!-- 重置学习进度 -->
+  <section class="fg-card fg-danger-zone">
+    <button type="button" class="fg-btn fg-btn--danger" id="reset-btn">重置学习进度</button>
+    <span class="fg-muted">将清空全部进度、自评与错题本，操作不可恢复。</span>
+  </section>
+</main>
+
+<footer class="fg-footer">
+  <p>前端领航员 · 纯静态本地学习站 —— 无网络请求，数据仅存于本机浏览器 localStorage。</p>
+</footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本
+     （curriculum.js 暂缺时不报错，页面显示提示文案） -->
+<script src="assets/data/curriculum.js"></script>
+<script src="assets/js/progress-store.js"></script>
+<script src="assets/js/quiz-engine.js"></script>
+<script src="assets/js/site.js"></script>
+<script>
+/* 学习地图渲染逻辑（页面内联脚本） */
+(function () {
+  'use strict';
+  var esc = window.FG ? FG.esc : function (s) { return String(s); };
+
+  /* 「已学」判定口径：存在进度记录，且（自评掌握度 ≥ 3 或 测验最佳成绩 > 0） */
+  function isLearned(rec) {
+    return !!(rec && (rec.mastery >= 3 || rec.quizBest > 0));
+  }
+
+  function getData() {
+    var c = window.CURRICULUM;
+    return (c && Array.isArray(c.modules) && c.modules.length) ? c : null;
+  }
+
+  function findPointById(c, id) {
+    var modules = c.modules || [];
+    for (var i = 0; i < modules.length; i++) {
+      var pts = modules[i].points || [];
+      for (var j = 0; j < pts.length; j++) {
+        if (pts[j].id === id) return { module: modules[i], point: pts[j] };
+      }
+    }
+    return null;
+  }
+
+  function render() {
+    var c = getData();
+    var notice = document.getElementById('fg-notice');
+    var host = document.getElementById('fg-modules');
+    host.innerHTML = '';
+
+    if (!c) {
+      notice.hidden = false;
+      notice.textContent = '课程数据（assets/data/curriculum.js）尚未生成或加载失败，学习地图暂时为空。文件生成后刷新本页即可。';
+      document.getElementById('progress-text').textContent = '已学 0 / 0';
+      document.getElementById('progress-bar').style.width = '0%';
+      renderDepMap(null);
+      updateWrongBadge();
+      return;
+    }
+    notice.hidden = true;
+
+    /* 「该复习了」：基于遗忘曲线到期列表 */
+    var due = {};
+    (window.ProgressStore ? ProgressStore.dueList() : []).forEach(function (id) { due[id] = true; });
+
+    var learnedTotal = 0;
+    var pointTotal = 0;
+
+    c.modules.forEach(function (m, mi) {
+      var pts = m.points || [];
+      pointTotal += pts.length;
+      var learned = 0;
+      pts.forEach(function (p) {
+        if (isLearned(ProgressStore ? ProgressStore.get(p.id) : null)) learned += 1;
+      });
+      learnedTotal += learned;
+
+      var sec = document.createElement('section');
+      sec.className = 'fg-module fg-card';
+      sec.id = 'module-' + (m.id || mi);
+      sec.style.setProperty('--fg-accent', m.color || '');
+
+      var head = document.createElement('div');
+      head.className = 'fg-module-head';
+      head.innerHTML =
+        '<div><h2 class="fg-module-name">' + esc(m.name || '') + '</h2>' +
+        '<p class="fg-module-summary">' + esc(m.summary || '') + '</p></div>' +
+        '<span class="fg-module-progress">' + learned + ' / ' + pts.length + '</span>';
+      sec.appendChild(head);
+
+      var grid = document.createElement('div');
+      grid.className = 'fg-point-grid';
+      pts.forEach(function (p) {
+        grid.appendChild(renderPointCard(p, due));
+      });
+      sec.appendChild(grid);
+      host.appendChild(sec);
+    });
+
+    document.getElementById('progress-text').textContent = '已学 ' + learnedTotal + ' / ' + pointTotal;
+    document.getElementById('progress-bar').style.width =
+      pointTotal ? Math.round(learnedTotal / pointTotal * 100) + '%' : '0%';
+    renderDepMap(c);
+    updateWrongBadge();
+  }
+
+  /* 知识点卡片：标题链接 + 掌握度星 + 依赖 chips + 「该复习了」徽标 */
+  function renderPointCard(p, due) {
+    var rec = ProgressStore ? ProgressStore.get(p.id) : null;
+    var lv = rec && rec.mastery ? rec.mastery : 0;
+    var stars = '';
+    for (var i = 1; i <= 5; i++) stars += (i <= lv) ? '★' : '☆';
+
+    var c = getData();
+    var depHtml = (p.deps || []).map(function (d) {
+      var target = c ? findPointById(c, d) : null;
+      if (target && target.point.path) {
+        return '<a class="fg-chip" href="' + esc(target.point.path) + '" title="前置知识点">' +
+          esc(target.point.title || d) + '</a>';
+      }
+      return '<span class="fg-chip fg-chip--muted">' + esc(d) + '</span>';
+    }).join('');
+
+    var card = document.createElement('article');
+    card.className = 'fg-point-card' + (isLearned(rec) ? ' is-learned' : '');
+    card.innerHTML =
+      '<h3 class="fg-point-title"><a href="' + esc(p.path || '#') + '">' + esc(p.title || p.id) + '</a></h3>' +
+      '<div class="fg-point-meta">' +
+        '<span class="fg-stars fg-stars--readonly" aria-label="掌握度 ' + lv + ' / 5">' + stars + '</span>' +
+        '<span class="fg-point-minutes">约 ' + (p.minutes || 0) + ' 分钟</span>' +
+        (due[p.id] ? '<span class="fg-badge fg-badge--warn">该复习了</span>' : '') +
+      '</div>' +
+      (depHtml ? '<div class="fg-point-deps"><span class="fg-muted">前置：</span>' + depHtml + '</div>' : '');
+    return card;
+  }
+
+  /* ---------- 模块依赖 SVG（手绘坐标） ---------- */
+  /* 7 个模块节点的手工布置坐标（viewBox 内 x,y）与主要依赖连线（节点下标成对） */
+  var NODE_POS = [
+    { x: 90,  y: 180 }, { x: 90,  y: 60 },  { x: 250, y: 120 },
+    { x: 415, y: 60 },  { x: 415, y: 180 }, { x: 580, y: 60 },
+    { x: 580, y: 180 }
+  ];
+  var EDGES = [[0, 2], [1, 2], [2, 3], [2, 4], [3, 5], [4, 5], [4, 6], [5, 6]];
+
+  function shortName(name, max) {
+    name = String(name || '');
+    return name.length > max ? name.slice(0, max) + '…' : name;
+  }
+
+  function renderDepMap(c) {
+    var host = document.getElementById('fg-depmap');
+    var mods = c ? c.modules : null;
+    var nodes = [];
+    for (var i = 0; i < 7; i++) {
+      var m = mods && mods[i];
+      var learned = 0, total = 0;
+      if (m) {
+        total = (m.points || []).length;
+        (m.points || []).forEach(function (p) {
+          if (isLearned(ProgressStore ? ProgressStore.get(p.id) : null)) learned += 1;
+        });
+      }
+      nodes.push({
+        id: m ? (m.id || i) : ('m' + (i + 1)),
+        name: m ? shortName(m.name, 7) : '模块 ' + (i + 1),
+        color: (m && m.color) || '#8a93a8',
+        learned: learned,
+        total: total
+      });
+    }
+
+    /* 用 innerHTML 构建内联 SVG（HTML 解析器会自动赋予 SVG 命名空间） */
+    var svg = '<svg class="fg-depmap-svg" viewBox="0 0 700 268" role="img" aria-label="模块依赖关系图，点击节点跳转对应模块">';
+    EDGES.forEach(function (e) {
+      var a = NODE_POS[e[0]];
+      var b = NODE_POS[e[1]];
+      /* 手绘感：用二次贝塞尔曲线轻微上弯 */
+      var mx = (a.x + b.x) / 2;
+      var my = (a.y + b.y) / 2 - 18;
+      svg += '<path class="fg-depmap-edge" d="M ' + a.x + ' ' + a.y +
+        ' Q ' + mx + ' ' + my + ' ' + b.x + ' ' + b.y + '"/>';
+    });
+    nodes.forEach(function (n, i) {
+      var p = NODE_POS[i];
+      svg += '<g class="fg-depmap-node" data-target="module-' + esc(n.id) +
+        '" tabindex="0" role="button" aria-label="跳到模块：' + esc(n.name) + '">' +
+        '<circle cx="' + p.x + '" cy="' + p.y + '" r="24" fill="' + n.color + '"/>' +
+        '<text x="' + p.x + '" y="' + (p.y + 5) + '" class="fg-depmap-node-text">' + (i + 1) + '</text>' +
+        '<text x="' + p.x + '" y="' + (p.y + 44) + '" class="fg-depmap-node-name">' + esc(n.name) + '</text>' +
+        '<text x="' + p.x + '" y="' + (p.y + 60) + '" class="fg-depmap-node-sub">' +
+          n.learned + ' / ' + n.total + '</text>' +
+        '</g>';
+    });
+    svg += '</svg>';
+    host.innerHTML = svg;
+
+    /* 节点点击 / 回车 → 滚动到对应模块锚点 */
+    var nodeEls = host.querySelectorAll('.fg-depmap-node');
+    for (var k = 0; k < nodeEls.length; k++) {
+      (function (g) {
+        function go() {
+          var t = document.getElementById(g.getAttribute('data-target'));
+          if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+        g.addEventListener('click', go);
+        g.addEventListener('keydown', function (ev) {
+          if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); go(); }
+        });
+      })(nodeEls[k]);
+    }
+  }
+
+  function updateWrongBadge() {
+    var el = document.getElementById('wrong-count');
+    if (el && window.ProgressStore) el.textContent = String(ProgressStore.wrongList().length);
+  }
+
+  /* ---------- 事件 ---------- */
+  document.getElementById('reset-btn').addEventListener('click', function () {
+    if (!window.confirm('确定要清空全部学习进度与错题本吗？此操作不可恢复。')) return;
+    if (window.ProgressStore) ProgressStore.resetAll();
+    render();
+  });
+
+  /* ---------- 启动 ---------- */
+  render();
+  var slot = document.getElementById('sound-slot');
+  if (slot && window.FG) slot.appendChild(FG.sound.button());
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>单元测试与 E2E 测试 · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ========== 本页动画专用样式：玩具车出厂质检流水线（单测 vs E2E） ========== */
+.test-factory {
+  border: 1px solid #c6cede;
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+  margin: 10px 0;
+}
+.test-defect-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  margin: 8px 0;
+}
+.test-defect-row .fg-btn.is-picked {
+  outline: 2px solid #f59e0b;
+  font-weight: 700;
+}
+.test-line {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0;
+}
+.test-part {
+  flex: 1;
+  text-align: center;
+  border: 1px solid #c6cede;
+  border-radius: 6px;
+  padding: 8px 4px;
+  font-size: 12px;
+  color: #6b7488;
+  background: #f4f6fb;
+  transition: all 0.3s ease;
+}
+.test-part.is-checking { border-color: #f59e0b; color: #8a6d1a; background: #fdf6e3; }
+.test-part.is-good { border-color: #3fae7c; color: #1e7a52; background: #e4f5ec; }
+.test-part.is-bad { border-color: #b3364f; color: #b3364f; background: #fdeaea; }
+.test-cost {
+  font-size: 13px;
+  margin: 8px 0;
+}
+.test-cost b { font-family: var(--fg-mono); color: #b3364f; }
+.test-car {
+  text-align: center;
+  font-size: 22px;
+  padding: 6px 0;
+  min-height: 40px;
+  transition: transform 0.4s ease;
+}
+.test-car.is-moving { transform: translateX(60px); }
+.test-car.is-broken { filter: grayscale(1); opacity: 0.6; }
+</style>
+</head>
+<body data-page="m4-test">
+
+<!-- 壳层自动渲染区：site.js 检测到 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">改一行公共代码，三个页面同时炸——靠「上线前人肉点一遍」永远追不上改代码的速度。本页讲测试如何像质检流水线一样，替你把问题拦在出厂之前。</p>
+
+  <!-- ① 导入：本知识点无硬性前置依赖，给出热身建议 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>本知识点<strong>没有硬性前置依赖</strong>，零基础也可以直接学。不过例题里要动手「给函数写测试」，如果还没写过 JS 函数与数组，建议先去 <a href="../m1/m1-js-scope.html">JS 类型、作用域与闭包</a> 热热身。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：讲解 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>为什么需要自动化测试</h3>
+    <p>项目每天改几十处代码，每改一次就「人肉把所有页面点一遍」，人越多越不现实。自动化测试就是让机器替你点：把「点开购物车应该看到 3 件商品」写成一行代码，以后每次改完代码跑一遍，几秒钟内告诉你哪些原有功能被改坏了。<strong>测试本质上是给未来的自己买保险</strong>——写的时候花十分钟，之后每次改动都省下一小时的心惊肉跳。测试用例还有个副产品：它是最诚实的文档，读用例就知道这个函数怎么用、边界在哪。</p>
+
+    <h3>测试金字塔：三道质检工序</h3>
+    <ul>
+      <li><strong>单元测试（底层，量最大）</strong>：把最小的独立单元（一个函数、一个工具方法）单独拿出来验证。跑得飞快，失败时直接告诉你「哪个函数的哪个分支算错了」，定位最精确。</li>
+      <li><strong>集成测试（中层）</strong>：把几个模块拼起来验证协作，比如「表单组件 + 校验规则 + 提交接口的假实现」能不能配合出正确行为。</li>
+      <li><strong>E2E 测试（顶层，量最小）</strong>：驱动真实浏览器，模拟真实用户从打开页面到完成下单的完整链路。最接近真实体验，但最慢、最贵、挂了也最说不清是哪一层的问题。</li>
+    </ul>
+    <p>健康的比例是金字塔形：单元测试铺得最宽，E2E 只挑几条核心链路。越往上，一次测试覆盖的面越广，但每次的花费和定位难度也越高。</p>
+
+    <h3>单元测试长什么样</h3>
+    <p>Vitest、Jest 这类主流框架都是同一套风格：用 <code>describe</code>/<code>test</code>（或 <code>it</code>）组织用例，用 <code>expect(实际值).toBe(期望值)</code> 这样的<strong>断言</strong>描述「应该是什么」。断言失败时框架会打印「期望 4，实际 3」以及出错的用例名——这就是「定位到函数与分支」的来源。</p>
+
+    <h3>mock：把不确定的依赖换成假货</h3>
+    <p>测「发送验证码」的逻辑时，不能每次测试都真发一条短信。做法是把「短信服务」换成 <strong>mock（假实现）</strong>：假装发出去，并记下「被调用了几次、传了什么参数」。好处有三：快（不发真实网络请求）、稳（不受第三方服务波动影响）、<strong>能制造罕见场景</strong>——比如让假服务「恰好超时」「恰好返回 500」，专门验证失败分支。定时器也能 mock：把「等 60 秒后再提示」压缩成立即走完。</p>
+
+    <h3>组件测试与 Testing Library 思想</h3>
+    <p>测 UI 组件时有个重要原则：<strong>像用户一样去测</strong>。按「按钮上的文字」「输入框的角色」找到元素、模拟点击、断言界面上出现了用户能看到的变化——而不是去断言组件内部的 state 或某个类名。后者一重构测试就全碎，测的不再是「行为」而是「实现细节」。快照测试是补充手段：第一次运行时把渲染结果记录下来，之后每次对比有没有意外变化。</p>
+
+    <h3>E2E 测试：整车试驾</h3>
+    <p>Playwright、Cypress 这类工具驱动真实浏览器：打开页面、填表单、点登录、断言跳转到了个人中心。它 catches 的正是「零件都合格、组合起来却出错」的问题。但 E2E 也有出名的<strong>脆弱性</strong>：弹窗、动画时序、测试数据被别人改了，都可能让它误报。所以业内共识是只给核心链路（登录、注册、下单、支付）写少量 E2E，把大量验证交给快得多的单元测试。</p>
+
+    <h3>覆盖率：有用的指标，危险的目标</h3>
+    <p>覆盖率回答的是「多少比例的代码在测试中被执行过」。注意它只保证<strong>「跑到」</strong>，不保证<strong>「断言对」</strong>——一个没有任何断言的测试也能把覆盖率刷上去，一行不写断言的代码被跑过，bug 照样漏网。优先测的顺序：核心业务规则、公共工具函数、曾经出过 bug 的地方；纯函数（同样的输入永远同样的输出）最容易测。100% 覆盖率不值得追求，为凑数字写的测试本身就是负债。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 玩具车工厂的质检流水线</div>
+      <p>一家玩具车工厂（你的项目）每天出货一千辆小车（每次发版）。厂里有两道质检工序。第一道是<strong>零件质检（单元测试）</strong>：螺丝、轮子、电机逐颗上检具，几秒钟一颗；哪个不合格当场拦下，标签上写着「3 号电机线圈短路」——缺陷定位精确到零件（测试失败信息直接指到某个函数的某个分支）。检具便宜耐用，一天能测几万颗，所以厂里铺了满满一墙检具（单元测试数量最多）。</p>
+      <p>第二道是<strong>整车试驾（E2E 测试）</strong>：随机抽几台整车装上电池，在跑道上学着小顾客的样子跑一圈。它能抓住零件质检抓不到的问题——比如每个零件单看都合格，但遥控器和电机对不上频（模块各自正确、组合起来出错）。但试驾一台要十分钟，还得配专职司机和一条跑道（真实浏览器环境），所以只测「前进、转弯、遥控」这几条核心路线，不可能把每辆车的每种玩法都试一遍。</p>
+      <p>最糟的经营决策是：砍掉零件质检、全靠整车试驾。一辆车在跑道上抛锚，你只知道「车坏了」，却要拆开整车逐颗零件排查（E2E 失败定位成本高）。这笔账很好算：零件层拦下一个缺陷花 1 块钱，车子出货后召回要花一百块——<strong>bug 被发现得越晚，修复成本翻着倍地涨</strong>，而测试金字塔就是这道成本算术的答案。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：质检流水线对比（可点选缺陷零件、单步执行） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>下面是一条玩具车质检流水线。先点选「这批的缺陷藏在哪个零件」，再选一种出厂策略并单步执行，对比两种策略的成本与定位精度：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">模式 A = 逐个零件质检（单元测试）；模式 B = 跳过质检直接整车试驾（只靠 E2E）。</p>
+      <div class="test-factory">
+        <div class="test-defect-row">
+          <span>这批的缺陷藏在：</span>
+          <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm test-pick is-picked" data-part="电机">电机</button>
+          <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm test-pick" data-part="轮子">轮子</button>
+          <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm test-pick" data-part="遥控器">遥控器</button>
+        </div>
+        <div class="test-line">
+          <div class="test-part" id="test-part-0">轮子<br>待检</div>
+          <div class="test-part" id="test-part-1">电机<br>待检</div>
+          <div class="test-part" id="test-part-2">遥控器<br>待检</div>
+        </div>
+        <div class="test-cost">已消耗质检成本：<b id="test-cost">0</b> 单位（零件检具 1 单位/次，装配 3 单位，试驾 5 单位）</div>
+        <div class="test-car" id="test-car">🚗</div>
+      </div>
+      <div class="anim-console" id="test-console">
+        <div class="anim-line is-muted">选好缺陷位置后，点「模式 A」或「模式 B」，再用「单步执行」推进流水线…</div>
+      </div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="test-mode-a">模式 A：先跑零件质检（单测）</button>
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="test-mode-b">模式 B：直接整车试驾（只靠 E2E）</button>
+        <button type="button" class="fg-btn fg-btn--ok fg-btn--sm" id="test-step">单步执行</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="test-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：延伸 + 交叉链接（本知识点无硬性前置依赖） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：无硬性前置，是「性能与质量」模块里可以直接上手的一页；动手前熟悉函数与数组即可（见 <a href="../m1/m1-js-scope.html">JS 类型、作用域与闭包</a>）。</p>
+    <p><strong>向后延伸</strong>：测试拦得住「写错的代码」，拦不住「线上才出现的意外」——接下来学<a href="./m4-error.html">错误处理与容错设计</a>；而重试、降级这类容错逻辑恰恰最值得被测试保护，两页互为补充。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="../m3/m3-component.html">组件设计原则</a> —— 单一职责、依赖清晰的组件才好测；「难测」往往是设计问题的信号</li>
+      <li><a href="../m1/m1-js-promise.html">Promise 与 async/await</a> —— 异步代码为什么需要 mock 定时器与假 Promise，先懂异步再懂异步测试</li>
+      <li><a href="./m4-monitor.html">前端监控与错误上报</a> —— 测试覆盖不到线上真实环境，监控是测试之后的下一道防线</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（mode:'main'） -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后把最佳成绩写入进度仓库（见页面底部内联脚本）：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：测试就是产品出厂前的质检流水线——单测像逐颗检查螺丝，又快又便宜、坏了当场指出哪颗坏；E2E 像整车试驾，最接近真实但又慢又贵。两层配合，才能让问题在出厂（上线）前被拦住。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前复述 1 次，1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：单元测试和 E2E 测试各有什么优缺点？项目里怎么搭配？</summary>
+      <ul>
+        <li>单元测试：快（毫秒级）、便宜、失败定位精确到函数与分支；缺点是只验证孤立单元，覆盖不到模块组合的问题。</li>
+        <li>E2E 测试：最接近真实用户链路，能发现「零件都对、组合出错」的问题；缺点是慢、环境脆弱易误报、失败时难以定位到具体层。</li>
+        <li>搭配方式：按测试金字塔分配——单元测试覆盖核心逻辑与工具函数（数量最多），少量集成测试验证模块协作，E2E 只覆盖登录、下单、支付等核心链路。</li>
+        <li>加分项：能说出「bug 发现越晚修复越贵」，金字塔形状本质是成本算术；以及异步逻辑要靠 mock 定时器 / 假 Promise 才能测得又快又稳。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：测试覆盖率刷到 100%，就代表代码没有 bug 了吗？</summary>
+      <ul>
+        <li>覆盖率只统计「代码被执行过」，不统计「断言是否正确、场景是否穷尽」——没有断言的测试同样能刷高覆盖率。</li>
+        <li>边界与组合没测到照样有 bug：覆盖率高的函数，遇到没覆盖到的输入组合依然会错。</li>
+        <li>为凑数字写测试是负债：把简单实现「锁死」的测试会阻碍重构，维护成本反而上升。</li>
+        <li>正确用法：把覆盖率当作发现「完全没被测试触碰的模块」的探照灯，重点补核心业务与高频变更区域的测试，而不是追求全局数字。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm4-test'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'） */
+  var WARMUP = [{
+    id: 'm4-test-warmup-1',
+    type: 'single',
+    stem: '预热：改了一行公共工具函数，上线后炸了三个页面。下面哪种做法最能提前拦住这类问题？',
+    options: [
+      '上线后派人在用户群里盯着反馈',
+      '发布前跑一遍自动化测试，被改坏的旧功能会当场报错',
+      '让测试同学每次多测两天',
+      '在函数旁边多写几行注释提醒大家小心'
+    ],
+    answer: [1],
+    explain: '自动化测试把「原有功能应该表现正常」固化成代码，每次发布前自动跑一遍，被改坏的行为会立即暴露。人盯群、延长人肉测试都无法持续规模化，注释更拦不住误改。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm4-test-q1',
+      type: 'single',
+      stem: '按测试金字塔的思想，数量应该最多、失败时定位最精确的是哪一层？',
+      options: [
+        'E2E 测试（真实浏览器全链路）',
+        '集成测试（几个模块拼起来验证）',
+        '单元测试（单个函数 / 单元独立验证）',
+        '人工回归测试'
+      ],
+      answer: [2],
+      explain: '单元测试跑得最快、成本最低，失败信息直接指到「哪个函数的哪个分支算错了」，所以金字塔让它铺得最宽。E2E 最接近真实但慢、贵、难定位，只留给核心链路；人工测试无法随每次提交重复执行，不属于金字塔分层。'
+    },
+    {
+      id: 'm4-test-q2',
+      type: 'multi',
+      stem: '关于 mock 与测试覆盖率，下面哪些说法是正确的？',
+      options: [
+        'mock 的价值之一是能在不依赖真实第三方服务的情况下，模拟「对方超时」这类罕见场景',
+        '覆盖率达到 100% 就等于代码没有 bug',
+        'Testing Library 主张按「用户能看到的东西」（文字、角色）查询元素，而不是断言组件内部实现细节',
+        'E2E 测试又快又稳定，应该把每条用户路径都写成 E2E 用例'
+      ],
+      answer: [0, 2],
+      explain: 'A 对：mock 让「超时、500、返回异常数据」随叫随到，失败分支才测得起来。C 对：按用户视角测试，重构实现细节时测试依然有效。B 错：覆盖率只说明代码「被跑到」，不说明断言正确、场景穷尽。D 错：E2E 慢且脆弱，只应覆盖核心链路，全量路径交给更快更稳的单元 / 集成测试。'
+    },
+    {
+      id: 'm4-test-q3',
+      type: 'code',
+      stem: '手写一个极简测试运行器 runTests(tests)：参数是形如 [{ name: "用例名", fn: 函数 }] 的数组；依次执行每个 fn，不抛错记为通过，抛错记为失败。返回 { passed: 通过数, failed: 失败数, failures: [失败用例的名字数组] }。',
+      stub: 'function runTests(tests) {\n  // tests：[{ name: \'用例名\', fn: function(){} }]\n  // 依次执行每个 fn：不抛错 → 通过；抛错 → 失败，并记下用例名\n  // 返回 { passed, failed, failures }\n}\n',
+      reference: 'function runTests(tests) {\n  var passed = 0;\n  var failed = 0;\n  var failures = [];\n  (tests || []).forEach(function (t) {\n    try {\n      t.fn();                 // 断言失败的信号就是「抛错」\n      passed += 1;            // 走到这说明本用例通过\n    } catch (e) {\n      failed += 1;            // 抛错 = 断言失败\n      failures.push(t.name);  // 记录名字，供报告展示\n    }\n  });\n  return { passed: passed, failed: failed, failures: failures };\n}',
+      asserts: [
+        "runTests([{ name: 'a', fn: function(){} }, { name: 'b', fn: function(){} }]).passed === 2",
+        "(function(){ var r = runTests([{ name: 'ok', fn: function(){} }, { name: 'bad', fn: function(){ throw new Error('断言失败'); } }]); return r.failed === 1 && r.passed === 1 && r.failures[0] === 'bad'; })()",
+        '(function(){ var r = runTests([]); return r.passed === 0 && r.failed === 0 && r.failures.length === 0; })()'
+      ],
+      explain: '这是 Jest / Vitest「断言失败即用例失败」思想的最小内核：框架把 expect(...).toBe(...) 的不等封装成抛错，运行器只负责「跑一遍、数一数、收集失败名单」。try/catch 的分工值得注意——真正的框架还会捕获 fn 里的异步错误（要求用例返回 Promise 并等待），这里先用同步版抓住主干。第二个断言同时验证了「失败要收集名字」，因为报告里最有价值的信息就是「哪条用例挂了」。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库 */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：玩具车质检流水线对比——零件质检（单测）vs 直接整车试驾（只靠 E2E） */
+(function () {
+  'use strict';
+  var PARTS = ['轮子', '电机', '遥控器']; // 流水线上的三个零件
+  var defect = '电机';                    // 这批的缺陷零件（可点选切换）
+  var mode = null;     // 当前模式：'A' | 'B' | null
+  var steps = [];      // 当前模式的脚本队列
+  var cursor = 0;      // 已执行到第几步
+  var cost = 0;        // 累计质检成本
+  var summarized = false; // 小结是否已打印
+
+  var consoleEl = document.getElementById('test-console');
+  var costEl = document.getElementById('test-cost');
+  var carEl = document.getElementById('test-car');
+  var stepBtn = document.getElementById('test-step');
+  var resetBtn = document.getElementById('test-reset');
+  var pickBtns = document.querySelectorAll('.test-pick');
+
+  /* 向控制台追加一行日志并自动滚到底 */
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  function paintParts() {
+    PARTS.forEach(function (name, i) {
+      var el = document.getElementById('test-part-' + i);
+      el.className = 'test-part'; // 复位
+      el.innerHTML = name + '<br>待检';
+    });
+  }
+
+  function paintCost() {
+    costEl.textContent = String(cost);
+  }
+
+  /* 点选缺陷零件：只能在「未开工」时切换 */
+  function pickDefect(e) {
+    if (mode) return; // 流水线已启动，不允许换批次
+    defect = e.currentTarget.getAttribute('data-part');
+    Array.prototype.forEach.call(pickBtns, function (b) {
+      b.classList.toggle('is-picked', b === e.currentTarget);
+    });
+    log('本批次的缺陷零件已设置为：「' + defect + '」', 'is-muted');
+  }
+
+  /* 模式 A：逐个零件质检——缺陷在零件层被拦下，定位精确、成本最低 */
+  function buildModeA() {
+    var arr = [];
+    PARTS.forEach(function (name, i) {
+      if (name === defect) {
+        arr.push({
+          text: '检具报警：「' + name + '」不合格——缺陷在零件层被当场拦下，定位精确到零件',
+          cls: 'is-end', cost: 1, partIndex: i, partState: 'is-bad'
+        });
+      } else {
+        arr.push({
+          text: '检查「' + name + '」→ 合格（检具 1 单位成本）',
+          cls: 'is-ok', cost: 1, partIndex: i, partState: 'is-good'
+        });
+      }
+    });
+    return arr;
+  }
+
+  /* 模式 B：跳过质检直接整车试驾——缺陷暴露在最贵的一层，定位还绕远路 */
+  function buildModeB() {
+    var badIndex = PARTS.indexOf(defect);
+    return [
+      { text: '三个零件未经质检，直接装配整车（装配线 3 单位成本）', cls: '', cost: 3 },
+      { text: '整车上跑道试驾：小车跑起来……（试驾 5 单位成本）', cls: '', cost: 5, moveCar: true },
+      { text: '跑到一半车突然不动了！试驾只告诉你「车坏了」，三个零件都可疑', cls: 'is-end', cost: 0, breakCar: true },
+      { text: '只能回炉拆解，逐颗零件复检……（拆解复检 3 单位成本）', cls: '', cost: 3 },
+      {
+        text: '终于定位到缺陷零件：「' + defect + '」（第 ' + (badIndex + 1) + ' 道工序）——整车装了又拆，白白多绕一大圈',
+        cls: 'is-end', cost: 0, partIndex: badIndex, partState: 'is-bad'
+      }
+    ];
+  }
+
+  function startMode(m) {
+    mode = m;
+    steps = (m === 'A') ? buildModeA() : buildModeB();
+    cursor = 0;
+    cost = 0;
+    summarized = false;
+    paintCost();
+    paintParts();
+    carEl.className = 'test-car';
+    carEl.textContent = '🚗';
+    Array.prototype.forEach.call(pickBtns, function (b) { b.disabled = true; });
+    log('已切换到模式 ' + m + '（' + (m === 'A' ? '先跑零件质检 / 单元测试' : '跳过质检，直接整车试驾 / 只靠 E2E') + '），点「单步执行」推进', 'is-muted');
+  }
+
+  /* 单步执行：一次推进一道工序，便于观察成本与定位精度的差别 */
+  function step() {
+    if (!mode) {
+      log('请先点「模式 A」或「模式 B」选择出厂策略。', 'is-muted');
+      return;
+    }
+    if (cursor >= steps.length) {
+      if (!summarized) {
+        summarized = true;
+        if (mode === 'A') {
+          log('小结：模式 A 共消耗 ' + cost + ' 单位成本，缺陷在零件层被拦下，定位一步到位，问题没机会流向装配线。', 'is-ok');
+        } else {
+          log('小结：模式 B 共消耗 ' + cost + ' 单位成本，且定位绕了装配、试驾、拆解三大圈——核心链路值得 E2E，但不能只靠它。', 'is-end');
+        }
+        log('点「重置」换一个缺陷零件或换一种模式再试。', 'is-muted');
+      }
+      return;
+    }
+    var s = steps[cursor];
+    cursor += 1;
+    cost += s.cost;
+    paintCost();
+    if (s.partIndex !== undefined && s.partState) {
+      var el = document.getElementById('test-part-' + s.partIndex);
+      el.classList.add(s.partState);
+      el.innerHTML = PARTS[s.partIndex] + '<br>' + (s.partState === 'is-bad' ? '不合格!' : '合格');
+    }
+    if (s.moveCar) carEl.classList.add('is-moving');
+    if (s.breakCar) {
+      carEl.classList.add('is-broken');
+      carEl.textContent = '🚗💥';
+    }
+    log('第 ' + cursor + ' 步：' + s.text, s.cls);
+  }
+
+  function reset() {
+    mode = null;
+    steps = [];
+    cursor = 0;
+    cost = 0;
+    summarized = false;
+    paintCost();
+    paintParts();
+    carEl.className = 'test-car';
+    carEl.textContent = '🚗';
+    Array.prototype.forEach.call(pickBtns, function (b) { b.disabled = false; });
+    consoleEl.innerHTML = '';
+    log('流水线已复位：选好缺陷零件后重新开工…', 'is-muted');
+  }
+
+  Array.prototype.forEach.call(pickBtns, function (b) {
+    b.addEventListener('click', pickDefect);
+  });
+  document.getElementById('test-mode-a').addEventListener('click', function () { startMode('A'); });
+  document.getElementById('test-mode-b').addEventListener('click', function () { startMode('B'); });
+  stepBtn.addEventListener('click', step);
+  resetBtn.addEventListener('click', reset);
+  paintParts();
+  paintCost();
+})();
+</script>
+</body>
+</html>

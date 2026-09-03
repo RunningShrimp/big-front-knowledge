@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>JS 类型、作用域与闭包 · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ===== 本页动画专用样式：作用域链「逐级上报」查找演示（纯手写 CSS） ===== */
+.sc-chain { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; }
+.sc-layer {
+  border: 2px solid #d5dbe7;
+  border-radius: 10px;
+  padding: 8px 12px;
+  background: #f7f9fc;
+  transition: border-color .25s, background .25s, transform .25s;
+}
+.sc-layer.is-active { border-color: #4C6FFF; background: #eef2ff; transform: translateX(8px); }
+.sc-layer.is-found  { border-color: #22a06b; background: #ecfdf3; }
+.sc-layer.is-miss   { opacity: .72; }
+.sc-layer-name { font-weight: 700; font-size: 13px; color: #41506b; }
+.sc-vars { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; min-height: 22px; }
+.sc-var {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px; padding: 2px 8px; border-radius: 6px;
+  background: #fff; border: 1px solid #d5dbe7; color: #41506b;
+  transition: background .2s, color .2s;
+}
+.sc-var.is-hit { background: #22a06b; border-color: #22a06b; color: #fff; }
+.sc-arrow { text-align: center; color: #8a93a6; font-size: 12px; margin: -2px 0; }
+</style>
+</head>
+<body data-page="m1-js-scope">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">知识点：JS 类型、作用域与闭包（建议学习时长约 35 分钟）——类型判断、作用域链、变量提升与闭包原理。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>本页前置依赖只有一页：<a href="./m1-html-semantic.html">HTML 语义化与页面结构</a>（理解「页面由元素组成」即可，本页大量概念发生在 JS 内部）。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：分小标题推进 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、值分两种：基本类型与引用类型</h3>
+    <p>基本类型（number、string、boolean、undefined、null、symbol、bigint）的值直接存在「栈」里：
+      复制变量时复制的是<strong>值本身</strong>，两份从此互不相干。
+      引用类型（对象、数组、函数）的实体放在「堆」里，变量里只存一张指向它的「地址小票」：
+      复制变量复制的是<strong>小票</strong>，于是两个变量操纵的是同一个对象——这就是为什么 <code>b.push(3)</code> 之后 <code>a.length</code> 也变了。</p>
+
+    <h3>二、判断类型的三板斧</h3>
+    <p><code>typeof</code> 能区分大部分基本类型（但 <code>typeof null === 'object'</code> 是历史遗留 bug，函数倒是会返回 <code>'function'</code>）；
+      <code>instanceof</code> 沿原型链回答「这个值是不是某个构造函数造出来的」；
+      <code>Object.prototype.toString.call(x)</code> 最精准，能返回 <code>'[object Array]'</code> 这样的准确标签。</p>
+
+    <h3>三、作用域与作用域链</h3>
+    <p>作用域就是变量的「有效房间」：函数每被调用一次，就新开一间房。
+      在房间里用到一个变量时，JS 从当前房间开始找，找不到就推门出去到外层房间找，一路找到全局——
+      这条「逐级向外」的查找路线叫<strong>作用域链</strong>。关键是：路线在函数<strong>定义时</strong>就定好了（词法作用域），与函数在哪儿被调用无关。</p>
+
+    <h3>四、变量提升与暂时性死区</h3>
+    <p><code>var</code> 的声明会被「提升」到函数顶部，所以在声明之前访问它得到 <code>undefined</code>（不报错）——这是历史包袱。
+      <code>let/const</code> 其实也会提升，但在声明语句执行前处于<strong>暂时性死区</strong>：访问直接抛 ReferenceError。
+      <code>const</code> 的「绑定」不可重新赋值，但对象的内容（属性）依然可以修改。</p>
+
+    <h3>五、闭包：函数记住了出生地</h3>
+    <p>内层函数引用了外层函数的变量，当外层函数已经返回、按理说变量该销毁时，这些变量却因为被内层函数「惦记着」而继续存活，且只属于这一个内层函数——这就是<strong>闭包</strong>。</p>
+<pre><code>function makeCounter() {
+  var count = 0;              // 被内层函数记住的私有变量
+  return function () {
+    count = count + 1;
+    return count;
+  };
+}
+var c1 = makeCounter();
+var c2 = makeCounter();
+c1(); c1();  // c1 各自计数，返回 2
+c2();        // c2 是另一个独立闭包，返回 1</code></pre>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 作用域链像小区门禁</div>
+      <p>小李住 3 栋 502：在自己家里（当前作用域）拿什么私人东西都行；想借工具就出房门去客厅（外层函数作用域），
+        还没有就下楼去小区便利店（全局作用域）——查找永远「从里向外」逐级走，且路线在你搬进来那天（函数定义时）就固定了。
+        如果便利店也没有，就是「查无此人」，直接报 ReferenceError。反过来，便利店的东西（全局变量）全小区都够得着，但住在楼里的私人东西，外人是摸不到的。</p>
+    </div>
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 闭包像外卖柜</div>
+      <p>下班前，你把外卖放进公司楼下的外卖柜（外层函数把变量留在内存里），然后回家了（外层函数执行完毕、调用栈清空）。
+        但你手里还捏着取件小票（内层函数的引用）——晚上到家想吃了，凭小票照样开柜取出当初存的东西。
+        而且柜子按小票隔离：你的小票开不了别人的柜子（闭包变量对外不可见，等效私有变量）。
+        函数回到「家」里，仍能凭小票取出「出生地」存放的东西，这就是闭包。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：作用域链逐级查找（可点击变量 + 单步执行，纯手写 DOM/CSS） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>把作用域当成三间「房间」，亲手走一遍逐级上报的查找路线：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">inner 函数想用几个变量：name（自己房间就有）、dept（要出门去外层房间）、price（要一路走到小区门口的全局）、salary（谁家都没有）。
+        先点一个变量名，再反复点「下一站」看查找如何逐级上报：</p>
+      <pre><code>var price = 99;                 // 全局作用域
+function outer() {
+  var dept = '技术部';           // outer 的函数作用域
+  function inner() {
+    var name = '小李';           // inner 的函数作用域
+    // 查找路线：inner → outer → 全局（定义时就定好的路线）
+  }
+  inner();
+}
+outer();</code></pre>
+      <div class="sc-chain" id="scope-chain"></div>
+      <div class="anim-console" id="scope-console"></div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm scope-find" data-target="name">查 name</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm scope-find" data-target="dept">查 dept</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm scope-find" data-target="price">查 price</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm scope-find" data-target="salary">查 salary</button>
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="scope-step" disabled>下一站</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="scope-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（全部为课程数据中的真实 path） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="./m1-html-semantic.html">HTML 语义化与页面结构</a>——先建立「页面与代码」的整体图景，再深入 JS 的内部机制。</p>
+    <p><strong>向后延伸</strong>：理解了变量怎么存、怎么找，下一步自然要问「对象的方法从哪来、函数里的 this 指谁」——即<a href="./m1-js-prototype.html">原型链与 this</a>；
+      而 let/const、箭头函数这些现代写法的细节，见<a href="./m1-js-es6.html">ES6+ 核心特性</a>。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="../m4/m4-runtime.html">运行时优化：防抖、节流与计算缓存</a> —— 防抖节流的定时器 id 全靠闭包保存，是闭包最实用的落地场景</li>
+      <li><a href="../m7/m7-handwrite-basic.html">手写题·JS 基础篇</a> —— 手写防抖/深拷贝/柯里化，本质都在考闭包与私有变量</li>
+      <li><a href="./m1-js-es6.html">ES6+ 核心特性</a> —— 暂时性死区、块级作用域与箭头函数的现代写法对照</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（mode:'main'，判分写入进度仓库） -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后会把最佳成绩写入进度仓库，并推进复习计划：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：变量放在一个个「房间」里，用的时候从自己房间往外逐间找；而闭包就像外卖柜小票——函数回到家了，仍能凭小票取出当初存放的东西，别人还开不了它的柜子。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前复述 1 次「闭包小票」的比喻；1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：经典输出题 + 闭包泄漏题，答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：下面代码输出什么？如何让它输出 0、1、2？</summary>
+<pre><code>for (var i = 0; i &lt; 3; i++) {
+  setTimeout(function () { console.log(i); });
+}</code></pre>
+      <ul>
+        <li>输出 3、3、3：var 是函数作用域，三次回调共享<strong>同一个</strong>变量 i；回调进入任务队列，等同步代码（整个循环）跑完才执行，此时 i 已停在 3。</li>
+        <li>方案一：把 var 改成 let——每轮迭代创建一个独立的块级绑定，回调各自记住当轮的 i。</li>
+        <li>方案二：包一层 IIFE，把 i 当参数拷贝进函数作用域（旧代码兼容写法）。</li>
+        <li>加分项：点出「回调执行时机由事件循环决定」，能自然过渡到事件循环考点。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：什么是闭包？它一定会导致内存泄漏吗？</summary>
+      <ul>
+        <li>定义：函数与它定义时所在词法作用域的组合——内层函数持有外层变量的引用，外层返回后变量依然存活。</li>
+        <li>常见应用：计数器与私有变量、函数柯里化、防抖节流里保存定时器 id、模块模式。</li>
+        <li>泄漏场景：闭包意外长期持有大对象或 DOM 引用——典型是忘了清理的定时器回调、事件监听闭包。</li>
+        <li>准确的结论：闭包本身不是泄漏元凶，「不该活着的引用一直活着」才是；解决办法是及时 clearInterval、移除监听、把不再需要的引用置 null。</li>
+        <li>加分项：现代引擎按「可达性」回收，只被闭包引用的变量不会被误回收；能说出这一点说明懂 GC 思路。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm1-js-scope'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'）：题目 id 以知识点 id 开头 */
+  var WARMUP = [{
+    id: 'm1-js-scope-warmup-1',
+    type: 'single',
+    stem: '预热：var a = [1, 2]; var b = a; b.push(3); 此时 a.length 是多少？',
+    options: ['2', '3', '抛出错误'],
+    answer: [1],
+    explain: '数组是引用类型：变量 a、b 里存的都不是数组本身，而是指向同一个数组的「地址小票」。b.push(3) 改的是这个共同的数组，a 立刻能看到，length 变成 3。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm1-js-scope-q1',
+      type: 'single',
+      stem: "typeof null 的返回值是？",
+      options: ["'null'", "'object'", "'undefined'"],
+      answer: [1],
+      explain: "typeof null === 'object' 是 JS 早期实现的历史 bug（底层按值的前缀位判断类型，null 的前缀恰好与对象相同），为兼容老代码一直保留至今。判断 null 请直接用 x === null，不要依赖 typeof。"
+    },
+    {
+      id: 'm1-js-scope-q2',
+      type: 'single',
+      stem: 'for (var i = 0; i < 3; i++) { setTimeout(function () { console.log(i); }); } 依次输出？',
+      options: ['0、1、2', '3、3、3', '0、0、0', '什么都不输出'],
+      answer: [1],
+      explain: 'var 是函数作用域：整个循环共享同一个 i。setTimeout 的回调进入任务队列排队，等同步代码（整个循环）跑完才执行，那时 i 已经是 3。把 var 换成 let，每轮循环创建一个独立的块级 i，才会输出 0、1、2。'
+    },
+    {
+      id: 'm1-js-scope-q3',
+      type: 'code',
+      stem: '手写简易记忆化函数 memoize(fn)：返回一个新函数；某参数第一次调用时真正执行 fn 并把结果存入缓存，之后相同参数调用直接读缓存、不再执行 fn（用闭包保存缓存，单参数即可）。',
+      stub: 'function memoize(fn) {\n  // 提示：\n  // 1. 在这里准备一个缓存对象 cache\n  // 2. 返回一个新函数：参数命中缓存就直接返回\n  //    否则调用 fn 得到结果、写入缓存后再返回\n}\n',
+      reference: 'function memoize(fn) {\n  var cache = {};                      // 闭包里的私有缓存，外部摸不到\n  return function (n) {\n    if (n in cache) return cache[n];   // 命中缓存：直接返回，不再计算\n    cache[n] = fn(n);                  // 未命中：计算并写入缓存\n    return cache[n];\n  };\n}',
+      asserts: [
+        "var __calls = 0; var __slow = function (n) { __calls += 1; return n * n; }; var __fast = memoize(__slow); true",
+        "__fast(4) === 16 && __calls === 1",
+        "__fast(4) === 16 && __calls === 1 && __fast(5) === 25 && __calls === 2"
+      ],
+      explain: '核心是「返回的新函数把 cache 闭包住了」：memoize 本身早已执行完毕，但之后每次调用新函数，都能读到同一个 cache——这正是闭包「记住出生地变量」的价值；cache 对外不可访问，等效于私有变量。第一次算过的参数直接查表返回，用空间换时间，这就是函数记忆化（memoization）。第三条断言专门验证：重复调用 __fast(4) 不再让计数增长，说明真的走了缓存。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：作用域链「逐级上报」查找（纯 DOM 手写，无动画库） */
+(function () {
+  'use strict';
+
+  /* 三间「房间」：从最内层到全局。vars 是各层存放的变量 */
+  var LAYERS = [
+    { name: 'inner 函数作用域（小李的房间）', vars: { name: "'小李'" } },
+    { name: 'outer 函数作用域（客厅）',       vars: { dept: "'技术部'" } },
+    { name: '全局作用域（小区门口便利店）',   vars: { price: '99' } }
+  ];
+
+  var chainEl = document.getElementById('scope-chain');
+  var consoleEl = document.getElementById('scope-console');
+  var stepBtn = document.getElementById('scope-step');
+  var resetBtn = document.getElementById('scope-reset');
+  var findBtns = document.querySelectorAll('.scope-find');
+
+  var target = null;   // 当前要找的变量名
+  var level = 0;       // 当前走到第几层
+  var walking = false; // 是否处于查找途中
+
+  /* 把三层房间渲染出来（只渲染一次，之后只切换高亮类） */
+  function renderChain() {
+    chainEl.innerHTML = '';
+    LAYERS.forEach(function (layer, idx) {
+      var box = document.createElement('div');
+      box.className = 'sc-layer';
+      box.setAttribute('data-level', String(idx));
+      var title = document.createElement('div');
+      title.className = 'sc-layer-name';
+      title.textContent = layer.name;
+      box.appendChild(title);
+      var vars = document.createElement('div');
+      vars.className = 'sc-vars';
+      var keys = Object.keys(layer.vars);
+      if (keys.length === 0) {
+        var empty = document.createElement('span');
+        empty.className = 'sc-var';
+        empty.textContent = '（没有变量）';
+        vars.appendChild(empty);
+      }
+      keys.forEach(function (k) {
+        var chip = document.createElement('span');
+        chip.className = 'sc-var';
+        chip.setAttribute('data-key', k);
+        chip.textContent = k + ' = ' + layer.vars[k];
+        vars.appendChild(chip);
+      });
+      box.appendChild(vars);
+      chainEl.appendChild(box);
+      /* 房间之间画一条「向外」的箭头 */
+      if (idx < LAYERS.length - 1) {
+        var arrow = document.createElement('div');
+        arrow.className = 'sc-arrow';
+        arrow.textContent = '↑ 自身没有就向外一层（作用域链）';
+        chainEl.appendChild(arrow);
+      }
+    });
+  }
+
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  function layerAt(idx) {
+    return chainEl.querySelectorAll('.sc-layer')[idx];
+  }
+
+  function clearMarks() {
+    chainEl.querySelectorAll('.sc-layer').forEach(function (el) {
+      el.classList.remove('is-active', 'is-found', 'is-miss');
+    });
+    chainEl.querySelectorAll('.sc-var').forEach(function (el) {
+      el.classList.remove('is-hit');
+    });
+  }
+
+  /* 选中一个变量，从最内层开始走 */
+  function startFind(name) {
+    target = name;
+    level = 0;
+    walking = true;
+    clearMarks();
+    consoleEl.innerHTML = '';
+    log('开始查找 ' + target + '：从最内层 inner 出发，点击「下一站」前进…', 'is-muted');
+    stepBtn.disabled = false;
+  }
+
+  /* 单步：只推进「一层房间」的判定，便于观察逐级上报 */
+  function step() {
+    if (!walking) return;
+    var layer = LAYERS[level];
+    var box = layerAt(level);
+    box.classList.add('is-active');
+    if (Object.prototype.hasOwnProperty.call(layer.vars, target)) {
+      /* 命中：在本层找到，查找结束 */
+      box.classList.remove('is-miss');
+      box.classList.add('is-found');
+      var chip = box.querySelector('[data-key="' + target + '"]');
+      if (chip) chip.classList.add('is-hit');
+      log('在「' + layer.name + '」找到 ' + target + ' = ' + layer.vars[target] + ' → 停止向外，查找结束', 'is-ok');
+      finish();
+    } else {
+      box.classList.add('is-miss');
+      if (level === LAYERS.length - 1) {
+        /* 走到全局也没有：变量彻底不存在，报引用错误 */
+        log('在「' + layer.name + '」也没有 ' + target + ' → 整条作用域链走完，抛出 ReferenceError: ' + target + ' is not defined', 'is-end');
+        finish();
+      } else {
+        log('在「' + layer.name + '」没有 ' + target + '，向外走一层', 'is-muted');
+        level += 1;
+      }
+    }
+  }
+
+  function finish() {
+    walking = false;
+    stepBtn.disabled = true;
+    log('点击其它变量名可再来一次，或点「重置」清空痕迹。', 'is-muted');
+  }
+
+  function reset() {
+    target = null;
+    level = 0;
+    walking = false;
+    stepBtn.disabled = true;
+    clearMarks();
+    consoleEl.innerHTML = '';
+    log('已重置。先选一个变量名，再点「下一站」逐步观察作用域链查找…', 'is-muted');
+  }
+
+  findBtns.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      startFind(btn.getAttribute('data-target'));
+    });
+  });
+  stepBtn.addEventListener('click', step);
+  resetBtn.addEventListener('click', reset);
+  renderChain();
+  reset();
+})();
+</script>
+</body>
+</html>

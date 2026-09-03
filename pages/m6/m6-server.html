@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>HTTP 服务：Express 与 Koa · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ===== 本页动画专用样式：包裹层层包装 / 原路拆开，对比 Express 管道与 Koa 洋葱（纯手写 CSS） ===== */
+.mw-wrap {
+  display: flex; gap: 16px; flex-wrap: wrap; align-items: stretch; margin: 12px 0;
+}
+.mw-boxes { flex: 1 1 260px; min-width: 240px; }
+.mw-layer {
+  border: 2px solid #94a3b8; border-radius: 12px; padding: 10px 12px;
+  margin: 6px 0; background: #fff; transition: border-color .25s, background .25s, box-shadow .25s;
+}
+.mw-layer-name { font-size: 12px; font-weight: 700; color: #41506b; }
+.mw-layer.is-active { border-color: #10B981; background: #ecfdf5; box-shadow: 0 0 0 3px rgba(16, 185, 129, .15); }
+.mw-core {
+  border: 2px dashed #c9a34e; border-radius: 10px; padding: 8px 10px; margin: 6px 0 0;
+  background: #fffbeb; font-size: 12px; color: #8a6d1f; transition: box-shadow .25s, background .25s;
+}
+.mw-core.is-active { background: #fef3c7; box-shadow: 0 0 0 3px rgba(201, 163, 78, .25); }
+.mw-log { flex: 1 1 260px; min-width: 240px; }
+.mw-dir { font-size: 12px; margin: 8px 0 2px; color: #8a93a6; }
+</style>
+</head>
+<body data-page="m6-server">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">知识点：HTTP 服务：Express 与 Koa（建议学习时长约 25 分钟）——原生 http 模块起步、中间件思想、Express 单向管道与 Koa 洋葱模型。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>本页前置依赖：<a href="./m6-node.html">Node.js 运行时与事件循环</a>（服务器就跑在事件循环上）、<a href="../m2/m2-http.html">HTTP 协议基础</a>（请求行、方法、状态码是中间件要加工的原料）。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：分小标题推进 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、从一行代码起步：原生 http 模块的最小服务器</h3>
+    <p>Node 内置了 http 模块，十几行就能起一个服务器。它只干一件事：<strong>守着端口收请求</strong>，每来一个请求就调用一次你给的回调，把「请求对象 req」和「响应对象 res」交给你：</p>
+<pre><code>var http = require('http');
+var server = http.createServer(function (req, res) {
+  res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+  res.end('你好，我是服务器'); // 必须以 end 收尾，否则浏览器一直等
+});
+server.listen(3000);</code></pre>
+    <p>它能跑，但没法长大：想加路由得手写 <code>if (req.url === '/users')</code>，想读请求体得手动拼字符串，想记日志得每个分支都补一句——功能全堆在一个回调里，很快变成面条山。</p>
+
+    <h3>二、中间件：把「请求到响应」拆成一节节车厢</h3>
+    <p>框架的解法是<strong>中间件</strong>：每个中间件就是一个函数，拿到 req/res 后做一小件事（记日志、解析 body、校验登录……），然后决定<strong>交棒</strong>（调用 next() 传给下一个）还是<strong>直接响应</strong>（自己 res.end / ctx.body）。服务器按注册顺序把请求依次流过每一节车厢——这就是「框架」最核心的那点事。</p>
+
+    <h3>三、Express：回调式单向流水线</h3>
+<pre><code>var express = require('express');
+var app = express();
+app.use(express.json());                    // 中间件：把 JSON 请求体解析进 req.body
+app.use(function (req, res, next) {
+  console.log(req.method, req.url);         // 中间件：记一笔日志
+  next();                                   // 交棒给下一个中间件
+});
+app.get('/users/:id', function (req, res) { // 路由：路径参数 req.params.id
+  res.json({ id: req.params.id });
+});
+app.listen(3000);</code></pre>
+    <p>Express 的中间件按注册顺序<strong>单向流动</strong>：进 → 加工 → next → 下一站。静态资源一行 <code>app.use(express.static('public'))</code> 就能托管；
+      错误处理靠「四个参数」的特殊中间件 <code>function (err, req, res, next)</code>。注意 Express 4 的坑：<strong>异步代码里</strong>的 Promise 异常不会自动进错误中间件，要自己 <code>next(err)</code> 交出去。</p>
+
+    <h3>四、Koa：async/await 与洋葱模型</h3>
+<pre><code>var Koa = require('koa');
+var app = new Koa();
+app.use(async function (ctx, next) {
+  var start = Date.now();        // 去程：请求刚进来，先干一件事
+  await next();                  // 交棒给下游，等它全部处理完再回来
+  ctx.set('X-Response-Time', (Date.now() - start) + 'ms'); // 回程：下游都完成了
+});
+app.use(async function (ctx) {
+  ctx.body = { msg: 'ok' };      // 最内层：真正干活、写响应
+});
+app.listen(3000);</code></pre>
+    <p>Koa 的中间件是 async 函数，<code>await next()</code> 之前的代码在<strong>去程</strong>执行，之后的代码在<strong>回程</strong>执行——一层包一层再原路展开，像洋葱。
+      这让「响应之后还要做的事」（耗时统计、加响应头、统一错误捕获 <code>try { await next() } catch (e) {...}</code>）有了天然的落点，一个最外层中间件就能兜住所有内层异常。</p>
+
+    <h3>五、常用中间件清单：路由之外的三件套</h3>
+    <p>真实项目几乎必备三样：<strong>body 解析</strong>（express.json() / koa-bodyparser，把请求体变成对象）、
+      <strong>cors</strong>（统一给响应加 Access-Control-Allow-Origin 等头，放行跨域请求）、<strong>静态资源</strong>（express.static，托管打包产物）。
+      它们都是普通中间件——理解了「函数 + next()」，就能看懂框架生态里的一切插件。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 打包一份礼物：层层裹上，原路拆开</div>
+      <p>快递员小 K 要寄一份礼物。他先套上防压盒，顺手<strong>贴好面单</strong>（中间件 A 的去程）；再塞防撞泡沫，顺手<strong>写了张易碎便签</strong>（中间件 B 的去程）；
+        最后套上快递袋（中间件 C 的去程），袋子最里面才是<strong>礼物本身</strong>（业务代码，真正写响应的地方）。</p>
+      <p>收件人拆包时严格按<strong>原路反序</strong>：先拆快递袋——拆的时候可以顺手<strong>拍照留底</strong>（中间件 C 的回程）；再取出泡沫——顺手<strong>核对便签</strong>（中间件 B 的回程）；最后拆防压盒——顺手<strong>在面单上盖章记录总耗时</strong>（中间件 A 的回程）。
+        Koa 的 <code>await next()</code> 之前是「裹包装」，之后是「拆包装」；而 Express 的流水线只有「裹包装」这一个方向，next() 一去不回头，
+        想在「拆开时」做点事（比如统计耗时）就得另想办法。这就是两个框架最本质的区别。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：包裹包装/拆包，对比 Express 单向管道与 Koa 洋葱（可单步 + 自动播放，纯 DOM/CSS/JS） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>同一份请求包裹，两种框架两种走法。切换模式后单步执行，重点看「有没有回程」：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">三层包装对应三个中间件（A 防压盒 / B 防撞泡沫 / C 快递袋），最里面是礼物（业务处理）。
+        切到「Koa 洋葱」模式，能看到每个中间件被经过两次：</p>
+      <div class="mw-wrap">
+        <div class="mw-boxes">
+          <div class="mw-dir" id="mw-dir">模式：Express 单向管道</div>
+          <div class="mw-layer" id="mw-layer-A"><span class="mw-layer-name">中间件 A · 防压盒</span><div id="mw-text-A" style="font-size:12px;color:#8a93a6;">（待命）</div></div>
+          <div class="mw-layer" id="mw-layer-B"><span class="mw-layer-name">中间件 B · 防撞泡沫</span><div id="mw-text-B" style="font-size:12px;color:#8a93a6;">（待命）</div></div>
+          <div class="mw-layer" id="mw-layer-C"><span class="mw-layer-name">中间件 C · 快递袋</span><div id="mw-text-C" style="font-size:12px;color:#8a93a6;">（待命）</div></div>
+          <div class="mw-core" id="mw-layer-core"><strong>礼物 · 业务处理</strong><div id="mw-text-core" style="font-size:12px;">（待命）</div></div>
+        </div>
+        <div class="mw-log">
+          <div class="anim-console" id="mw-console"></div>
+        </div>
+      </div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="mw-mode-express">模式：Express 管道</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="mw-mode-koa">模式：Koa 洋葱</button>
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="mw-step">单步执行</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="mw-auto">自动播放</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="mw-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（全部为课程数据中的真实 path） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="./m6-node.html">Node.js 运行时与事件循环</a>——框架的 createServer 回调是在事件循环里排队执行的任务；<a href="../m2/m2-http.html">HTTP 协议基础</a>——req/res 就是协议文本的对象化。</p>
+    <p><strong>向后延伸</strong>：会搭服务之后，下一步是把接口设计得规范统一，见<a href="./m6-rest.html">RESTful API 设计</a>。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="../m2/m2-cors.html">跨域与 CORS</a> —— cors 中间件的本质就是按协议规则给响应补几条 Access-Control-* 头</li>
+      <li><a href="../m1/m1-js-promise.html">Promise 与 async/await</a> —— Koa 洋葱模型的地基：await next() 能「等下游回来」全靠 Promise 链</li>
+      <li><a href="../m3/m3-router.html">前端路由</a> —— 前端路由换视图不请求服务器，服务端路由按 URL 分发处理，一对镜像概念</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（mode:'main'，判分写入进度仓库） -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后会把最佳成绩写入进度仓库，并推进复习计划：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：后端框架像一条加工请求的流水线——每个中间件是其中一个工位，做点小活就把请求传给下一站；Express 的传送带只进不回，Koa 的洋葱模型则允许每个工位在请求「进来时」和「出去时」各干一次活。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前手画一遍三中间件的洋葱执行顺序（A1→B1→C→B2→A2）并写一句 Express 与 Koa 的区别；1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：Express vs Koa + 洋葱模型的应用，答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：Express 和 Koa 的中间件机制有什么区别？</summary>
+      <ul>
+        <li>编程模型：Express 基于回调 (req, res, next)，控制权单向流动；Koa 基于 async/await 与 (ctx, next)，next() 返回 Promise。</li>
+        <li>执行形状：Express 是单向管道，next() 一去不回头；Koa 是洋葱模型，await next() 之后代码会「回程」再执行一次。</li>
+        <li>错误处理：Express 4 中异步代码的 Promise 异常不会自动进错误中间件，需手动 next(err)；Koa 在最外层 try { await next() } catch 即可统一兜底。</li>
+        <li>对象设计：Express 的 req/res 贴近原生并做了扩展；Koa 把两者封装成 ctx，并用 getter/setter 代理常用属性。</li>
+        <li>加分项：Express 5 已支持自动捕获 Promise 异常；也能提 Express 生态更老更全、Koa 更轻更现代。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：洋葱模型解决了什么问题？举一个实际用法。</summary>
+      <ul>
+        <li>核心价值：把「响应发出前后」的成对逻辑收敛进同一个函数，前半段去程处理请求、后半段回程处理响应。</li>
+        <li>典型用法一：耗时统计中间件——去程记 start，回程 set 响应头，逻辑聚在一起不用改业务代码。</li>
+        <li>典型用法二：统一错误处理——最外层 try { await next() } catch (err)，任何内层抛错都会被原路带回顶层。</li>
+        <li>推演：三个中间件 A/B/C 的输出顺序恒为 A1 → B1 → C → B2 → A2，面试常考手写 compose。</li>
+        <li>加分项：对比 Express 里同样需求要靠事件监听或多个中间件配合才能实现，说明洋葱模型的表达力优势。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm6-server'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'）：题目 id 以知识点 id 开头 */
+  var WARMUP = [{
+    id: 'm6-server-warmup-1',
+    type: 'single',
+    stem: '预热：Express 中间件里调用 next() 的作用是？',
+    options: [
+      '结束本次响应，把结果发给客户端',
+      '把控制权交给下一个中间件，让请求继续往后流',
+      '重新执行当前中间件一遍',
+      '回退到上一个中间件重新处理'
+    ],
+    answer: [1],
+    explain: 'next() 的唯一职责是把控制权交给下一个注册的中间件；不调用它，请求就停在这一站（Koa 里则停在 await next() 之前）。结束响应是 res.end / ctx.body 的职责，与 next() 无关。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm6-server-q1',
+      type: 'single',
+      stem: 'Koa 注册了三个中间件：A 打印 A1、await next() 后打印 A2；B 打印 B1、await next() 后打印 B2；C 只打印 C。一个请求进来，输出顺序是？',
+      options: ['A1、A2、B1、B2、C', 'A1、B1、C、B2、A2', 'C、B1、B2、A1、A2', 'A1、B1、C、A2、B2'],
+      answer: [1],
+      explain: '洋葱模型：请求先「去程」穿过 A1 → B1 → C，C 是最内层（没有 next 可等）；随后「回程」按注册的逆序逐层返回：先执行 B 的后半段 B2，再执行 A 的后半段 A2。口诀「去程正序、回程逆序、C 只经过一次」。'
+    },
+    {
+      id: 'm6-server-q2',
+      type: 'single',
+      stem: '关于 Express 与 Koa 的中间件机制，下列说法正确的是？',
+      options: [
+        '两者都基于 async/await，中间件执行形状完全一致',
+        'Express 中间件是回调式、按注册顺序单向流动；Koa 中间件是 async 函数，await next() 之后会回到当前中间件继续执行',
+        'Express 的 next() 在同一站可以放心多次调用，没有任何副作用',
+        'Koa 必须在最后一个中间件里手动调用原生 res.end() 才能结束响应'
+      ],
+      answer: [1],
+      explain: 'Express 是「回调 + 单向管道」，Koa 是「async/await + 洋葱」，这正是两者最常被面试追问的区别。Express 的 next() 重复调用会引发 "next() called multiple times" 类错误（框架内会检测重复派发）；Koa 用 ctx.body 赋值即可完成响应，框架负责收尾。'
+    },
+    {
+      id: 'm6-server-q3',
+      type: 'code',
+      stem: '手写 compose 组合中间件函数（Koa 洋葱模型的同步简化版）：compose(middleware) 返回 function (ctx, next)。middleware 是形如 function (ctx, next) 的中间件数组，执行时按「前半段 → next() 下游 → 后半段」的洋葱顺序运行；最内层 next 参数为空数组末尾时对应传入的最外层 next（没有则到此为止）。',
+      stub: 'function compose(middleware) {\n  // 本题为同步简化版：中间件是普通函数 function (ctx, next)\n  // 中间件内部：先做前半段处理 → 调用 next() 交给下游 → 下游完成后做后半段\n  // 要点：\n  // 1. 用递归 dispatch(j) 派发第 j 层中间件\n  // 2. 传给每层的 next 就是「派发下一层」的函数\n  // 3. 走完全部层后，调用最外层传入的 next（若有），否则结束\n  // 4. 进阶：同一层的 next 被调用两次时，抛出 Error("next() called multiple times")\n}\n',
+      reference: 'function compose(middleware) {\n  return function (ctx, next) {\n    var i = -1; // 已派发到的层号，用于拦截重复调用\n    function dispatch(j) {\n      if (j <= i) throw new Error(\'next() called multiple times\');\n      i = j;\n      var fn = middleware[j];          // 第 j 层中间件\n      if (j === middleware.length) fn = next; // 层走完了 → 交给最外层 next\n      if (typeof fn !== \'function\') return;   // 没有最外层 next：洋葱到此为止\n      fn(ctx, function () { dispatch(j + 1); }); // 传给本层的 next = 派发下一层\n    }\n    dispatch(0);\n  };\n}',
+      asserts: [
+        "var __log = []; compose([function (c, n) { __log.push('A1'); n(); __log.push('A2'); }, function (c, n) { __log.push('B1'); n(); __log.push('B2'); }, function (c) { __log.push('C'); }])({}, function () {}); __log.join(',') === 'A1,B1,C,B2,A2'",
+        "var __log2 = []; compose([function (c, n) { __log2.push('A1'); }])({}, function () { __log2.push('END'); }); __log2.join(',') === 'A1'",
+        "var __log3 = []; compose([])({}, function () { __log3.push('N'); }); __log3.join(',') === 'N'",
+        "var __ok = true; try { compose([function (c, n) { n(); n(); }])({}, function () {}); } catch (e) { __ok = false; } __ok === false"
+      ],
+      explain: '四条断言对应洋葱模型的四个关键：第一条验证完整洋葱顺序 A1→B1→C→B2→A2——每层的 next() 派发下一层，下游全部完成后才回到本层后半段，这正是 Koa 借 Promise 实现的「等待回程」的同步等价物；第二条验证「中间件没调 next() 就短路」，最外层 next 不会执行，与真实框架中「某站直接响应后不再后传」对应；第三条验证空中间件数组时直接执行最外层 next（真实 koa-compose 对空数组有同样语义）；第四条验证防重复派发——同一层的 next 被调两次意味着洋葱「分叉」，必须抛错，koa-compose 用层号 i 与 j 的比较实现同一拦截。真实版只多了一步：把 dispatch 包进 Promise 并 return，让 await next() 能等待回程。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：包裹包装 / 原路拆包，对比 Express 管道与 Koa 洋葱（纯 DOM 手写，无动画库） */
+(function () {
+  'use strict';
+
+  /* 两种模式的步骤脚本：layer 指高亮哪一层，text 是该层的状态文案 */
+  var MODES = {
+    express: {
+      name: 'Express 单向管道',
+      steps: [
+        { layer: 'A', dir: '去程（只有这一个方向）', text: '贴面单：记日志 → 调 next() 传给下一站' },
+        { layer: 'B', dir: '去程', text: '塞泡沫：解析请求体 → 调 next()' },
+        { layer: 'core', dir: '去程', text: '业务处理：写响应并结束，流程到此为止' },
+        { layer: null, dir: '终点', text: '响应已发出。A、B 的 next() 之后没有代码，流程一去不回头' }
+      ]
+    },
+    koa: {
+      name: 'Koa 洋葱模型',
+      steps: [
+        { layer: 'A', dir: '去程（包裹方向）', text: '前半段：贴面单（记录开始时间）→ await next()' },
+        { layer: 'B', dir: '去程', text: '前半段：塞泡沫（解析请求体）→ await next()' },
+        { layer: 'C', dir: '去程', text: '前半段：套快递袋（权限校验）→ await next()' },
+        { layer: 'core', dir: '最内层', text: '业务处理：拆到最里面，写 ctx.body' },
+        { layer: 'C', dir: '回程（拆包方向）', text: '后半段：快递袋封口，顺手拍照留底' },
+        { layer: 'B', dir: '回程', text: '后半段：核对易碎便签，加工响应头' },
+        { layer: 'A', dir: '回程', text: '后半段：面单盖章，统计总耗时' },
+        { layer: null, dir: '交付', text: '响应完成。每个中间件都被经过了两次——这就是洋葱' }
+      ]
+    }
+  };
+
+  var dirEl = document.getElementById('mw-dir');
+  var consoleEl = document.getElementById('mw-console');
+  var stepBtn = document.getElementById('mw-step');
+  var autoBtn = document.getElementById('mw-auto');
+  var resetBtn = document.getElementById('mw-reset');
+  var expressBtn = document.getElementById('mw-mode-express');
+  var koaBtn = document.getElementById('mw-mode-koa');
+
+  var LAYERS = ['A', 'B', 'C', 'core']; // 可高亮的四层
+  var mode = 'express';   // 当前模式
+  var idx = -1;           // 已执行到的步骤下标（-1 = 未开始）
+  var timer = null;       // 自动播放定时器
+
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* 渲染某一步：高亮对应层并更新层内文案 */
+  function paintStep(step) {
+    LAYERS.forEach(function (key) {
+      var el = document.getElementById('mw-layer-' + key);
+      el.classList.toggle('is-active', step.layer === key);
+    });
+    dirEl.textContent = '模式：' + MODES[mode].name + '　|　' + step.dir;
+    if (step.layer) {
+      document.getElementById('mw-text-' + step.layer).textContent = step.text;
+    }
+  }
+
+  function clearPaint() {
+    LAYERS.forEach(function (key) {
+      document.getElementById('mw-layer-' + key).classList.remove('is-active');
+      document.getElementById('mw-text-' + key).textContent = '（待命）';
+    });
+    dirEl.textContent = '模式：' + MODES[mode].name;
+  }
+
+  function stopAuto() {
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+      autoBtn.disabled = false;
+    }
+  }
+
+  function step() {
+    var steps = MODES[mode].steps;
+    if (idx >= steps.length - 1) return;
+    stopAuto();
+    idx += 1;
+    var s = steps[idx];
+    paintStep(s);
+    log((idx + 1) + '. [' + s.dir + '] ' + s.text, idx === steps.length - 1 ? 'is-end' : 'is-ok');
+  }
+
+  /* 切模式 / 重置：清空状态与日志 */
+  function reset() {
+    stopAuto();
+    idx = -1;
+    clearPaint();
+    consoleEl.innerHTML = '';
+    log('已切换为「' + MODES[mode].name + '」。点击「单步执行」逐层观察请求的流向…', 'is-muted');
+  }
+
+  function autoPlay() {
+    if (idx >= MODES[mode].steps.length - 1) return;
+    autoBtn.disabled = true;
+    timer = setInterval(function () {
+      step();
+      if (idx >= MODES[mode].steps.length - 1) stopAuto();
+    }, 900);
+  }
+
+  expressBtn.addEventListener('click', function () { mode = 'express'; reset(); });
+  koaBtn.addEventListener('click', function () { mode = 'koa'; reset(); });
+  stepBtn.addEventListener('click', step);
+  autoBtn.addEventListener('click', autoPlay);
+  resetBtn.addEventListener('click', reset);
+  reset();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>面试沟通与反问技巧 · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ===== 本页动画专用样式：对话双通道（说什么 / 怎么说 / 别这么说）演示，纯手写 CSS，零外部库 ===== */
+.dlg-layout { display: flex; gap: 14px; flex-wrap: wrap; margin: 12px 0; }
+.dlg-qs { flex: 0 0 210px; display: flex; flex-direction: column; gap: 8px; }
+.dlg-qbtn {
+  text-align: left; padding: 10px 12px; border: 2px solid #d5dbe7; border-radius: 10px;
+  background: #f7f9fc; cursor: pointer; font-size: 13px; color: #2b3a55; transition: border-color .2s, background .2s;
+}
+.dlg-qbtn:hover { border-color: #4C6FFF; }
+.dlg-qbtn.is-active { border-color: #4C6FFF; background: #eef2ff; font-weight: 700; }
+.dlg-panel { flex: 1 1 320px; min-width: 280px; border: 2px solid #d5dbe7; border-radius: 10px; background: #fff; padding: 12px; }
+.dlg-q { font-size: 13px; font-weight: 700; color: #5b6680; margin-bottom: 10px; line-height: 1.6; }
+.dlg-modes { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.dlg-mode.is-on { border-color: #4C6FFF; background: #eef2ff; color: #3450d6; font-weight: 700; }
+.dlg-seg { margin: 6px 0; padding: 8px 10px; border-radius: 8px; font-size: 13px; line-height: 1.7; }
+.dlg-seg.is-plain { background: #f7f9fc; }
+.dlg-seg.is-ok { background: #f2f8f4; border-left: 3px solid #0FB5A6; }
+.dlg-seg.is-bad { background: #fdf1f1; border-left: 3px solid #d9534f; }
+.dlg-tag { display: inline-block; font-size: 11px; font-weight: 700; border-radius: 4px; padding: 1px 6px; margin-right: 6px; vertical-align: 1px; }
+.dlg-tag.is-ok { background: #0FB5A6; color: #fff; }
+.dlg-tag.is-bad { background: #d9534f; color: #fff; }
+.dlg-hint { font-size: 12px; color: #8a93a6; margin-top: 10px; line-height: 1.6; }
+</style>
+</head>
+<body data-page="m7-soft">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">知识点：面试沟通与反问技巧（建议学习时长约 20 分钟）——结构化表达、不会答时的正确姿势、高质量反问清单与流程管理。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>本页前置依赖：<a href="./m7-project.html">项目拆解与亮点提炼</a>——先把项目故事整理成「背景 + 难点 + 方案 + 结果」，沟通技巧才有弹药可打。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：分小标题推进 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、结构化表达：先给结论，再给理由</h3>
+    <p>面试官一天要听十几个人说话，注意力是稀缺资源。<strong>结论先行</strong>就是把最值钱的信息放在第一句，
+      让对方立刻建立「这段话值得听」的预期；再展开论据和例子，对方是在「验证你的结论」，而不是在迷雾里猜重点。
+      通用框架是 <strong>PREP</strong>：<strong>P</strong>oint 结论 → <strong>R</strong>eason 理由 → <strong>E</strong>xample 例子 → <strong>P</strong>oint 重申。
+      对比一下同一件事的两种说法：「我们用了 Vue3 和 Vite，做了很多页面」（罗列，无重点）vs
+      「我把首屏耗时从 4 秒降到 1.5 秒，主要靠三件事：代码分割、图片按需加载、接口预取」（先结论后论据）——信息量相同，接收效率天差地别。
+      另外<strong>能量化就量化</strong>：耗时、体积、错误率、覆盖率都是硬通货；量化不了的，就讲清「变化前是什么样、变化后是什么样」。</p>
+
+    <h3>二、不会答怎么办：诚实承认 + 展示思考路径</h3>
+    <p>被问住不代表出局，<strong>回应方式</strong>才是评分点。推荐三段式：</p>
+    <ul>
+      <li><strong>承认边界</strong>：「这个我没有在生产项目里用过，深入了解有限」——诚实不丢分，被追问穿帮才丢大分。</li>
+      <li><strong>给出推测</strong>：「但按我的理解，它应该是为了解决……的问题」——调用已有知识向前推理一步，展示的是迁移能力。</li>
+      <li><strong>给出验证方法</strong>：「如果工作里要用，我会先查官方文档 / 写个 demo 跑一下基准测试」——展示的是工程习惯，而不是「等答案」。</li>
+    </ul>
+    <p>三个雷区：不懂装懂（一追问就崩，且信用破产）；干巴巴一句「不知道」就沉默（放弃展示学习能力的机会）；反问「这个在实际工作里重要吗」（像在质疑面试题本身）。记住：面试官抛「不会的题」，很多时候考的<strong>不是知识本身，而是你面对未知的第一反应</strong>。</p>
+
+    <h3>三、高质量反问清单：最后一道免费送分题</h3>
+    <p>「你有什么想问我们的？」几乎每场面试的必答题，答「没有问题」等于把机会原样退回。安全且高质的三类问题：</p>
+    <ul>
+      <li><strong>业务方向</strong>：「团队目前负责的业务是什么？未来半年重点会放在哪块？」——展示你在关心「去了之后做什么」。</li>
+      <li><strong>团队分工</strong>：「前端在团队里怎么分工？和后端、产品怎么协作？迭代节奏如何？」——展示协作意识。</li>
+      <li><strong>成长机制</strong>：「新人一般从哪类任务切入？有导师制或 code review 机制吗？」——展示长期意愿，也能帮你判断这家值不值得去。</li>
+    </ul>
+    <p>三个避坑：<strong>薪资福利</strong>的问题留给 HR 面，第一轮技术面就问容易传递错误信号；<strong>官网和 JD 能查到的信息不要问</strong>（暴露没做功课）；<strong>不要吐槽前公司或抱怨加班</strong>。理想状态是准备 2~3 个问题，对方回答后还能自然追问一层——追问本身就在展示你的倾听与思考。</p>
+
+    <h3>四、流程管理：面试也是一个项目</h3>
+    <p><strong>复盘</strong>：每场面试结束 10 分钟内，把被问住的题记下来，24 小时内弄懂——面试本身就是最好的摸底卷，这和站点错题本是同一个思路。
+      <strong>多家并行</strong>：按意向度排期，把不太想去的公司安排在前几场攒经验，把心仪的公司放在状态最好时。
+      <strong>基础事务</strong>：提前确认地点或会议链接、提前 10 分钟到场、结束时礼貌确认下一步流程与时间线——靠谱的印象往往由这些小事累积。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 两场相亲：条件相当，输赢在「会聊」</div>
+      <p>小周和小李条件相当，先后去相亲。小周全程「你问我答」：问一句答一句，答完就低头刷手机；被问到没想过的问题（「你未来三年什么规划？」），他硬编了一个宏大答案，对方随便追问两句就前后矛盾；结尾对方问「你有什么想了解的」，他说「没有」。饭还没吃完，对方心里已经打了个叉。</p>
+      <p>小李不同：开场先给结论——「我的工作挺稳定，但我更想找能一起把生活过出章法的对象」；被问到没规划过的问题，他坦白说「这块我真没想过，听你这么一说我倒觉得可以想想」，反而显得真诚；全程他会接对方的话头，追问一句「你刚说你喜欢徒步，周末一般去哪条线？」；结束时他主动问「如果处得来，你希望多久见一次面？」——把未来的可能性聊开了。</p>
+      <p>面试和相亲是同一门课：<strong>光有内才不够，表达的结构决定对方接收到几成，倾听决定你有没有听懂问题，反问决定对方觉得你有没有诚意</strong>。尬聊的人条件再好也容易出局——因为对方在你的沉默里，读不到合作的意愿。下面的演示，把同一场面试的「说什么」和「怎么说」拆成两个通道，你自己切换着看。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：对话双通道（可点击切换问题与视角，纯 DOM/CSS/JS，零外部库） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>左侧选择一道面试场景，右侧切换视角：<strong>「说什么」看内容、「怎么说」看结构、「别这么说」看错误示范</strong>：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">同一句回答，在「怎么说」通道里被拆成 结论 → 论据 → 例子 → 重申 的结构角色。结构不是套话——它是让面试官高效接收信息的导览图。</p>
+      <div class="dlg-layout">
+        <div class="dlg-qs" id="dlg-qs"></div>
+        <div class="dlg-panel">
+          <div class="dlg-q" id="dlg-q"></div>
+          <div class="dlg-modes">
+            <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm dlg-mode is-on" id="dlg-mode-what">说什么（内容）</button>
+            <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm dlg-mode" id="dlg-mode-how">怎么说（结构）</button>
+            <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm dlg-mode" id="dlg-mode-bad">别这么说（错误示范）</button>
+          </div>
+          <div id="dlg-body"></div>
+          <div class="dlg-hint" id="dlg-hint"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（全部为课程数据中的真实 path） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="./m7-project.html">项目拆解与亮点提炼</a>——「背景 + 难点 + 方案 + 结果」的项目故事，是结构化表达最常用的素材。</p>
+    <p><strong>向后延伸</strong>：把「结构化表达」推到极限的是<a href="./m7-design.html">前端侧系统设计</a>——澄清需求 → 拆解模块 → 权衡取舍，整场就是一次大型 PREP。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="./m7-handwrite-basic.html">手写题·JS 基础篇</a> —— 动笔前「先和面试官确认边界」的那句话，就是沟通技巧在编码环节的应用。</li>
+      <li><a href="./m7-handwrite-async.html">手写题·异步篇</a> —— 讲题时的「先说思路再落笔、边写边解释为什么」，同样是本页结构化表达的分支。</li>
+      <li><a href="../../pages/m4/m4-cwv.html">Core Web Vitals 性能指标</a> —— 面试里最值钱的量化语言（秒开率、LCP 数字）来自这些指标页。</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（含解析），mode:'main' -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>两道情景判断 + 一道轻量代码题（把「缺点+行动」的表达结构写成一个可测试的函数）：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：面试沟通就是把你会的菜装盘——同样的食材（实力），先端招牌菜（结论先行）、坦诚今天没有的菜（诚实承认不足）、最后问一句「你们招牌是什么」（高质量反问），客人（面试官）对你的印象完全不同。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：本页是软技能页，复习成本低——睡前对着镜子用 PREP 结构把「项目介绍」和「缺点 + 行动」各讲一遍，再把 3 个反问问题口头过一遍；1 天、3 天、7 天后回来重做例题（对应遗忘曲线间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：2 个问法，答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：「你有什么想问我们的？」——这道题到底在考什么？</summary>
+      <ul>
+        <li>它考的不是信息获取，而是诚意与关注点：你关心的是「去了做什么、和谁做、怎么成长」，还是只想快点结束。</li>
+        <li>三类安全高质问题：业务方向（未来半年重点）、团队协作（分工 / 评审 / 节奏）、成长机制（新人切入任务 / 导师制）。</li>
+        <li>时机规则：薪资福利留到 HR 面；官网、JD 能查到的信息不要问（暴露没做功课）。</li>
+        <li>加分动作：对方回答后自然追问一层；把问题和自己的经历绑定——「我过去主要做 C 端，咱们 B 端的节奏会有什么不同？」</li>
+        <li>雷区：说「没有问题了」；第一轮就问加班与调休；借反问吐槽前公司。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：整场面试的表达，有没有可复用的框架？</summary>
+      <ul>
+        <li>开放题通用 PREP：结论 → 理由 → 例子 → 重申；第一句永远先给结论或量化结果。</li>
+        <li>讲项目用四段式：背景 + 难点 + 方案 + 可量化结果（详见项目拆解页）。</li>
+        <li>不会的题用三段式：诚实承认边界 → 基于已有知识给出推测 → 给出验证方法（查文档 / 写 demo）。</li>
+        <li>手写题口头禅：「我先确认一下边界」——既是信息收集，也是沟通素养的现场展示。</li>
+        <li>场外动作：每场面试后 10 分钟复盘，把被问住的题弄懂——面试本身就是最好的摸底卷。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm7-soft'; // 与 body data-page、curriculum.js 中的 points[].id 一字不差
+
+  /* 预热题（mode:'warmup'） */
+  var WARMUP = [{
+    id: 'm7-soft-w1',
+    type: 'single',
+    stem: '预热：面试官说「介绍一个你负责的项目」，下面哪种开场更好？',
+    options: [
+      '「我们项目用了 Vue3 + Vite + TypeScript，还搭了 CI……」（从技术栈罗列开始）',
+      '「这个项目我把首屏耗时从 4 秒降到了 1.5 秒，主要靠三件事……」（先给结论和结果）',
+      '「这个项目说来话长，要从三年前说起……」（从背景铺陈开始）',
+      '「项目是团队一起做的，我个人其实没做什么。」（先自谦）'
+    ],
+    answer: [1],
+    explain: '面试官的注意力是稀缺资源：先抛出可量化的结论，他立刻知道这个项目的价值锚点，才会带着兴趣听后面的论据。技术栈、背景都可以放在结论之后作为支撑；一上来罗列技术栈或铺陈背景故事，重点会被稀释，自谦式开场更是亲手把话题往冷场里带。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm7-soft-q1',
+      type: 'single',
+      stem: '被问到完全没接触过的技术（比如某个没用过的构建工具），哪种应对最好？',
+      options: [
+        '凭印象说「用过」，先混过去再说',
+        '直接说「不知道」，等面试官换题',
+        '诚实说明没在生产用过，然后基于已有知识给出理解与验证思路，并表示会去研究',
+        '反问面试官「这个在实际工作里重要吗」'
+      ],
+      answer: [2],
+      explain: '「诚实 + 思考路径」是唯一的双赢答案：硬编会在追问里崩塌，且信用破产影响后面所有回答；干瘪的「不知道」等于放弃展示学习能力；质疑题目重要性则显得态度敷衍。面试官抛「不会的题」时，考的往往不是知识本身，而是你面对未知的第一反应——承认边界、调用已有知识推理、给出验证方法，这正是工程师面对陌生问题的标准动作。'
+    },
+    {
+      id: 'm7-soft-q2',
+      type: 'single',
+      stem: '第一轮技术面的最后，面试官问「你有什么想问我们的？」哪个提问最合适？',
+      options: [
+        '「加班多吗？调休怎么算？」',
+        '「咱们团队现在有多少人？」（招聘信息上写着 15 人）',
+        '「团队目前的技术栈和迭代节奏是怎样的？新人一般从哪类任务切入？」',
+        '「没有问题了，谢谢。」'
+      ],
+      answer: [2],
+      explain: '好反问的三个特征：关心业务与技术本身、答案不容易公开查到、能自然引出追问。A 的薪资福利问题该留给 HR 面，第一轮就问容易传递「更在意待遇」的信号；B 的问题暴露你没做功课——公开可查的信息拿来提问，等于当面展示「我没有提前了解你们」；D 把最后一道免费送分题原样退回。关于业务方向、团队分工、成长机制的问题，既展示诚意，也帮你判断这家公司值不值得去。'
+    },
+    {
+      id: 'm7-soft-q3',
+      type: 'code',
+      stem: '实现 answerWeakness(weakness, plan)：把「缺点表述」改写成「缺点 + 行动」的结构化回答。要求：去掉 weakness 首尾空白；若末尾已有中文句号「。」则去掉一个（避免和模板拼出双句号）；返回模板「{缺点}。为此我已经在行动：{行动}。」',
+      stub: 'function answerWeakness(weakness, plan) {\n  // 在此实现：「缺点 + 行动」的结构化改写\n  // 提示 1：先去掉首尾空白\n  // 提示 2：末尾已有的「。」要去掉，模板里会统一补句号\n}\n',
+      reference: "function answerWeakness(weakness, plan) {\n  var w = String(weakness || '').trim();      // 去掉首尾空白：真实输入永远不干净\n  if (w.charAt(w.length - 1) === '。') {      // 已带句号则去掉，避免和模板拼出双句号\n    w = w.slice(0, -1);\n  }\n  return w + '。为此我已经在行动：' + plan + '。';\n}",
+      asserts: [
+        'answerWeakness("我的短板是算法基础薄弱。", "每周刷三道题并写复盘") === "我的短板是算法基础薄弱。为此我已经在行动：每周刷三道题并写复盘。"',
+        'answerWeakness("我对前端监控了解不多", "在自己的博客里接了一个上报脚本") === "我对前端监控了解不多。为此我已经在行动：在自己的博客里接了一个上报脚本。"',
+        'answerWeakness("  表达容易紧张  ", "每周录一次自己讲题的视频") === "表达容易紧张。为此我已经在行动：每周录一次自己讲题的视频。"',
+        'answerWeakness("A", "B") === "A。为此我已经在行动：B。"'
+      ],
+      explain: '先说「为什么面试要缺点+行动」：只说缺点是白白扣分，回避缺点又答非所问；把缺点和一个正在发生的改进行动绑在一起，传递的是「有自知之明 + 有执行力」，这正是面试官想确认的信号。再说代码层面：第 1 条断言验证句号归一化——输入自带「。」时要去掉一个，否则输出会出现双句号（模板统一补句号是稳定输出的前提）；第 2 条验证无句号的常规拼接；第 3 条验证 trim——真实输入永远带毛刺（多余空格），入口处清洗是防御式编程的基本功；第 4 条是最小模板验证，确认输出格式逐字符稳定。把「表达结构」做成可断言的函数还有一层用意：结构稳定的输出才谈得上被复用、被测试——你回答面试问题也应该追求这种「结构稳定」，面试官听到第三句就能预判你第四句要说什么，这就是结构化表达的质感。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（会推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：对话双通道切换器（纯 DOM 手写，零外部库）。
+   三道真实面试场景 × 三个视角：说什么（内容）/ 怎么说（结构拆解）/ 别这么说（错误示范）。
+   点击左侧问题卡切换场景，点击视角按钮切换同一段对话的「解读通道」。 */
+(function () {
+  'use strict';
+
+  /* 对话数据：good = 推荐回答（每段承担一个结构角色）；bad = 同场景的错误示范 */
+  var DLG = [
+    {
+      label: '① 介绍一个最有成就感的项目',
+      q: '面试官：介绍一个你最有成就感的项目。',
+      good: [
+        { tag: '结论', text: '我最有成就感的是把公司官网的首屏耗时从 4.2 秒优化到 1.6 秒，跳出率降了 18%。' },
+        { tag: '论据', text: '主要做了三件事：路由级代码分割、图片按屏加载、关键接口预取。' },
+        { tag: '例子', text: '单说代码分割：JS 包体积从 1.1MB 砍到 480KB，LCP 实测降了约 2 秒。' },
+        { tag: '重申', text: '这个项目让我养成了「先看指标定位瓶颈、再动手优化」的习惯。' }
+      ],
+      bad: [
+        { tag: '流水账', text: '「我们用了 Vue，做了很多页面，还有登录，还有后台管理……」——罗列功能，没有重点，面试官抓不到价值锚点。' },
+        { tag: '没结果', text: '「做了挺多优化的，反正就是快了很多。」——没有数字、没有前后对比，价值无法被感知。' }
+      ]
+    },
+    {
+      label: '② 被问到完全不会的题',
+      q: '面试官：你了解 WebAssembly 吗？我们有些重计算场景在考虑它。',
+      good: [
+        { tag: '诚实', text: 'WebAssembly 我没有在生产项目里用过，深入了解有限，这点我跟您直说。' },
+        { tag: '思考路径', text: '但按我的理解：它给浏览器补了一条高性能的字节码执行通道，适合音视频解码、图形计算这类密集场景。' },
+        { tag: '验证方法', text: '如果真要用，我会先写个基准测试，对比它和纯 JS 在我们场景里的实际收益，再决定是否引入。' }
+      ],
+      bad: [
+        { tag: '硬编', text: '「WebAssembly 啊，我特别熟，项目里用得很多。」——一追问三句就露馅，还会连累前面所有回答的可信度。' },
+        { tag: '干瘪', text: '「不知道，没听过。」——话题当场聊死，也放弃了展示学习能力的机会。' }
+      ]
+    },
+    {
+      label: '③ 「你有什么想问我们的？」',
+      q: '面试官：我的问题问完了，你有什么想问我们的吗？',
+      good: [
+        { tag: '业务', text: '团队目前负责的业务方向是什么？未来半年重点会放在哪块？' },
+        { tag: '分工', text: '前端在团队里的分工是怎样的？和后端、产品怎么协作？' },
+        { tag: '成长', text: '新人入职后一般从哪类任务切入？团队有 code review 或导师机制吗？' }
+      ],
+      bad: [
+        { tag: '时机不对', text: '「加班多么？加班费怎么算？」——关心待遇没有错，但第一轮技术面就问容易传递错误信号，这类问题留给 HR 面。' },
+        { tag: '零分反问', text: '「没有问题了。」——等于把展示诚意的机会原样退回，也少了一次判断团队值不值得去的信息来源。' }
+      ]
+    }
+  ];
+
+  /* 三种视角的底部提示语 */
+  var HINTS = {
+    what: '「说什么」视角：只看内容本身。切到「怎么说」，看每句话承担的结构角色。',
+    how: '「怎么说」视角：同一段回答被拆成结构角色。结论先行让对方立刻抓住重点，例子让结论可信，重申把话题收拢回你的主场。',
+    bad: '「别这么说」视角：这些回答踩了沟通的坑。对照「怎么说」通道里的正确示范，体会差别在哪里。'
+  };
+
+  var qi = 0;            // 当前场景下标
+  var mode = 'what';     // 当前视角：what / how / bad
+  var qsEl = document.getElementById('dlg-qs');
+  var qEl = document.getElementById('dlg-q');
+  var bodyEl = document.getElementById('dlg-body');
+  var hintEl = document.getElementById('dlg-hint');
+  var modeBtns = {
+    what: document.getElementById('dlg-mode-what'),
+    how: document.getElementById('dlg-mode-how'),
+    bad: document.getElementById('dlg-mode-bad')
+  };
+
+  /* 渲染一个回答分段：showTag 决定是否显示结构标签 */
+  function buildSeg(seg, tone, showTag) {
+    var div = document.createElement('div');
+    div.className = 'dlg-seg ' + tone;
+    if (showTag) {
+      var tag = document.createElement('span');
+      tag.className = 'dlg-tag ' + tone;
+      tag.textContent = seg.tag;
+      div.appendChild(tag);
+    }
+    div.appendChild(document.createTextNode(seg.text));
+    return div;
+  }
+
+  /* 整体渲染：问题文本 + 当前视角下的分段列表 + 提示语 */
+  function render() {
+    var d = DLG[qi];
+    qEl.textContent = d.q;
+
+    bodyEl.innerHTML = '';
+    if (mode === 'what') {
+      d.good.forEach(function (seg) { bodyEl.appendChild(buildSeg(seg, 'is-plain', false)); });
+    } else if (mode === 'how') {
+      d.good.forEach(function (seg) { bodyEl.appendChild(buildSeg(seg, 'is-ok', true)); });
+    } else {
+      d.bad.forEach(function (seg) { bodyEl.appendChild(buildSeg(seg, 'is-bad', true)); });
+    }
+    hintEl.textContent = HINTS[mode];
+
+    /* 同步左侧问题卡与视角按钮的高亮态 */
+    var qbtns = qsEl.querySelectorAll('.dlg-qbtn');
+    for (var i = 0; i < qbtns.length; i++) qbtns[i].classList.toggle('is-active', i === qi);
+    modeBtns.what.classList.toggle('is-on', mode === 'what');
+    modeBtns.how.classList.toggle('is-on', mode === 'how');
+    modeBtns.bad.classList.toggle('is-on', mode === 'bad');
+  }
+
+  /* 构建左侧问题卡：点击切换当前场景 */
+  DLG.forEach(function (d, i) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'dlg-qbtn';
+    b.textContent = d.label;
+    b.addEventListener('click', function () { qi = i; render(); });
+    qsEl.appendChild(b);
+  });
+
+  /* 视角切换按钮 */
+  modeBtns.what.addEventListener('click', function () { mode = 'what'; render(); });
+  modeBtns.how.addEventListener('click', function () { mode = 'how'; render(); });
+  modeBtns.bad.addEventListener('click', function () { mode = 'bad'; render(); });
+
+  render();
+})();
+</script>
+</body>
+</html>

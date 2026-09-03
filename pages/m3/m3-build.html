@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>构建工具思想与 Vite · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ===== 本页动画专用样式（纯手写，无外部资源） ===== */
+.bt-wrap { display: flex; flex-wrap: wrap; gap: 14px; margin: 10px 0; }
+.bt-panel {
+  flex: 1 1 280px; min-width: 270px;
+  border: 1px solid var(--fg-c-line); border-radius: 8px;
+  background: var(--fg-c-card); padding: 10px 12px;
+  transition: border-color .3s, box-shadow .3s;
+}
+.bt-panel.is-open { border-color: var(--fg-c-ok); box-shadow: 0 0 0 2px var(--fg-c-ok-weak); }
+.bt-name { font-weight: 700; font-size: 14px; }
+.bt-status { font-size: 12px; color: var(--fg-c-ink-2); margin: 4px 0 8px; }
+.bt-bar { height: 8px; border-radius: 4px; background: var(--fg-c-bg); border: 1px solid var(--fg-c-line); overflow: hidden; }
+.bt-bar-fill { height: 100%; width: 0; background: var(--fg-c-primary); transition: width .3s; }
+.bt-panel.is-open .bt-bar-fill { background: var(--fg-c-ok); }
+.bt-dishes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.bt-dish {
+  font-size: 12px; border: 1px solid var(--fg-c-line); border-radius: 14px;
+  padding: 3px 10px; background: var(--fg-c-bg); cursor: pointer; user-select: none;
+  transition: all .3s;
+}
+.bt-dish.is-cooked { border-color: var(--fg-c-ok); background: var(--fg-c-ok-weak); color: var(--fg-c-ok); }
+.bt-dish.is-cooking { border-color: var(--fg-c-warn); background: var(--fg-c-warn-weak); color: var(--fg-c-warn); animation: bt-pulse .5s infinite alternate; }
+.bt-dish.is-served { border-color: var(--fg-c-primary); background: var(--fg-c-primary-weak); color: var(--fg-c-primary); }
+@keyframes bt-pulse { from { transform: scale(1); } to { transform: scale(1.12); } }
+.bt-note { font-size: 12px; color: var(--fg-c-ink-3); margin-top: 6px; }
+</style>
+</head>
+<body data-page="m3-build">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">构建工具到底在替你干什么？为什么 Webpack 开发冷启动慢、Vite 却能秒开？看清「先全量打包」与「按需编译」两种哲学。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>前置知识：建议先过一遍 <a href="./m3-module.html">模块化：ESM 与 CommonJS</a>——
+      本页反复出现的「依赖图」「按需编译」「Tree Shaking」，全部建立在「import 可以被静态分析」这件事上，那一页是本页的地基。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：讲解 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>一、浏览器只认识它认识的，构建工具补上剩下的</h3>
+    <p>你写的工程代码浏览器往往「一口吞不下去」：几百个模块文件（总不能发几百个请求）、TypeScript/JSX 这类浏览器不认识的语法、
+      还要兼容旧浏览器（语法降级）、上线前要把体积压到最小（压缩混淆）、把环境变量注入代码。这些脏活累活，
+      全部交给<strong>构建工具</strong>（Webpack / Rollup / esbuild / Vite）在代码送进浏览器之前处理。它的四大本职：
+      <strong>模块合并（打包）、语法降级（编译转译）、资源压缩、环境变量注入</strong>——记住这个清单，就不会把它神化成「黑魔法」。</p>
+
+    <h3>二、传统方案 Webpack：先全部打包，再开始服务</h3>
+    <p>Webpack 的开发流程是：<code>npm run dev</code> → 从入口出发<strong>递归分析整个依赖图</strong>，
+      把所有模块编译、合并成若干 bundle → 打包完毕，dev server 才开始提供服务。
+      项目越大，依赖图越大，「启动前的等待」就越长——哪怕你今天只想改首页的一行字，
+      它也要先把几千个模块全部嚼一遍。<strong>冷启动慢</strong>是这条路线的天然代价。</p>
+
+    <h3>三、Vite 的思路：开发时按需编译，利用浏览器原生 ESM</h3>
+    <p>Vite 反着来：<strong>开发环境几乎不打包</strong>。启动 dev server 时只做一件轻活——用 esbuild 把第三方依赖预构建一下
+      （把 CJS 依赖转成 ESM、把碎文件合并），源码模块一个都不碰。然后它直接把「未经打包的源码」交给浏览器：
+      现代浏览器本来就走 <code>&lt;script type="module"&gt;</code> 的原生 ESM 加载，遇到 <code>import</code> 就向 dev server 要那个文件，
+      Vite <strong>收到请求才即时编译该模块</strong>并返回。于是启动速度与项目体积几乎无关——因为开工时根本没编译几个文件。
+      这就是「按需编译」：请求驱动、即点即得。</p>
+
+    <h3>四、生产环境仍然要正经打包</h3>
+    <p>别把 Vite 的快误解成「不需要打包」。开发环境是「现炒」给一个用户看的；生产环境要把产物发给成千上万个用户，
+      必须做合并、压缩、加指纹、拆包优化——此时 Vite 换用 <strong>Rollup</strong> 做全量打包（依赖预构建用的则是 esbuild）。
+      所以准确的总结是：<strong>Vite 的快是「开发期」的快，来自按需编译 + esbuild 预构建；生产构建它依然走成熟的打包路线</strong>。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比 · 自助餐厅与现点现炒的小馆子</div>
+      <p>Webpack 像<strong>自助餐厅</strong>：规矩是「全部菜炒好才开门营业」。每天早晨（冷启动），后厨把菜单上六十几道菜
+        全部炒完、摆上餐台（全量打包），客人才能进店。开门之后自然爽——客人点什么，端起来就吃（改代码后热更新也快）；
+        可每天开门前的那一两个小时，大家只能盯着卷帘门干等。店越大（项目越大），备菜越久。</p>
+      <p>Vite 像<strong>现点现炒的小馆子</strong>：卷帘门唰地一下就拉开（dev server 秒起），后厨其实还空着。
+        客人点什么（浏览器 import 哪个模块），师傅才现炒那一道（按需编译），几十秒后热腾腾上桌；
+        没人点的菜，后厨一整天都不会碰。当然，店里办婚宴（生产环境、服务成千上万客人）时，
+        现炒就顶不住了——老板会请一支专业宴席班子（Rollup）来做全量备菜，该打包的一样打包。</p>
+    </div>
+
+    <h3>五、配置与插件生态：一套配置打通开发与生产</h3>
+    <p>Vite 把「开发服务器行为」与「生产构建行为」收进同一份 <code>vite.config</code>，通过插件机制扩展
+      （如 <code>@vitejs/plugin-react</code> 处理 JSX）。插件在两条流水线上都能挂钩子，所以大多数项目一份配置就能同时管住
+      dev 与 build——工程化体验统一，也是它流行的重要原因。</p>
+  </section>
+
+  <!-- ③ 动画演示：自助餐厅 vs 现点现炒（纯手写，可点击操作） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>两家餐厅、同一份六道菜的菜单。先分别点「开业」，观察冷启动差异；开业后<strong>点击任意菜品模拟顾客点单</strong>，
+      对比出餐方式；最后试试「模拟生产构建」看 Vite 请谁来帮手。</p>
+    <div class="anim-stage">
+      <p class="anim-caption">场景：一个 6 个页面的电商项目。菜品 = 页面模块；进度条 = 打包/编译完成度。</p>
+      <div class="bt-wrap">
+        <div class="bt-panel" id="bt-wp-panel">
+          <div class="bt-name">Webpack · 自助餐厅</div>
+          <div class="bt-status" id="bt-wp-status">歇业中——全部菜炒好才开门</div>
+          <div class="bt-bar"><div class="bt-bar-fill" id="bt-wp-bar"></div></div>
+          <div class="bt-dishes" id="bt-wp-dishes"></div>
+          <div class="bt-note">点菜品 = 顾客点单（开业后生效）</div>
+        </div>
+        <div class="bt-panel" id="bt-vt-panel">
+          <div class="bt-name">Vite · 现点现炒</div>
+          <div class="bt-status" id="bt-vt-status">歇业中——拉门即营业</div>
+          <div class="bt-bar"><div class="bt-bar-fill" id="bt-vt-bar"></div></div>
+          <div class="bt-dishes" id="bt-vt-dishes"></div>
+          <div class="bt-note">点菜品 = 顾客点单（开业后生效）</div>
+        </div>
+      </div>
+      <div class="anim-console" id="bt-console">
+        <div class="anim-line is-muted">分别点击两家的「开业」按钮开始，日志会告诉你每一秒发生了什么…</div>
+      </div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="bt-wp-open">Webpack：开业（先全部打包）</button>
+        <button type="button" class="fg-btn fg-btn--primary fg-btn--sm" id="bt-vt-open">Vite：开业（按需编译）</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="bt-prod">模拟生产构建（办宴席）</button>
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="bt-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（真实课程路径） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="./m3-module.html">模块化：ESM 与 CommonJS</a>——
+      没有静态可分析的 import，就没有依赖图、按需编译与 Tree Shaking；本页所有魔法都站在那一页的结论上。</p>
+    <p><strong>向后延伸</strong>：构建产物如何送到用户手里，是下一站的功课——
+      <a href="../m4/m4-load.html">首屏与资源加载优化</a> 讲构建后的资源怎么拆、怎么按优先级加载；
+      <a href="../m6/m6-deploy.html">部署基础：Nginx 与 Docker</a> 讲打包产物如何被静态服务器与容器服务起来。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="../m2/m2-pipeline.html">浏览器渲染流水线</a> —— 构建产物（脚本/样式）进入浏览器后如何被解析、哪些会阻塞渲染，决定打包策略怎么定。</li>
+      <li><a href="../m4/m4-load.html">首屏与资源加载优化</a> —— 路由懒加载、代码分割都是「构建工具能力 + 加载策略」的组合拳。</li>
+      <li><a href="../m6/m6-deploy.html">部署基础：Nginx 与 Docker</a> —— dist 目录里的静态产物上线、SPA 路由兜底，都在部署环节收尾。</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（含解析），mode:'main' -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后把最佳成绩写入进度仓库（见页面底部内联脚本）：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：构建工具是「翻译+打包流水线」，替浏览器看懂你写的现代代码并压缩瘦身；
+      Webpack 像自助餐厅——全部菜炒好才开门（先全量打包再服务），Vite 像现点现炒的小馆子——开发时客人点哪道才炒哪道（按需编译），办宴席（生产上线）时再请专业帮手 Rollup。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前复述 1 次「构建四职责：合并/降级/压缩/注入；Vite 开发快 = 原生 ESM 按需编译 + esbuild 预构建；生产构建用 Rollup」，1 天后、3 天后、7 天后各回来重做一遍例题（对应遗忘曲线 1/3/7 天间隔），站点会在地图页标出「该复习了」。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：2 个问法，答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：Vite 为什么快？它与 Webpack 的本质差异是什么？</summary>
+      <ul>
+        <li>启动模型不同：Webpack 先递归打包整个依赖图再提供服务，冷启动耗时随项目体积增长；Vite 先起 dev server，源码模块不做打包。</li>
+        <li>按需编译：Vite 利用浏览器原生 ESM，浏览器 import 哪个文件，dev server 才即时编译哪个，请求驱动、启动速度与项目大小基本无关。</li>
+        <li>依赖预构建：首次启动用 esbuild 把第三方依赖转成 ESM 并合并碎文件，esbuild 是 Go 编写的原生工具，比 JS 工具链快一个量级。</li>
+        <li>本质差异一句话：Webpack 是「bundler 优先」，Vite 是「native ESM + 按需编译优先」，两者不是谁取代谁，而是开发体验与构建策略的不同取舍。</li>
+        <li>加分项：热更新（HMR）也更精确——模块级失效重编译，而不是整包重新构建。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：「Vite 不需要打包」这个说法对吗？生产环境怎么办？</summary>
+      <ul>
+        <li>不对，快只属于开发期。生产环境面向海量用户，必须合并、压缩、语法降级、加内容指纹、按路由拆包——这些只有全量打包能做到。</li>
+        <li>Vite 生产构建底层用 Rollup（依赖预构建用 esbuild）：产物质量、Tree Shaking、代码分割都是打包器的看家本领。</li>
+        <li>为什么开发能省：开发服务的是你自己一个用户，请求驱动现编译即可；生产面对的是不可控的并发与网络环境，目标完全不同。</li>
+        <li>加分项：说出「按需编译是加载策略，不是优化信仰」——工具选型要按环境目标拆开讨论，这正是面试官想听的权衡意识。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 + 双餐厅动画 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm3-build'; // 与 body data-page 保持一致
+
+  /* 预热题（mode:'warmup'） */
+  var WARMUP = [{
+    id: 'm3-build-warmup-1',
+    type: 'single',
+    stem: '预热：下面哪件事通常不属于构建工具的职责？',
+    options: [
+      '把几百个模块文件合并打包成少量产物',
+      '把 TypeScript / JSX 语法降级编译成浏览器认识的 JS',
+      '代替浏览器解析并执行 JS、渲染页面',
+      '压缩混淆代码、注入环境变量'
+    ],
+    answer: [2],
+    explain: '构建工具的四样本职：模块合并、语法降级、资源压缩、环境变量注入——全部发生在代码进入浏览器「之前」。解析执行 JS 与渲染页面是浏览器引擎的本职，构建工具插不上手。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm3-build-q1',
+      type: 'single',
+      stem: '项目从 Webpack 迁到 Vite 后「npm run dev」秒开。开发环境启动快的最主要原因是？',
+      options: [
+        'Vite 把代码压缩得更小，所以加载快',
+        'Vite 开发时几乎不打包：依赖用 esbuild 预构建，源码模块等浏览器原生 ESM 请求到来时才按需编译',
+        'Vite 跳过了 TypeScript 类型检查，所以省了时间',
+        'Vite 使用了更快的网络协议'
+      ],
+      answer: [1],
+      explain: '关键在「启动时做了多少事」。Webpack 启动前要遍历整个依赖图全量打包；Vite 启动只做依赖预构建（esbuild，把第三方依赖转 ESM 并合并），源码模块完全不碰——等浏览器按原生 ESM 发起 import 请求，才即时编译对应文件。启动耗时与项目体积基本解耦，这才是「秒开」的根源。压缩是生产构建的事，类型检查也从不属于打包器的启动流程。'
+    },
+    {
+      id: 'm3-build-q2',
+      type: 'single',
+      stem: '关于 Vite 各环节使用的工具，下面哪个说法是正确的？',
+      options: [
+        '开发与生产都只用浏览器原生 ESM，从不打包',
+        '开发期依赖预构建用 esbuild，生产环境全量构建用 Rollup',
+        '开发用 Rollup，生产用 esbuild',
+        '开发与生产都靠 Webpack 内核，只是套了新壳'
+      ],
+      answer: [1],
+      explain: 'Vite 是「工具编排者」而非单一内核：开发期用 esbuild 做依赖预构建（快），源码交给浏览器原生 ESM 按需请求；生产环境则换 Rollup 做全量打包，享受成熟的 Tree Shaking 与代码分割。「从不打包」「生产也用原生 ESM」都是常见误解——按需现炒是开发期策略，办宴席仍要专业打包。'
+    },
+    {
+      id: 'm3-build-q3',
+      type: 'code',
+      stem: '动手模拟「按需编译」的第一步：dev server 收到入口请求后，只会编译「从入口出发可达」的模块。实现 collectReach(deps, entry)：deps 是依赖表（如 { \'main.js\': [\'router.js\', \'store.js\'] }），返回从 entry 出发（含自身）全部可达文件的文件名数组，按广度优先的首次发现顺序排列；依赖表里没有的文件视为无依赖；注意防御循环依赖。',
+      stub: 'function collectReach(deps, entry) {\n  // 1. 用队列做广度优先遍历（BFS），从 entry 出发\n  // 2. seen 标记表防止循环依赖导致死循环\n  // 3. deps 里没有条目的文件视为没有依赖\n  // 4. 返回可达文件名数组（含 entry，按首次发现顺序）\n}\n',
+      reference: 'function collectReach(deps, entry) {\n  var out = [];\n  var seen = {};\n  var queue = [entry];\n  seen[entry] = true;\n  while (queue.length) {\n    var cur = queue.shift();\n    out.push(cur);\n    var list = deps[cur] || []; // 没有条目 = 无依赖\n    for (var i = 0; i < list.length; i++) {\n      if (!seen[list[i]]) {\n        seen[list[i]] = true;\n        queue.push(list[i]);\n      }\n    }\n  }\n  return out;\n}',
+      asserts: [
+        'JSON.stringify(collectReach({ "main.js": ["router.js", "store.js"], "router.js": ["home.js"], "other.js": ["main.js"] }, "main.js")) === \'["main.js","router.js","store.js","home.js"]\'',
+        'JSON.stringify(collectReach({}, "x.js")) === \'["x.js"]\'',
+        'JSON.stringify(collectReach({ a: ["b"], b: ["a"] }, "a")) === \'["a","b"]\'',
+        'collectReach({ "main.js": ["a.js", "b.js"], "a.js": [] }, "main.js").length === 3'
+      ],
+      explain: '这道题就是 Vite 按需编译的核心数据操作：从入口请求出发的图遍历。三个要点：① BFS 用「队列 + 首次发现顺序」天然保证结果按层级排列（main → 它的直接依赖 → 间接依赖），第 1 条断言里 other.js 虽然依赖 main，但从 main 出发到不了它，所以不出现——这正对应「只编译入口可达模块」；② deps[cur] || [] 兜住依赖表里没有条目的文件；③ seen 标记表在入队时就打上（而不是出队时），才能防住 a↔b 这类循环依赖导致的死循环。真实 dev server 在此基础上还做按路径改写（把 import \'./x\' 改写成可请求的 URL）与缓存。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库（会推进复习计划） */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：自助餐厅（Webpack 全量备菜） vs 现点现炒（Vite 按需编译） */
+(function () {
+  'use strict';
+
+  var DISHES = ['首页', '列表页', '详情页', '购物车', '支付页', '个人中心'];
+  var consoleEl = document.getElementById('bt-console');
+  var wpPanel = document.getElementById('bt-wp-panel');
+  var vtPanel = document.getElementById('bt-vt-panel');
+  var wpStatus = document.getElementById('bt-wp-status');
+  var vtStatus = document.getElementById('bt-vt-status');
+  var wpBar = document.getElementById('bt-wp-bar');
+  var vtBar = document.getElementById('bt-vt-bar');
+  var wpDishesEl = document.getElementById('bt-wp-dishes');
+  var vtDishesEl = document.getElementById('bt-vt-dishes');
+  var wpOpenBtn = document.getElementById('bt-wp-open');
+  var vtOpenBtn = document.getElementById('bt-vt-open');
+
+  var state = {
+    wpOpen: false,   // Webpack 是否已开业
+    vtOpen: false,   // Vite 是否已开业
+    wpCooking: false, // Webpack 是否正在备菜（防连点）
+    prodDone: false,  // 生产构建是否已演示
+    timers: []        // 所有进行中的定时器，重置时统一清理
+  };
+
+  /* 输出一行日志 */
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    consoleEl.appendChild(line);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* 稍后执行：登记定时器便于重置清理 */
+  function later(fn, ms) {
+    var t = setTimeout(fn, ms);
+    state.timers.push(t);
+    return t;
+  }
+
+  /* 生成某一侧的全部菜品芯片 */
+  function renderDishes(host, side) {
+    host.innerHTML = '';
+    DISHES.forEach(function (name) {
+      var chip = document.createElement('span');
+      chip.className = 'bt-dish';
+      chip.textContent = name;
+      chip.addEventListener('click', function () { order(side, name, chip); });
+      host.appendChild(chip);
+    });
+  }
+
+  /* 顾客点单：两侧出餐方式完全不同 */
+  function order(side, name, chip) {
+    var open = side === 'wp' ? state.wpOpen : state.vtOpen;
+    if (!open) {
+      log('「' + name + '」还没开业呢，请先点击对应餐厅的开业按钮。', 'is-muted');
+      return;
+    }
+    if (chip.classList.contains('is-served')) {
+      log('「' + name + '」已经上过桌了，换一道试试。', 'is-muted');
+      return;
+    }
+    if (side === 'wp') {
+      chip.classList.add('is-served');
+      log('顾客点「' + name + '」→ 直接端出：冷启动时早已全部打包完毕。等待换来的零点单延迟，这就是自助餐的买卖。', 'is-ok');
+    } else {
+      if (chip.classList.contains('is-cooking')) return;
+      chip.classList.add('is-cooking');
+      log('顾客点「' + name + '」→ 后厨开始现炒：仅为该模块做即时编译…', 'is-end');
+      later(function () {
+        chip.classList.remove('is-cooking');
+        chip.classList.add('is-served');
+        log('「' + name + '」上菜！全程只编译了这一个模块，其余 ' + (DISHES.length - 1) + ' 道菜的后厨根本没动过——这就是按需编译。', 'is-ok');
+      }, 450);
+    }
+  }
+
+  /* Webpack 开业：逐道「炒菜」（全量打包），完成后才开门 */
+  function openWp() {
+    if (state.wpOpen || state.wpCooking) return;
+    state.wpCooking = true;
+    wpOpenBtn.disabled = true;
+    var i = 0;
+    var chips = wpDishesEl.querySelectorAll('.bt-dish');
+    log('Webpack 收到开业指令：从入口递归分析整个依赖图，开始全量打包…（项目越大，这段等待越长）', 'is-end');
+    (function cookNext() {
+      if (i < DISHES.length) {
+        chips[i].classList.add('is-cooked');
+        wpStatus.textContent = '备菜中 ' + (i + 1) + ' / ' + DISHES.length + ' 道…';
+        wpBar.style.width = Math.round(((i + 1) / DISHES.length) * 100) + '%';
+        i = i + 1;
+        later(cookNext, 380);
+      } else {
+        state.wpCooking = false;
+        state.wpOpen = true;
+        wpPanel.classList.add('is-open');
+        wpStatus.textContent = '营业中——6/6 道菜全部打包完毕';
+        wpOpenBtn.disabled = false;
+        log('打包完成，自助餐厅开门！此后顾客点任何菜都是「端起来就吃」（改模块后热更新也快），但开业前的等待是固定成本。', 'is-ok');
+      }
+    })();
+  }
+
+  /* Vite 开业：秒开，后厨还是空的 */
+  function openVt() {
+    if (state.vtOpen) return;
+    state.vtOpen = true;
+    vtPanel.classList.add('is-open');
+    vtStatus.textContent = '营业中——0/6 道菜被编译，等点单';
+    vtBar.style.width = '4%';
+    log('Vite 收到开业指令：只做轻量依赖预构建（esbuild），源码模块一个不碰 → 卷帘门唰地拉开，秒级营业。菜单上还没有任何一道菜被「炒」。', 'is-ok');
+  }
+
+  /* 生产构建：Vite 请 Rollup 帮手全量打包 */
+  function runProd() {
+    if (state.prodDone) {
+      log('生产构建演示过了：记住结论——「现点现炒」只是开发期策略，生产照旧全量打包。', 'is-muted');
+      return;
+    }
+    state.prodDone = true;
+    var chips = vtDishesEl.querySelectorAll('.bt-dish');
+    var i = 0;
+    log('办宴席（生产环境）！Vite 换上正装：调用 Rollup 做全量打包——合并、压缩、加指纹、拆包一样不少。', 'is-end');
+    (function cookNext() {
+      if (i < DISHES.length) {
+        chips[i].classList.add('is-cooked');
+        vtStatus.textContent = 'Rollup 宴席备菜中 ' + (i + 1) + ' / ' + DISHES.length + '…';
+        vtBar.style.width = Math.round(((i + 1) / DISHES.length) * 100) + '%';
+        i = i + 1;
+        later(cookNext, 300);
+      } else {
+        vtStatus.textContent = '生产构建完成（Rollup 全量产物）';
+        log('宴席备齐：dist 产物就绪，交给静态服务器部署。所以「Vite 不需要打包」是误解——它只是把开发期的打包推迟成了按需编译。', 'is-ok');
+      }
+    })();
+  }
+
+  function reset() {
+    state.timers.forEach(function (t) { clearTimeout(t); });
+    state.timers = [];
+    state.wpOpen = false;
+    state.vtOpen = false;
+    state.wpCooking = false;
+    state.prodDone = false;
+    wpOpenBtn.disabled = false;
+    vtOpenBtn.disabled = false;
+    wpPanel.classList.remove('is-open');
+    vtPanel.classList.remove('is-open');
+    wpStatus.textContent = '歇业中——全部菜炒好才开门';
+    vtStatus.textContent = '歇业中——拉门即营业';
+    wpBar.style.width = '0';
+    vtBar.style.width = '0';
+    renderDishes(wpDishesEl, 'wp');
+    renderDishes(vtDishesEl, 'vt');
+    consoleEl.innerHTML = '';
+    log('已重置：两家餐厅都在等开门指令。建议先各开一次业，再分别点同一道菜，体会出餐方式的差别。', 'is-muted');
+  }
+
+  wpOpenBtn.addEventListener('click', openWp);
+  vtOpenBtn.addEventListener('click', openVt);
+  document.getElementById('bt-prod').addEventListener('click', runProd);
+  document.getElementById('bt-reset').addEventListener('click', reset);
+  reset();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20100%20100'%3E%3Ctext%20y%3D'.9em'%20font-size%3D'90'%3E%F0%9F%A7%AD%3C%2Ftext%3E%3C%2Fsvg%3E">
+<title>TypeScript 基础 · 前端领航员</title>
+<link rel="stylesheet" href="../../assets/css/site.css">
+<style>
+/* ========== 本页动画样式：机场安检通道·类型闸机（纯手写 CSS，无任何动画库） ========== */
+/* 传送带：斜纹底模拟履带，行李（值）从左滑向右端的安检闸机 */
+.ts-belt {
+  position: relative; height: 68px; margin: 12px 0;
+  border: 1px solid #cbd5e1; border-radius: 10px; overflow: hidden;
+  background: repeating-linear-gradient(45deg, #f1f5f9, #f1f5f9 12px, #e8edf4 12px, #e8edf4 24px);
+}
+/* 安检闸机：声明为什么类型，就只放行什么类型的值 */
+.ts-gate {
+  position: absolute; right: 12px; top: 8px; bottom: 8px; width: 96px;
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  border: 2px solid #4C6FFF; border-radius: 8px;
+  background: #eef1ff; color: #4C6FFF; font-size: 12px; font-weight: 700;
+  font-family: monospace; line-height: 1.5; padding: 4px;
+}
+/* 行李 chip：滑行由 left 的 transition 完成 */
+.ts-chip {
+  position: absolute; left: 12px; top: 50%; margin-top: -15px;
+  padding: 6px 10px; border-radius: 8px; border: 1px solid #94a3b8;
+  background: #fff; font-family: monospace; font-size: 13px; color: #2c3550;
+  transition: left 1.1s ease;
+}
+/* 通道与行李按钮的选中态 */
+.ts-pick.is-on { border-color: #4C6FFF; background: #eef1ff; font-weight: 700; }
+/* 判定不通过时的红色日志 */
+.anim-line.is-bad { color: #f08c8c; }
+</style>
+</head>
+<body data-page="m1-ts-basic">
+
+<!-- 壳层自动渲染区：site.js 检测 data-page 后填充面包屑 / 上一页 / 下一页 / 返回地图 / 音效开关 -->
+<header id="fg-header" class="fg-header"></header>
+
+<main class="fg-container">
+  <p class="fg-subtitle">本页对应知识点「TypeScript 基础」（建议 30 分钟）：为什么要 TS、类型标注与推断、any/unknown/never、interface 与 type、联合与字面量类型，最后泛型入门。</p>
+
+  <!-- ① 导入：前置知识链接 + 1 道预热单选（mode:'warmup'） -->
+  <section class="fg-section" data-section="import">
+    <h2>① 导入 · 开始之前</h2>
+    <p>TS 的每一行类型标注都建立在 ES6+ 语法之上（解构、箭头函数、class 等），建议先学前置知识：<a href="./m1-js-es6.html">ES6+ 核心特性</a>。</p>
+    <p>热热身，一道预热题（不计入正式成绩，答错同样会进错题本）：</p>
+    <div id="warmup-quiz"></div>
+  </section>
+
+  <!-- ② 深入浅出：讲解 + 生活类比（.analogy-box） -->
+  <section class="fg-section" data-section="explain">
+    <h2>② 深入浅出</h2>
+
+    <h3>1. 为什么需要 TS：动态类型的隐患</h3>
+    <p>纯 JS 里，<code>function total(price, count) { return price * count; }</code> 传进字符串也能「跑起来」，直到某天 price 是 <code>"12元"</code>，页面上赫然出现 <code>NaN</code>——错误暴露在<strong>运行时</strong>，而且往往在线上。TS 的做法是给值「贴类型标签」，让绝大多数错误在<strong>编译期</strong>（写代码与编译阶段）就被拦下；TS 最终仍编译成 JS 运行，所以它不改变运行时行为，改变的是「错误被发现的时机」。</p>
+
+    <h3>2. 类型标注与类型推断</h3>
+    <pre><code>let count: number = 42;          // 显式标注
+let name = '小李';                // 省略标注：TS 推断为 string，一样有检查
+function total(price: number, count: number): number {
+  return price * count;
+}
+total(12, '3');                  // 编译报错：string 不能赋给 number</code></pre>
+    <p>推断能覆盖的场景不必手写标注；标注的价值在「函数边界」——参数与返回值是调用双方的契约，最值得写。</p>
+
+    <h3>3. any / unknown / never 三兄弟</h3>
+    <ul>
+      <li><strong>any</strong>：彻底放弃类型检查，any 值可以赋给谁、谁也能赋给 any，且错误会像涂改液一样把检查「传染」给下游。应急可用，不要常用。</li>
+      <li><strong>unknown</strong>：安全的「万能接收型」——什么值都能装进来，但<strong>使用前必须先收窄</strong>（typeof / instanceof 判断或类型断言），否则编译报错。接接口返回值、第三方库未知数据时，用它替代 any。</li>
+      <li><strong>never</strong>：没有任何值能赋给它的「底类型」。常出现在必然抛错或死循环的函数返回值上；配合联合类型的穷尽性检查，还能在「漏处理某个分支」时让编译报错。</li>
+    </ul>
+
+    <h3>4. interface 与 type、联合类型与字面量类型</h3>
+    <pre><code>interface User { name: string; age?: number }   // age 可选
+type ID = string | number;                       // 联合类型：二选一
+type Status = 'idle' | 'loading' | 'done';       // 字面量类型：把合法值枚举出来
+let s: Status = 'loadingg';                      // 拼错 → 编译期就报错</code></pre>
+    <p>interface 与 type 大部分能力重叠：描述对象/函数都行。差异点——interface 支持<strong>声明合并</strong>（同名自动合并，适合扩充公共契约），用 extends 继承；type 更灵活，能表达联合、字面量、条件类型等。团队统一一种即可。字面量联合类型是性价比最高的防呆手段：把「合法取值」列出来，拼错、乱传当场拦截。</p>
+
+    <h3>5. 泛型入门：类型参数化</h3>
+    <pre><code>function firstItem&lt;T&gt;(arr: T[]): T {
+  return arr[0];
+}
+const a = firstItem&lt;number&gt;([1, 2, 3]);   // a: number
+const b = firstItem(['x', 'y']);          // 自动推断 T = string，b: string</code></pre>
+    <p>泛型把「类型」变成函数的参数：一份逻辑，进出类型都跟着调用方的实际类型走，既不用为每种类型复制函数，也不会丢掉检查。</p>
+
+    <h3>6. 面试高频小结</h3>
+    <p>unknown 与 any 的差异（能否不检查直接用）、枚举的使用场景、interface 与 type 怎么选——这三问的回答要点已放进页尾「面试视角」。</p>
+
+    <div class="analogy-box">
+      <div class="analogy-box-title">生活类比：超市自助结算机的扫码环节</div>
+      <p>小李推着购物车来到超市自助结算机。带条码的商品一扫即过——条码就是<strong>类型标注</strong>：机器当场就知道「这是什么、多少钱」，绝不会把牙膏记成洗衣液的价格。散装水果没条码？放上秤，机器<strong>自动识别</strong>品名与价格——这就是<strong>类型推断</strong>：你没写标注，TS 也推得出来。</p>
+      <p>要是有人把没贴条码的商品硬塞进扫码区，机器<strong>当场报警</strong>——错误在出门（上线）之前就被拦下，而不是回到家（线上运行）拆袋才发现买错了东西。结算机旁还有两条特殊通道：「<strong>免检通道</strong>」any，什么商品都扫得过，但小票对不上账——检查被彻底关掉，隐患全留到运行时；「<strong>待检区</strong>」unknown，也什么都能放，但<strong>必须先确权</strong>（过一次检查/收窄）才允许结账使用。至于 never，那是「永不放行」通道——世界上不存在能通过它的商品。</p>
+    </div>
+  </section>
+
+  <!-- ③ 动画演示：可点击交互的安检通道·类型闸机（纯 DOM 手写，无动画库） -->
+  <section class="fg-section" data-section="anim">
+    <h2>③ 动画演示</h2>
+    <p>TS 的类型检查像机场安检：变量声明为什么类型（开哪条通道），就只放行什么类型的「值行李」。注意——检查发生在<strong>进站前</strong>（编译期），行李根本还没上车（代码还没运行）：</p>
+    <div class="anim-stage">
+      <p class="anim-caption">先选一条安检通道（声明类型），再点一件行李（一个值）投上传送带：</p>
+      <div class="anim-controls" id="ts-gates">
+        <!-- 安检通道按钮由脚本渲染 -->
+      </div>
+      <div class="ts-belt" id="ts-belt">
+        <div class="ts-gate" id="ts-gate-mark">let n:<br>number</div>
+        <!-- 行李 chip 由脚本动态创建并滑行 -->
+      </div>
+      <div class="anim-controls" id="ts-items">
+        <!-- 投放行李按钮由脚本渲染 -->
+      </div>
+      <div class="anim-console" id="ts-log">
+        <div class="anim-line is-muted">选择通道后投放行李，观察闸机的「编译期判定」…</div>
+      </div>
+      <div class="anim-controls">
+        <button type="button" class="fg-btn fg-btn--ghost fg-btn--sm" id="ts-reset">重置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 知识联结：依赖 + 延伸 + 交叉链接（均为课程数据中的真实路径） -->
+  <section class="fg-section" data-section="link">
+    <h2>④ 知识联结</h2>
+    <p><strong>前置依赖</strong>：<a href="./m1-js-es6.html">ES6+ 核心特性</a>——class、解构、箭头函数是 TS 类型标注的载体；泛型函数的写法也直接复用 ES6 函数语法。</p>
+    <p><strong>向后延伸</strong>：去 <a href="../m3/m3-react.html">React 核心与 Hooks</a> 看 props 的类型契约如何约束组件接口；去 <a href="../m3/m3-build.html">构建工具思想与 Vite</a> 了解 TS 的编译与语法降级由哪一环承接。</p>
+    <p><strong>交叉链接</strong>：</p>
+    <ul>
+      <li><a href="./m1-js-scope.html">JS 类型、作用域与闭包</a> —— typeof / instanceof / Object.prototype.toString 是「运行时」判断类型的三板斧，与 TS 的「编译期」类型互为表里。</li>
+      <li><a href="../m4/m4-error.html">错误处理与容错设计</a> —— 类型在编译后消失，接口返回的数据仍需运行时校验兜底，这正是本页代码题的出发点。</li>
+    </ul>
+  </section>
+
+  <!-- ⑤ 例题：2 道选择 + 1 道代码题（含解析），mode:'main' -->
+  <section class="fg-section" data-section="quiz">
+    <h2>⑤ 例题 · 动手检验</h2>
+    <p>完成后把最佳成绩写入进度仓库（见页面底部内联脚本）：</p>
+    <div id="main-quiz"></div>
+  </section>
+
+  <!-- ⑥ 巩固复习：一句话外行解释 + 费曼笔记 + 掌握度自评 + 建议复习时间 -->
+  <section class="fg-section" data-section="review">
+    <h2>⑥ 巩固复习</h2>
+    <p><strong>一句话讲给外行听</strong>：TS 就是给 JS 加了一道「进站安检」——每个值是什么类型、能不能这么用，写代码时就查清楚，错的当场拦下，而不是等程序跑崩了才发现。</p>
+    <div id="fg-note"></div>
+    <div id="fg-assess"></div>
+    <p class="fg-muted">建议复习时间：今天睡前口头回答一遍「any 与 unknown 的区别」；1 天、3 天、7 天后各回来重做例题，并默写一个带泛型的工具函数，思考「编译期检查」与「运行时校验」各自负责哪一段。</p>
+  </section>
+
+  <!-- ⑦ 面试视角：2 个问法，答案要点放 details -->
+  <section class="fg-section" data-section="interview">
+    <h2>⑦ 面试视角</h2>
+    <details class="fg-interview">
+      <summary>问法一：any 与 unknown 有什么区别？never 会在什么场景出现？</summary>
+      <ul>
+        <li>any：双向畅通且不检查——any 可以赋给任何类型，任何类型也能赋给 any，类型错误会顺着 any「传染」到下游，等于局部关闭了 TS。</li>
+        <li>unknown：只能接收、不能直接使用——调用方法或赋值给别的类型前必须收窄（typeof / instanceof / 类型断言），因此它是「安全的 any」。</li>
+        <li>实践口径：不确定的数据（接口返回、第三方回调）一律先 unknown，收窄后再用。</li>
+        <li>never：没有任何值属于它；必然抛错或死循环的函数返回 never；在联合类型 switch 中用「兜底分支赋值给 never」做穷尽性检查，漏分支时编译报错。</li>
+      </ul>
+    </details>
+    <details class="fg-interview">
+      <summary>问法二：interface 与 type 有哪些异同？枚举适合什么场景？</summary>
+      <ul>
+        <li>相同：都能描述对象、函数、可索引结构，都支持扩展（interface extends / type 交叉号组合），大多数场景可互换。</li>
+        <li>interface 独有：声明合并——同名 interface 自动合并成员，适合给公共库「打补丁」扩展契约。</li>
+        <li>type 独有：能表达联合类型、字面量类型、元组、条件类型等非对象形态，表达力更强。</li>
+        <li>枚举：适合一组相关的具名常量（如订单状态）且希望有命名空间与反向映射时；注意枚举会编译成真实的运行时对象，若只需要「合法取值约束」，字面量联合类型更轻量。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<footer id="fg-footer"></footer>
+
+<!-- 脚本加载顺序：curriculum.js → progress-store.js → quiz-engine.js → site.js → 页面内联脚本 -->
+<script src="../../assets/data/curriculum.js"></script>
+<script src="../../assets/js/progress-store.js"></script>
+<script src="../../assets/js/quiz-engine.js"></script>
+<script src="../../assets/js/site.js"></script>
+<script>
+/* 页面内联脚本：题目数据 + 挂载预热题 / 例题 / 费曼笔记 / 掌握度自评 */
+(function () {
+  'use strict';
+  var PAGE_ID = 'm1-ts-basic'; // 与 body data-page 一字不差
+
+  /* 预热题（mode:'warmup'） */
+  var WARMUP = [{
+    id: 'm1-ts-basic-warmup-1',
+    type: 'single',
+    stem: '预热：TypeScript 的类型检查发生在什么时候？',
+    options: [
+      '代码运行到出错那一行时',
+      '编译期（写代码与编译阶段），在程序运行之前',
+      '每次浏览器刷新页面时',
+      '只在打包体积超标时才检查'
+    ],
+    answer: [1],
+    explain: 'TS 的核心价值正是把错误发现时机从「运行时」提前到「编译期」：类型不匹配在写代码/编译阶段就报错，代码根本没机会带着类型错误上线。TS 编译产物是普通 JS，运行时不再有类型检查——这也是接口数据仍需运行时校验的原因。'
+  }];
+
+  /* 正式例题（mode:'main'）：2 道选择 + 1 道代码题 */
+  var QUESTIONS = [
+    {
+      id: 'm1-ts-basic-q1',
+      type: 'single',
+      stem: '关于 any 与 unknown，下列说法正确的是：',
+      options: [
+        'any 与 unknown 完全等价，只是写法不同',
+        'unknown 类型的值必须先收窄（typeof 判断或断言）才能使用，any 则可以直接用',
+        'unknown 比 any 更宽松，检查更少',
+        'TS 官方推荐尽量用 any 以提升开发效率'
+      ],
+      answer: [1],
+      explain: 'unknown 与 any 都能接收任何值，分野在「用的时候」：any 双向畅通、完全跳过检查，类型错误会传染下游；unknown 只进不出——必须先收窄确权才能调用方法或赋值，因此把运行时风险挡在了编译期。B 正确；C 说反了（unknown 更严格）；D 与实践口径相反：默认 unknown，any 只作应急。'
+    },
+    {
+      id: 'm1-ts-basic-q2',
+      type: 'single',
+      stem: '有如下代码：\ntype Status = "idle" | "loading" | "done";\nlet s: Status = "loadingg";\n会发生什么？',
+      options: [
+        '编译期报错：字符串字面量 "loadingg" 不在联合类型允许的取值中',
+        '运行时抛出 TypeError',
+        '静默通过，s 的值为 "loadingg"',
+        'TS 自动纠正为 "loading"'
+      ],
+      answer: [0],
+      explain: '字面量联合类型把「合法取值」逐个枚举，"loadingg" 不在列表里，编译器直接报错——这正是字面量类型的价值：状态名拼错、传错枚举值这类手滑，在敲代码的那一刻就被拦下，而不是等界面上出现一个「永远转圈」的幽灵状态才发现。注意报错来自编译期，代码尚未运行。'
+    },
+    {
+      id: 'm1-ts-basic-code-1',
+      type: 'code',
+      stem: '用 JS 模拟 TS 概念：TS 的类型只在编译期存在，运行后便消失了；但校验接口返回值等场景需要「运行时的类型守卫」。请手写 checkShape(obj, schema)：schema 形如 { name: "string", age: "number" }，要求 obj 拥有 schema 列出的全部字段且类型一致（多余字段不扣分），满足返回 true，否则返回 false。数组类型写作 "array"。',
+      stub: 'function checkShape(obj, schema) {\n  // TODO：遍历 schema 的每个字段 key：\n  //   1. obj 缺少该字段 → 返回 false\n  //   2. 类型与 schema[key] 不符 → 返回 false\n  //      注意两点：typeof null 也是 "object"；判断数组要用 Array.isArray\n  //   3. 全部通过 → 返回 true（多余字段不影响结果）\n}\n',
+      reference: 'function checkShape(obj, schema) {\n  if (obj === null || typeof obj !== "object") return false; // 防御非对象入参\n  return Object.keys(schema).every(function (key) {\n    var want = schema[key];\n    var val = obj[key];\n    if (val === undefined) return false;             // 字段缺失（或值为 undefined）\n    if (want === "array") return Array.isArray(val); // typeof 数组是 "object"，需特判\n    return typeof val === want;\n  });\n}',
+      asserts: [
+        "checkShape({ name: '小李', age: 25, vip: true }, { name: 'string', age: 'number' }) === true",
+        "checkShape({ name: 123, age: 25 }, { name: 'string', age: 'number' }) === false",
+        "checkShape({ name: '小李' }, { name: 'string', age: 'number' }) === false",
+        "checkShape({ tags: ['a', 'b'] }, { tags: 'array' }) === true"
+      ],
+      explain: '为什么这样设计：① TS 的编译期类型在代码运行后不复存在，所以「接口返回的数据对不对」必须靠运行时检查兜底——这就是 TS 类型与运行时校验的分工；② 断言一验证「类型全对 + 多余字段不扣分」，多余字段放行对应 TS 的结构化子类型（鸭子类型）思想；③ 断言二卡类型不符，断言三卡字段缺失；④ 两个经典陷阱：typeof null === "object"（要先排除 null），typeof [] === "object"（数组必须用 Array.isArray 特判，否则 tags: "array" 会被误判）。'
+    }
+  ];
+
+  /* ① 预热题挂载 */
+  QuizEngine.mount(document.getElementById('warmup-quiz'), WARMUP, {
+    pageId: PAGE_ID, mode: 'warmup'
+  });
+
+  /* ⑤ 例题挂载：判分完成后把最佳成绩写入进度仓库 */
+  var mainQuiz = QuizEngine.mount(document.getElementById('main-quiz'), QUESTIONS, {
+    pageId: PAGE_ID, mode: 'main'
+  });
+  mainQuiz.whenReady(function (res) {
+    ProgressStore.recordQuiz(PAGE_ID, res.score, res.total);
+  });
+
+  /* ⑥ 费曼笔记 + 掌握度自评 */
+  FG.note.mount(document.getElementById('fg-note'), PAGE_ID);
+  FG.assess.mount(document.getElementById('fg-assess'), PAGE_ID);
+})();
+
+/* ③ 动画演示：机场安检通道·类型闸机（纯 DOM 手写，无动画库）
+   选通道（声明类型）→ 投行李（一个值）→ 闸机做「编译期判定」 */
+(function () {
+  'use strict';
+  /* 三条安检通道：varName 是声明的变量名，allow 列出放行的运行时类型 */
+  var GATES = [
+    { varName: 'n', label: 'let n: number', allow: ['number'] },
+    { varName: 's', label: 'let s: string', allow: ['string'] },
+    { varName: 'u', label: 'let u: unknown', allow: ['number', 'string', 'boolean'], isUnknown: true }
+  ];
+  /* 可投放的三件行李：label 展示字面量，t 是它的运行时类型 */
+  var ITEMS = [
+    { label: '42', t: 'number' },
+    { label: '"hello"', t: 'string' },
+    { label: 'true', t: 'boolean' }
+  ];
+
+  var gate = 0; // 当前选中通道下标
+  var gatesEl = document.getElementById('ts-gates');
+  var itemsEl = document.getElementById('ts-items');
+  var beltEl = document.getElementById('ts-belt');
+  var gateMarkEl = document.getElementById('ts-gate-mark');
+  var logEl = document.getElementById('ts-log');
+  var resetBtn = document.getElementById('ts-reset');
+  var busy = false; // 一件行李滑行判定期间禁止再投放，避免叠加混乱
+
+  /* 追加一行日志并自动滚到底部 */
+  function log(text, cls) {
+    var line = document.createElement('div');
+    line.className = 'anim-line' + (cls ? ' ' + cls : '');
+    line.textContent = text;
+    logEl.appendChild(line);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  /* 更新闸机口的声明标签 */
+  function paintGate() {
+    gateMarkEl.innerHTML = GATES[gate].label.split(': ').join(':<br>');
+  }
+
+  /* 渲染通道选择按钮 */
+  function renderGates() {
+    GATES.forEach(function (g, i) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'fg-btn fg-btn--ghost fg-btn--sm ts-pick' + (i === gate ? ' is-on' : '');
+      btn.textContent = g.label;
+      btn.addEventListener('click', function () {
+        gate = i;
+        var btns = gatesEl.querySelectorAll('.ts-pick');
+        for (var k = 0; k < btns.length; k++) btns[k].classList.toggle('is-on', k === gate);
+        paintGate();
+        log('已切换通道：' + g.label + '（闸机只认这个声明）', 'is-muted');
+      });
+      gatesEl.appendChild(btn);
+    });
+  }
+
+  /* 渲染行李投放按钮 */
+  function renderItems() {
+    ITEMS.forEach(function (item) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'fg-btn fg-btn--primary fg-btn--sm ts-pick';
+      btn.textContent = '投放 ' + item.label;
+      btn.addEventListener('click', function () { send(item); });
+      itemsEl.appendChild(btn);
+    });
+  }
+
+  /* 投放行李：chip 滑过传送带，到闸机口后判定 */
+  function send(item) {
+    if (busy) { log('这件行李还在安检中，请稍候…', 'is-muted'); return; }
+    busy = true;
+    var g = GATES[gate];
+    var chip = document.createElement('span');
+    chip.className = 'ts-chip';
+    chip.textContent = item.label;
+    beltEl.appendChild(chip);
+    log('投放值 ' + item.label + '（运行时类型：' + item.t + '）', 'is-muted');
+
+    /* 下一帧再改 left，确保 CSS transition 滑行动画生效 */
+    requestAnimationFrame(function () {
+      chip.style.left = (beltEl.clientWidth - 130) + 'px';
+    });
+    /* 滑行 1.1 秒结束后做「编译期判定」 */
+    setTimeout(function () {
+      verdict(g, item);
+      beltEl.removeChild(chip); // 判定完收走行李，保持传送带干净
+      busy = false;
+    }, 1250);
+  }
+
+  /* 闸机判定：unknown 特殊通道 → 放行但要求收窄；匹配 → 放行；不匹配 → 编译报错 */
+  function verdict(g, item) {
+    var decl = 'let ' + g.varName + ': ' + g.label.split(': ')[1] + ' = ' + item.label + ';';
+    if (g.isUnknown) {
+      log(decl + '  // 编译通过：unknown 是「待检区」，什么都能装', 'is-ok');
+      log('但想直接使用会报错——必须先收窄确权，例如：if (typeof u === "string") { ... }', 'is-muted');
+    } else if (g.allow.indexOf(item.t) !== -1) {
+      log(decl + '  // 类型匹配 → 编译通过，闸机放行', 'is-ok');
+    } else {
+      log(decl + '  // 编译报错 TS2322: Type "' + item.t + '" is not assignable to type "' +
+        g.label.split(': ')[1] + '" —— 行李还没上车（代码未运行）就被拦下', 'is-bad');
+    }
+  }
+
+  /* 重置：清空传送带与日志 */
+  function reset() {
+    var chips = beltEl.querySelectorAll('.ts-chip');
+    for (var k = 0; k < chips.length; k++) beltEl.removeChild(chips[k]);
+    logEl.innerHTML = '';
+    busy = false;
+    log('已重置：换一条通道再试试', 'is-muted');
+  }
+
+  renderGates();
+  renderItems();
+  paintGate();
+  resetBtn.addEventListener('click', reset);
+})();
+</script>
+</body>
+</html>
